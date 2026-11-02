@@ -31,24 +31,53 @@ export function formatSize(bytes: number): string {
   return `${bytes} B`;
 }
 
+/** 对齐手机端 ClipboardHelper.copySensitive：复制敏感内容后 30 秒自动清空（仅当剪贴板仍是该内容时） */
+let clearTimer: ReturnType<typeof setTimeout> | null = null;
+let clearToken = 0;
+
+function scheduleClear(text: string): void {
+  const token = ++clearToken;
+  if (clearTimer) clearTimeout(clearTimer);
+  clearTimer = setTimeout(() => {
+    if (token !== clearToken) return; // 期间又复制了新内容，交由新定时器处理
+    clearTimer = null;
+    void (async () => {
+      try {
+        const cur = await navigator.clipboard.readText();
+        if (cur !== text) return; // 用户已在别处复制了别的内容，不动它
+      } catch {
+        // WebView2 可能拒绝读剪贴板：本应用未再复制过则尽力清空
+      }
+      try {
+        await navigator.clipboard.writeText("");
+      } catch {
+        /* 清空失败忽略 */
+      }
+    })();
+  }, 30_000);
+}
+
 export async function copyText(text: string): Promise<void> {
+  if (!text) return;
+  let ok = false;
   try {
     await navigator.clipboard.writeText(text);
-    return;
+    ok = true;
   } catch {
     // 回退到 execCommand
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      ok = document.execCommand("copy");
+    } finally {
+      ta.remove();
+    }
   }
-  const ta = document.createElement("textarea");
-  ta.value = text;
-  ta.style.position = "fixed";
-  ta.style.opacity = "0";
-  document.body.appendChild(ta);
-  ta.select();
-  try {
-    document.execCommand("copy");
-  } finally {
-    ta.remove();
-  }
+  if (ok) scheduleClear(text);
 }
 
 /** 浏览器侧下载：无插件，用 Blob + <a download> */
