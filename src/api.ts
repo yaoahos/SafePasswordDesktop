@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppSettings,
   BackupInfo,
+  CloudVaultEntry,
   GeneratorOptions,
   SecurityReport,
   StrengthResult,
@@ -84,6 +85,9 @@ export const importCsv = (text: string) => invoke<number>("import_csv", { text }
 export const importXml = (text: string) =>
   invoke<number>("import_xml", { text });
 
+/** 导入明文 JSON 里的条目到当前密码库（不新建库，对齐手机端「导入条目」） */
+export const importJsonItems = (json: string) => invoke<number>("import_json_items", { json });
+
 export const backupCreate = () => invoke<BackupInfo>("backup_create");
 
 export const backupList = () => invoke<BackupInfo[]>("backup_list");
@@ -111,6 +115,14 @@ export const webdavPullIfChanged = (config: WebDavConfig) =>
 
 /** 导出加密备份（.spv，Base64；前端转 Blob 下载，可拷回手机） */
 export const exportVaultSpv = () => invoke<string>("export_vault_spv");
+
+/** 云端密码库清单（读取 WebDAV 上的 index 文件） */
+export const webdavListCloud = (config: WebDavConfig) =>
+  invoke<CloudVaultEntry[]>("webdav_list_cloud", { config });
+
+/** 下载指定云端密码库密文（Base64；找不到返回 null） */
+export const webdavGetVault = (config: WebDavConfig, key: string) =>
+  invoke<string | null>("webdav_get_vault", { config, key });
 
 // ---- 检查更新 / 软件内自更新（对齐手机端 AboutScreen）----
 

@@ -252,7 +252,7 @@ export function ItemDetail({
           {pass && (
             <div className="preview-pass">
               <span className="preview-pass-mask">
-                {shown["hero"] ? pass : "•".repeat(Math.min(Math.max(pass.length, 8), 16))}
+                {shown["hero"] ? pass : pass ? "•".repeat(Math.min(Math.max(pass.length, 8), 16)) : ""}
               </span>
               <button
                 className="icon-btn"
@@ -292,7 +292,7 @@ export function ItemDetail({
                 <div className="preview-field" key={f.id}>
                   <div className="preview-field-label">{f.label}</div>
                   <div className="preview-field-value">
-                    {masked ? MASK : f.value}
+                    {f.value ? (masked ? MASK : f.value) : ""}
                   </div>
                   <div className="preview-field-actions">
                     {f.type === "URL" && f.value.trim() && (
@@ -509,7 +509,7 @@ export function ItemDetail({
                 {f.label}
               </div>
               {trashed ? (
-                <div className="field-value">{masked ? MASK : f.value}</div>
+                <div className="field-value">{f.value ? (masked ? MASK : f.value) : ""}</div>
               ) : f.type === "PASSWORD" || f.type === "SECRET" ? (
                 <div className="input-wrap grow">
                   <input

@@ -1804,3 +1804,35 @@ input[type="password"]::-ms-clear {
   max-width: 240px;
   margin-left: 4px;
 }
+/* 密码库页：本地/云端行 */
+.vault-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 2px;
+  border-top: 1px solid var(--border-soft);
+}
+.vault-row:first-of-type {
+  border-top: none;
+}
+.vault-row-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+}
+.vault-row-name .vault-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary);
+  display: inline-block;
+}
+.vault-badge {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
