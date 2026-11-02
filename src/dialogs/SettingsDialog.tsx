@@ -242,6 +242,31 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
 
       <div className="hr" />
       <div className="section-cap">本地备份</div>
+      <div className="form-row">
+        <label className="field-caption">自动备份</label>
+        <div className="seg">
+          {[
+            { v: 0, label: "关闭" },
+            { v: 1, label: "每天" },
+            { v: 3, label: "每 3 天" },
+            { v: 7, label: "每 7 天" },
+            { v: 30, label: "每 30 天" },
+          ].map((o) => (
+            <button
+              key={o.v}
+              className={ctx.settings.autoBackupDays === o.v ? "active" : ""}
+              onClick={() => void ctx.applySettings({ ...ctx.settings, autoBackupDays: o.v })}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {ctx.settings.lastBackupAt > 0 && (
+        <div className="muted small" style={{ marginTop: 6 }}>
+          上次备份：{formatTime(ctx.settings.lastBackupAt)}
+        </div>
+      )}
       <div className="row">
         <button className="btn sm" disabled={busy !== null} onClick={() => void createBackup()}>
           {busy === "create" ? "创建中…" : "创建备份"}

@@ -20,7 +20,7 @@ use crate::sp::container::VaultContainer;
 use crate::sp::fsutil::write_atomic;
 use crate::sp::generator::{self, GeneratorOptions};
 use crate::sp::hibp::HibpClient;
-use crate::sp::model::{new_id, Label, Vault, VaultItem, VaultMeta};
+use crate::sp::model::{new_id, now_ms, Label, Vault, VaultItem, VaultMeta};
 use crate::sp::safeincloud_xml;
 use crate::sp::security::{self, SecurityReport};
 use crate::sp::store::VaultStore;
@@ -66,6 +66,10 @@ pub struct AppSettings {
     pub auto_lock_minutes: i32,
     pub hibp_api_key: String,
     pub webdav: WebDavConfig,
+    /// 0 = 关闭自动备份，否则每 N 天（对齐手机端 autoBackupDays，默认 1）
+    pub auto_backup_days: i32,
+    /// 上次备份时间（epoch millis，对齐手机端 lastBackupAt）
+    pub last_backup_at: i64,
 }
 
 impl Default for AppSettings {
@@ -75,6 +79,8 @@ impl Default for AppSettings {
             auto_lock_minutes: 5,
             hibp_api_key: String::new(),
             webdav: WebDavConfig::default(),
+            auto_backup_days: 1,
+            last_backup_at: 0,
         }
     }
 }
@@ -115,6 +121,33 @@ impl AppStateInner {
         let cur = self.current.as_mut().ok_or(NO_OPEN_VAULT)?;
         self.store.save(&mut cur.container, &cur.meta).map_err(err)
     }
+
+    /// 对齐手机端 AppViewModel.maybeAutoBackup：创建/解锁后检查间隔，超期则
+    /// 备份 + 保留 10 份 + 记录 lastBackupAt；失败静默（Kotlin runCatching）。
+    fn maybe_auto_backup(&mut self) {
+        let days = self.settings.auto_backup_days;
+        if days <= 0 {
+            return;
+        }
+        let now = now_ms();
+        if now - self.settings.last_backup_at < i64::from(days) * 86_400_000 {
+            return;
+        }
+        let (file, name) = match self.current.as_ref() {
+            Some(cur) => (self.store.vault_file(&cur.meta), cur.container.vault.name.clone()),
+            None => return,
+        };
+        let mgr = match BackupManager::new(&self.backups_dir()) {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        if mgr.backup(&file, &name).is_err() {
+            return;
+        }
+        let _ = mgr.prune(10);
+        self.settings.last_backup_at = now;
+        let _ = self.persist_settings();
+    }
 }
 
 // ---------------------------------------------------------------- 保险库管理
@@ -137,6 +170,7 @@ pub fn create_vault(state: State<AppState>, name: String, password: String) -> C
         meta: meta.clone(),
         password,
     });
+    inner.maybe_auto_backup();
     Ok(meta)
 }
 
@@ -157,6 +191,7 @@ pub fn open_vault(state: State<AppState>, id: String, password: String) -> CmdRe
         meta,
         password,
     });
+    inner.maybe_auto_backup();
     Ok(vault)
 }
 
@@ -592,11 +627,18 @@ pub fn export_vault_sicv(state: State<AppState>) -> CmdResult<String> {
 
 #[tauri::command]
 pub fn backup_create(state: State<AppState>) -> CmdResult<BackupInfo> {
-    let inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
-    let cur = inner.current.as_ref().ok_or(NO_OPEN_VAULT)?;
-    let file = inner.store.vault_file(&cur.meta);
+    let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+    let (file, name) = {
+        let cur = inner.current.as_ref().ok_or(NO_OPEN_VAULT)?;
+        (inner.store.vault_file(&cur.meta), cur.container.vault.name.clone())
+    };
     let mgr = BackupManager::new(&inner.backups_dir()).map_err(err)?;
-    mgr.backup(&file, &cur.container.vault.name).map_err(err)
+    let info = mgr.backup(&file, &name).map_err(err)?;
+    let _ = mgr.prune(10);
+    // 对齐手机端 backupNow()：记录 lastBackupAt 并落盘
+    inner.settings.last_backup_at = now_ms();
+    inner.persist_settings()?;
+    Ok(info)
 }
 
 #[tauri::command]

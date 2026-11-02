@@ -114,10 +114,13 @@ fn ui_full_flow_roundtrip() {
     assert_eq!(c2.vault.items[0].title, "GitHub");
 
     // 5. 备份 → 列表 → 恢复（同 id 覆盖）
+    // 创建时 maybe_auto_backup 已自动备 1 份；文件名时间戳是秒级精度，
+    // 等 >1s 再手动备 1 份，避免同秒同名被 REPLACE 覆盖 → 应共 2 份。
+    std::thread::sleep(std::time::Duration::from_millis(1100));
     let info = c::backup_create(app.state::<AppState>()).unwrap();
     assert!(info.path.exists(), "备份文件应存在");
     let backups = c::backup_list(app.state::<AppState>()).unwrap();
-    assert_eq!(backups.len(), 1);
+    assert_eq!(backups.len(), 2, "1 份来自创建时自动备份 + 1 份手动备份");
     let restored = c::backup_restore(
         app.state::<AppState>(),
         info.path.to_string_lossy().to_string(),
