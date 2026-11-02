@@ -52,7 +52,7 @@ export function SyncDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void 
         </div>
       </div>
       <div className="spacer-10" />
-      <div className="row">
+      <div className="row" style={{ justifyContent: "flex-end" }}>
         <button className="btn primary" disabled={busy !== null} onClick={() => void run("sync")}>
           {busy === "sync" ? "同步中…" : "立即同步"}
         </button>

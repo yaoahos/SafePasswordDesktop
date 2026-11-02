@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import type { AttachmentRef, FieldType, Label, Vault, VaultItem } from "../types";
-import { attachmentAdd, attachmentRead, attachmentRemove } from "../api";
+import type { FieldType, Label, VaultItem } from "../types";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Dialog } from "./Dialog";
+import { LabelGlyph } from "./LabelGlyph";
 import { GeneratorDialog } from "../dialogs/GeneratorDialog";
 import {
   MASK,
-  arrayBufferToBase64,
   copyText,
-  formatSize,
   formatTime,
   isMaskedField,
   itemIcon,
@@ -43,7 +41,6 @@ export function ItemDetail({
   item,
   labels,
   onSave,
-  onVault,
   onToggleFavorite,
   onDuplicate,
   onDelete,
@@ -57,8 +54,6 @@ export function ItemDetail({
   labels: Label[];
   /** 保存编辑（putItem） */
   onSave: (next: VaultItem) => Promise<void>;
-  /** 附件操作后同步父级 vault（后端已落库并返回完整 Vault） */
-  onVault: (v: Vault) => void;
   onToggleFavorite: () => Promise<void>;
   onDuplicate: () => Promise<void>;
   /** 移回收站（status=TRASHED） */
@@ -81,12 +76,15 @@ export function ItemDetail({
   const [fType, setFType] = useState<FieldType>("TEXT");
   /** 字段行内生成密码的目标字段（对齐手机端 generatorTarget） */
   const [genFieldId, setGenFieldId] = useState<string | null>(null);
+  /** 预览态 / 编辑态（对齐手机端 ItemViewScreen ↔ ItemEditScreen；新建条目直接进编辑态） */
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     setDraft(item);
     setShown({});
     setDirty(false);
-  }, [item]);
+    setEditing(isNew);
+  }, [item, isNew]);
 
   const patch = (p: Partial<VaultItem>) => {
     setDraft((d) => ({ ...d, ...p }));
@@ -110,6 +108,7 @@ export function ItemDetail({
     try {
       await onSave({ ...draft, updatedAt: Date.now() });
       setDirty(false);
+      setEditing(false);
       notify("已保存", "success");
       return true;
     } catch (e) {
@@ -123,63 +122,7 @@ export function ItemDetail({
     if (await save()) onSaveAndCreate();
   };
 
-  const fileRef = useRef<HTMLInputElement>(null);
   const iconRef = useRef<HTMLInputElement>(null);
-
-  const b64ToBytes = (b64: string) => {
-    const bin = atob(b64);
-    const out = new Uint8Array(new ArrayBuffer(bin.length));
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  };
-
-  /** 附件操作后端已落库：同步父级与草稿（后端返回的 Vault 是新状态） */
-  const syncFromVault = (v: Vault) => {
-    onVault(v);
-    const it = v.items.find((i) => i.id === item.id);
-    if (it) setDraft(it);
-    setDirty(false);
-  };
-
-  const addAttach = async (f: File) => {
-    try {
-      // 先把未保存的编辑落库，避免附件操作把草稿改动顶掉
-      if (dirty) await save();
-      const buf = await f.arrayBuffer();
-      const data = arrayBufferToBase64(buf);
-      const v = await attachmentAdd(item.id, f.name, f.type || "application/octet-stream", data);
-      syncFromVault(v);
-      notify("已添加附件", "success");
-    } catch (e) {
-      notify(String(e), "error");
-    }
-  };
-
-  const downloadAttach = async (a: AttachmentRef) => {
-    try {
-      const bytes = b64ToBytes(await attachmentRead(a.id));
-      const blob = new Blob([bytes], { type: a.mime || "application/octet-stream" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = a.name;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    } catch (e) {
-      notify(String(e), "error");
-    }
-  };
-
-  const removeAttach = async (id: string) => {
-    try {
-      if (dirty) await save();
-      const v = await attachmentRemove(item.id, id);
-      syncFromVault(v);
-      notify("已移除附件", "success");
-    } catch (e) {
-      notify(String(e), "error");
-    }
-  };
 
   /** 对齐手机端 encodeIcon（ItemEditScreen.kt:1020）：正方形、≤256×256、重编码为 PNG 裸 base64 */
   const pickIcon = (f: File) => {
@@ -277,6 +220,146 @@ export function ItemDetail({
     setFType(draft.notesType);
     setFieldDlg({ mode: "notes" });
   };
+
+  /** 预览态（对齐手机端 ItemViewScreen：首卡 + 字段行 + 备注 + 时间） */
+  if (!editing && !trashed) {
+    const user =
+      draft.fields
+        .find((f) =>
+          ["用户名", "账号", "帐号", "账户", "登录名", "邮箱", "电子邮件", "Email", "e-mail"].includes(f.label),
+        )
+        ?.value.trim() || "";
+    const pass = draft.fields.find((f) => isMaskedField(f.type, f.sensitive))?.value ?? "";
+    const labelObjs = labels.filter((l) => draft.labelIds.includes(l.id));
+    return (
+      <div className="detail">
+        <div className="preview-hero">
+          <div className="preview-icon">
+            {icon.kind === "img" ? <img src={icon.src} alt="" /> : icon.kind === "char" ? icon.char : icon.emoji}
+          </div>
+          <div className="preview-title">{draft.title || "未命名"}</div>
+          {resolvedUrl && (
+            <button className="preview-url" onClick={openExternal} title={resolvedUrl}>
+              <span className="preview-url-text">{resolvedUrl}</span>
+              <span className="preview-open">↗</span>
+            </button>
+          )}
+          {user && <div className="preview-user">{user}</div>}
+          {pass && (
+            <div className="preview-pass">
+              <span className="preview-pass-mask">
+                {shown["hero"] ? pass : "•".repeat(Math.min(Math.max(pass.length, 8), 16))}
+              </span>
+              <button
+                className="icon-btn"
+                title={shown["hero"] ? "隐藏" : "显示"}
+                onClick={() => setShown((s) => ({ ...s, hero: !s.hero }))}
+              >
+                {shown["hero"] ? "🙈" : "👁"}
+              </button>
+            </div>
+          )}
+          {labelObjs.length > 0 && (
+            <div className="preview-labels">
+              {labelObjs.map((l) => (
+                <span
+                  className="preview-label"
+                  key={l.id}
+                  style={{
+                    color: labelColorCss(l.color),
+                    borderColor: `${labelColorCss(l.color)}55`,
+                    background: `${labelColorCss(l.color)}14`,
+                  }}
+                >
+                  <LabelGlyph color={labelColorCss(l.color)} size={10} />
+                  {l.name}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {(draft.fields.length > 0 || draft.notes.trim()) && (
+          <div className="card">
+            <div className="card-title">详情</div>
+            {draft.fields.map((f) => {
+              const masked = isMaskedField(f.type, f.sensitive) && !shown[f.id];
+              return (
+                <div className="preview-field" key={f.id}>
+                  <div className="preview-field-label">{f.label}</div>
+                  <div className="preview-field-value">{masked ? MASK : f.value || "—"}</div>
+                  <div className="preview-field-actions">
+                    {f.type === "URL" && f.value.trim() && (
+                      <button
+                        className="icon-btn"
+                        title="打开链接"
+                        onClick={() => {
+                          const t = f.value.trim();
+                          const target = t.includes("://") ? t : `http://${t}`;
+                          void openUrl(target).catch(() => notify("无法打开网址", "error"));
+                        }}
+                      >
+                        ↗
+                      </button>
+                    )}
+                    {isMaskedField(f.type, f.sensitive) && (
+                      <button
+                        className="icon-btn"
+                        title={shown[f.id] ? "隐藏" : "显示"}
+                        onClick={() => setShown((s) => ({ ...s, [f.id]: !s[f.id] }))}
+                      >
+                        {shown[f.id] ? "🙈" : "👁"}
+                      </button>
+                    )}
+                    <button
+                      className="icon-btn"
+                      title="复制"
+                      onClick={() => {
+                        void copyText(f.value).then(
+                          () => notify(`已复制“${f.label}”`, "success"),
+                          () => notify("复制失败", "error"),
+                        );
+                      }}
+                    >
+                      ⧉
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            {draft.notes.trim() && (
+              <div className="preview-notes">
+                <div className="preview-field-label">{draft.notesLabel || "备注"}</div>
+                <div className="preview-notes-text">{draft.notes}</div>
+              </div>
+            )}
+            <div className="preview-meta">
+              修改于 {formatTime(draft.updatedAt)} · 创建于 {formatTime(draft.createdAt)}
+            </div>
+          </div>
+        )}
+
+        <div className="detail-actions">
+          <button
+            className="btn primary"
+            onClick={() => {
+              setDraft(item);
+              setEditing(true);
+            }}
+          >
+            编辑
+          </button>
+          <button className="btn" onClick={() => void onDuplicate()}>
+            复制副本
+          </button>
+          <button className="btn" onClick={() => onDelete().catch((e) => notify(String(e), "error"))}>
+            删除
+          </button>
+        </div>
+        <div className="spacer-16" />
+      </div>
+    );
+  }
 
   return (
     <div className="detail">
@@ -571,7 +654,7 @@ export function ItemDetail({
                   });
                 }}
               >
-                <span className="dot" style={{ background: color }} />
+                <LabelGlyph color={color} size={12} />
                 {l.name}
               </button>
             );
@@ -579,53 +662,20 @@ export function ItemDetail({
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-title">附件</div>
-        {draft.attachments.length === 0 && (
-          <div className="muted small" style={{ padding: "4px 0" }}>
-            暂无附件
-          </div>
-        )}
-        {draft.attachments.map((a) => (
-          <div className="attach-row" key={a.id}>
-            <span>📎</span>
-            <span className="grow">{a.name}</span>
-            <span className="muted small">{formatSize(a.size)}</span>
-            <button className="btn sm" onClick={() => void downloadAttach(a)}>
-              下载
-            </button>
-            {!trashed && (
-              <button className="btn sm" onClick={() => void removeAttach(a.id)}>
-                移除
-              </button>
-            )}
-          </div>
-        ))}
-        {!trashed && (
-          <div className="attach-row">
-            <button className="btn sm" onClick={() => fileRef.current?.click()}>
-              添加附件…
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void addAttach(f);
-                e.target.value = "";
-              }}
-            />
-            <span className="muted small">单个 ≤ 10 MB，加密存储</span>
-          </div>
-        )}
-      </div>
-
       <div className="detail-actions">
         {!trashed && (
           <>
             <button className="btn primary" disabled={!dirty} onClick={() => void save()}>
               保存
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                setDraft(item);
+                setEditing(false);
+              }}
+            >
+              返回预览
             </button>
             <button className="btn" onClick={() => void onDuplicate()}>
               复制副本
@@ -655,7 +705,6 @@ export function ItemDetail({
         <Dialog
           title={fieldDlg.mode === "add" ? "添加字段" : "编辑字段"}
           onClose={() => setFieldDlg(null)}
-          showCloseButton={false}
           width={360}
         >
           <div className="muted small">字段名</div>

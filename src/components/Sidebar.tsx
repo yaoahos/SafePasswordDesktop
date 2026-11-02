@@ -1,5 +1,6 @@
 import type { Label, VaultMeta } from "../types";
 import type { SectionFilter } from "../app-context";
+import { LabelGlyph } from "./LabelGlyph";
 
 const SECTIONS: { key: SectionFilter; label: string; icon: string }[] = [
   { key: "ALL", label: "全部", icon: "☰" },
@@ -7,37 +8,34 @@ const SECTIONS: { key: SectionFilter; label: string; icon: string }[] = [
   { key: "TRASH", label: "回收站", icon: "🗑" },
 ];
 
+/**
+ * 侧栏：只显示当前密码库（不允许在此切换，切换走「设置 → 密码库」）；
+ * 底部不再放锁定按钮与软件名（对齐移动端侧栏，v1 项 9/14）。
+ */
 export function Sidebar({
   vault,
+  itemCount,
   labels,
   section,
   labelFilter,
   onSection,
   onLabelFilter,
-  onSwitchVault,
   onManageLabels,
-  onLock,
 }: {
   vault: VaultMeta;
+  itemCount: number;
   labels: Label[];
   section: SectionFilter;
   labelFilter: string | null;
   onSection: (s: SectionFilter) => void;
   onLabelFilter: (id: string | null) => void;
-  onSwitchVault: () => void;
   onManageLabels: () => void;
-  onLock: () => void;
 }) {
   return (
     <div className="sidebar">
-      <div className="sidebar-head" style={{ cursor: "pointer" }} onClick={onSwitchVault} title="切换密码库">
-        <div className="row">
-          <div className="grow">
-            <div className="title">{vault.name}</div>
-            <div className="sub">我的密码库 · 点击切换</div>
-          </div>
-          <span className="muted">▾</span>
-        </div>
+      <div className="sidebar-head">
+        <div className="title">{vault.name}</div>
+        <div className="sub">{itemCount} 个条目 · 已加密</div>
       </div>
 
       {SECTIONS.map((s) => (
@@ -73,7 +71,7 @@ export function Sidebar({
           className={`label-row${labelFilter === l.id ? " active" : ""}`}
           onClick={() => onLabelFilter(labelFilter === l.id ? null : l.id)}
         >
-          <span className="dot" style={{ background: labelColor(l.color) }} />
+          <LabelGlyph color={labelColor(l.color)} size={15} />
           <span className="grow" style={{ textAlign: "left" }}>
             {l.name}
           </span>
@@ -81,12 +79,6 @@ export function Sidebar({
       ))}
 
       <div className="sidebar-spacer" />
-
-      <button className="sidebar-row" onClick={onLock}>
-        <span className="ico">🔒</span>
-        <span>锁定</span>
-      </button>
-      <div className="sidebar-foot">SafePassword 0.1.0-demo</div>
     </div>
   );
 }

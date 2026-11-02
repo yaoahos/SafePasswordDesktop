@@ -1,5 +1,6 @@
 import type { Label, SortMode, VaultItem } from "../types";
 import { itemIcon, itemMatches, itemSubtitle, labelColorCss } from "../utils";
+import { LabelGlyph } from "./LabelGlyph";
 
 export function ItemList({
   items,
@@ -102,7 +103,7 @@ export function ItemList({
                   <div className="item-meta">
                     {labels.map((l) => (
                       <span key={l.id} className="chip" style={{ background: `${labelColorCss(l.color)}22` }}>
-                        <span className="dot" style={{ background: labelColorCss(l.color), display: "inline-block", marginRight: 4 }} />
+                        <LabelGlyph color={labelColorCss(l.color)} size={11} />
                         {l.name}
                       </span>
                     ))}

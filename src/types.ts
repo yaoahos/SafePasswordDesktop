@@ -103,6 +103,16 @@ export interface SecurityReport {
   old: VaultItem[];
 }
 
+/** 检查更新结果（对齐手机端 AboutScreen「检查更新」） */
+export interface UpdateInfo {
+  current: string;
+  latest: string;
+  hasUpdate: boolean;
+  url: string;
+  assetUrl: string;
+  notes: string;
+}
+
 export interface BackupInfo {
   path: string;
   name: string;
@@ -122,6 +132,8 @@ export type ThemeMode = "system" | "light" | "dark";
 
 export interface AppSettings {
   theme: ThemeMode;
+  /** 主题强调色（#RRGGBB，null/空 = 默认蓝） */
+  accent: string;
   autoLockMinutes: number;
   hibpApiKey: string;
   webdav: WebDavConfig;

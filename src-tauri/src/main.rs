@@ -62,6 +62,8 @@ fn main() {
             commands::webdav_sync,
             commands::webdav_pull,
             commands::webdav_pull_if_changed,
+            commands::check_update,
+            commands::update_download_and_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SafePassword");
