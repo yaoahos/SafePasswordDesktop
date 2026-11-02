@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AttachmentRef, Label, Vault, VaultItem } from "../types";
 import { attachmentAdd, attachmentRead, attachmentRemove } from "../api";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   MASK,
   arrayBufferToBase64,
@@ -133,6 +134,27 @@ export function ItemDetail({
   const icon = itemIcon(draft);
   const sub = itemSubtitle(draft);
   const trashed = draft.status === "TRASHED";
+  /** 对齐手机端 ItemViewScreen.kt:105 的四级 url fallback */
+  const resolvedUrl = (() => {
+    if (draft.url.trim()) return draft.url.trim();
+    const urlField = draft.fields.find((f) => f.type === "URL");
+    if (urlField && urlField.value.trim()) return urlField.value.trim();
+    const byLabel = draft.fields.find((f) =>
+      ["网址", "地址", "URL", "Website", "网站"].includes(f.label),
+    );
+    if (byLabel && byLabel.value.trim()) return byLabel.value.trim();
+    const byScheme = draft.fields.find((f) => /^https?:\/\//i.test(f.value.trim()));
+    return byScheme ? byScheme.value.trim() : "";
+  })();
+  /** 对齐手机端 withScheme（ItemViewScreen.kt:627）：trim、无 "://" 补 http://；协议不在 opener:default 白名单则由插件拒绝 */
+  const openExternal = () => {
+    if (!resolvedUrl) {
+      notify("没有可打开的网址", "error");
+      return;
+    }
+    const target = resolvedUrl.includes("://") ? resolvedUrl : `http://${resolvedUrl}`;
+    void openUrl(target).catch(() => notify("无法打开网址", "error"));
+  };
 
   return (
     <div className="detail">
@@ -213,6 +235,31 @@ export function ItemDetail({
             </div>
           );
         })}
+        {resolvedUrl && (
+          <div className="field-row">
+            <div className="field-label">网址</div>
+            <div className="field-value" title={resolvedUrl}>
+              {resolvedUrl}
+            </div>
+            {!trashed && (
+              <button className="icon-btn" title="打开链接" onClick={openExternal}>
+                ↗
+              </button>
+            )}
+            <button
+              className="icon-btn"
+              title="复制"
+              onClick={() => {
+                void copyText(resolvedUrl).then(
+                  () => notify("已复制“网址”", "success"),
+                  () => notify("复制失败", "error"),
+                );
+              }}
+            >
+              ⧉
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="card">

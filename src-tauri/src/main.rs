@@ -7,6 +7,7 @@ use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // 数据根目录：<appData>/com.yaoahos.safepassword.desktop
             //   vaults/<id>.sicv   保险库
