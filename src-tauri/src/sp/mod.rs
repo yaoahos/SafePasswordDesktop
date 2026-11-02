@@ -6,6 +6,7 @@ pub mod backup;
 pub mod codec;
 pub mod container;
 pub mod crypto;
+pub mod dpapi;
 pub mod fsutil;
 pub mod generator;
 pub mod hibp;
