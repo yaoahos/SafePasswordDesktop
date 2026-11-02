@@ -65,6 +65,8 @@ export default function App() {
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [selectItemId, setSelectItemId] = useState<string | null>(null);
+  /** 当前选中条目是否"刚从模板新建未保存"（对齐手机端 existing==null，驱动「保存并新建」） */
+  const [newItemId, setNewItemId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ id: number; msg: string; kind: ToastKind } | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("CREATED");
   const [sortAsc, setSortAsc] = useState(false);
@@ -316,6 +318,8 @@ export default function App() {
     async (next: VaultItem) => {
       const v = await putItem(next);
       setVault(v);
+      // 首次保存后不再是"新建"状态（对齐手机端保存后 existing!=null）
+      setNewItemId((n) => (n === next.id ? null : n));
     },
     [],
   );
@@ -375,6 +379,7 @@ export default function App() {
       const v = await putItem(item);
       setVault(v);
       setSelectItemId(item.id);
+      setNewItemId(item.id);
       setSection("ALL");
       setLabelFilter(null);
       setDialog(null);
@@ -518,6 +523,8 @@ export default function App() {
               onRestore={restoreSelected}
               onPurge={purgeSelected}
               notify={notify}
+              isNew={selectItemId !== null && selectItemId === newItemId}
+              onSaveAndCreate={() => void createFromTemplate("login")}
             />
           ) : (
             <div className="detail">
