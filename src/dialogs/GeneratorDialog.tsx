@@ -2,9 +2,17 @@ import { useState } from "react";
 import { Dialog } from "../components/Dialog";
 import { generatePassphrase, generatePassword, evaluateStrength } from "../api";
 import { copyText } from "../utils";
-import type { AppCtx } from "../app-context";
 
-export function GeneratorDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
+export function GeneratorDialog({
+  notify,
+  onClose,
+  onUse,
+}: {
+  notify: (msg: string, kind?: "info" | "success" | "error") => void;
+  onClose: () => void;
+  /** 字段行内"生成密码"回填（对齐手机端 GeneratorDialog onUse） */
+  onUse?: (value: string) => void;
+}) {
   const [mode, setMode] = useState<"password" | "passphrase">("password");
   const [length, setLength] = useState(20);
   const [lower, setLower] = useState(true);
@@ -151,12 +159,24 @@ export function GeneratorDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => 
               >
                 {result}
               </div>
+              {onUse && (
+                <button
+                  className="btn primary sm"
+                  style={{ marginRight: 8 }}
+                  onClick={() => {
+                    onUse(result);
+                    onClose();
+                  }}
+                >
+                  使用
+                </button>
+              )}
               <button
                 className="btn sm"
                 onClick={() => {
                   void copyText(result).then(
-                    () => ctx.notify("已复制生成结果", "success"),
-                    () => ctx.notify("复制失败", "error"),
+                    () => notify("已复制生成结果", "success"),
+                    () => notify("复制失败", "error"),
                   );
                 }}
               >
