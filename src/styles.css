@@ -111,60 +111,68 @@ button {
 /* ---------------------------------------------------------------- 顶栏 */
 
 .topbar {
-  height: 66px;
   flex: none;
   background: var(--surface);
   box-shadow: var(--shadow);
-  display: flex;
-  align-items: center;
-  padding: 0 8px 0 18px;
-  gap: 6px;
   z-index: 5;
   user-select: none;
+  display: flex;
+  flex-direction: column;
 }
 
-.topbar-brand {
+/* 标题栏：左侧图标 + 应用名 + 版本，右侧窗口按钮（标准桌面软件样式） */
+.titlebar {
+  height: 44px;
+  flex: none;
   display: flex;
   align-items: center;
   gap: 10px;
+  padding: 0 6px 0 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.titlebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
   flex: none;
-  margin-right: 12px;
-  cursor: default;
 }
 
-.topbar-logo {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+.titlebar-logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
 }
 
-.topbar-title {
-  font-size: 21px;
+.titlebar-title {
+  font-size: 17px;
   font-weight: 800;
   color: var(--text);
   letter-spacing: 0.2px;
 }
 
-.topbar-version {
-  font-size: 13px;
+.titlebar-version {
+  font-size: 12px;
   font-weight: 700;
   color: var(--text-2);
   align-self: flex-end;
-  padding-bottom: 4px;
+  padding-bottom: 9px;
 }
 
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex: none;
-  justify-content: flex-start;
-}
-
-.topbar-grow {
+.titlebar-grow {
   flex: 1;
   height: 100%;
   min-width: 12px;
+}
+
+/* 工具栏：动作按钮靠左 */
+.toolbar {
+  height: 52px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 10px;
 }
 
 /* 自绘窗口按钮（decorations:false） */
@@ -1179,12 +1187,19 @@ select.input {
 /* ---------------------------------------------------------------- 登录 / 解锁 */
 
 .auth-wrap {
-  position: relative;
   height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.auth-center {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg);
+  padding: 24px;
   overflow-y: auto;
 }
 
