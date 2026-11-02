@@ -61,7 +61,7 @@ fn is_true(value: &str) -> bool {
 }
 
 pub fn looks_like_xml(text: &str) -> bool {
-    text.trim_start_matches(|c| matches!(c, '\u{FEFF}' | ' ' | '\n' | '\r' | '\t'))
+    text.trim_start_matches(['\u{FEFF}', ' ', '\n', '\r', '\t'])
         .starts_with('<')
 }
 
@@ -158,12 +158,10 @@ fn parse_document(text: &str) -> Result<XmlEl, String> {
 
 fn collect_attrs(e: &quick_xml::events::BytesStart<'_>) -> Vec<(String, String)> {
     let mut out = Vec::new();
-    for attr in e.attributes().with_checks(false) {
-        if let Ok(attr) = attr {
-            let key = String::from_utf8_lossy(attr.key.as_ref()).into_owned();
-            let raw = String::from_utf8_lossy(&attr.value).into_owned();
-            out.push((key, unescape_xml(&raw)));
-        }
+    for attr in e.attributes().with_checks(false).flatten() {
+        let key = String::from_utf8_lossy(attr.key.as_ref()).into_owned();
+        let raw = String::from_utf8_lossy(&attr.value).into_owned();
+        out.push((key, unescape_xml(&raw)));
     }
     out
 }
@@ -707,7 +705,7 @@ mod tests {
         assert_eq!(cards[0].item.created_at, 9_999_999_999_000);
         // 0 不在 1.. 内 → 原样
         let xml0 = "<database><card id=\"a\" title=\"t\" time_stamp=\"0\"/></database>";
-        assert_eq!(parse(&xml0).unwrap()[0].item.created_at, 0);
+        assert_eq!(parse(xml0).unwrap()[0].item.created_at, 0);
         // 9 位 → ×1000
         let xml2 = "<database><card id=\"a\" title=\"t\" time_stamp=\"999999999\"/></database>";
         let cards2 = parse(xml2).unwrap();

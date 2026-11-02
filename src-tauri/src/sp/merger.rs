@@ -43,8 +43,8 @@ pub fn merge(local: &Vault, remote: &Vault, last_synced_at: i64) -> MergeResult 
         let r = remote.items.iter().find(|i| i.id == id);
         if let Some(tp) = tombstones.iter().position(|t| t.id == id) {
             let deleted_at = tombstones[tp].deleted_at;
-            let local_gone = l.map_or(true, |li| deleted_at >= li.updated_at);
-            let remote_gone = r.map_or(true, |ri| deleted_at >= ri.updated_at);
+            let local_gone = l.is_none_or(|li| deleted_at >= li.updated_at);
+            let remote_gone = r.is_none_or(|ri| deleted_at >= ri.updated_at);
             if local_gone && remote_gone {
                 continue;
             }

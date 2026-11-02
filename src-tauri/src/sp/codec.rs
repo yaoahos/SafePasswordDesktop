@@ -121,8 +121,7 @@ fn normalize_header(header: &str) -> String {
     let value = header
         .trim()
         .to_lowercase()
-        .replace(' ', "")
-        .replace('_', "");
+        .replace([' ', '_'], "");
     match value.as_str() {
         "title" | "name" | "标题" | "名称" => "title".to_string(),
         "username" | "user" | "login" | "账号" | "用户名" | "邮箱" => "username".to_string(),

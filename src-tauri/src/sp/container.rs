@@ -272,7 +272,7 @@ mod tests {
         assert_eq!(c2.vault.items.len(), 1);
         assert_eq!(c2.vault.items[0].title, "招商银行");
         assert_eq!(c2.vault.items[0].fields.len(), 2);
-        assert!(c2.vault.content_key.trim().is_empty() == false);
+        assert!(!c2.vault.content_key.trim().is_empty());
         assert_eq!(c2.iterations, PBKDF2_ITERATIONS);
         // 重新序列化能再次打开（往返稳定）
         let bytes2 = c2.to_bytes();

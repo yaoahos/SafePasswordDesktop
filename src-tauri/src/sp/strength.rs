@@ -42,13 +42,13 @@ pub fn evaluate(password: &str) -> StrengthResult {
 
     let chars: Vec<char> = password.chars().collect();
     let mut pool: f64 = 0.0;
-    if chars.iter().any(|c| ('a'..='z').contains(c)) {
+    if chars.iter().any(|c: &char| c.is_ascii_lowercase()) {
         pool += 26.0;
     }
-    if chars.iter().any(|c| ('A'..='Z').contains(c)) {
+    if chars.iter().any(|c: &char| c.is_ascii_uppercase()) {
         pool += 26.0;
     }
-    if chars.iter().any(|c| ('0'..='9').contains(c)) {
+    if chars.iter().any(|c: &char| c.is_ascii_digit()) {
         pool += 10.0;
     }
     // Kotlin isLetterOrDigit 是 Unicode 感知的

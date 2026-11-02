@@ -52,21 +52,20 @@ fn default_label_color() -> i32 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
+#[derive(Default)]
 pub enum ItemStatus {
+    #[default]
     Active,
     Archived,
     Trashed,
 }
 
-impl Default for ItemStatus {
-    fn default() -> Self {
-        ItemStatus::Active
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
+#[derive(Default)]
 pub enum FieldType {
+    #[default]
     Text,
     Password,
     /// 与密码一样加密、掩码显示，但不参与安全检查。
@@ -77,11 +76,6 @@ pub enum FieldType {
     Multiline,
 }
 
-impl Default for FieldType {
-    fn default() -> Self {
-        FieldType::Text
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
