@@ -214,8 +214,8 @@ mod tests {
         assert_eq!(WORDS.len(), 136);
         let mut sorted: Vec<&str> = WORDS.to_vec();
         sorted.sort_unstable();
-        let dedup = sorted.dedup_by(|a, b| a == b);
-        let _ = dedup;
+        sorted.dedup_by(|a, b| a == b);
+        ();
         assert_eq!(sorted.len(), 136);
         assert!(WORDS.iter().all(|w| *w == w.to_lowercase()));
     }

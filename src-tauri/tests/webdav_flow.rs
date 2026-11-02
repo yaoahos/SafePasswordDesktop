@@ -137,10 +137,8 @@ fn start_server() -> (Files, u16) {
     let files: Files = Arc::new(Mutex::new(HashMap::new()));
     let f2 = files.clone();
     std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            if let Ok(s) = stream {
-                handle(s, &f2);
-            }
+        for s in listener.incoming().flatten() {
+            handle(s, &f2);
         }
     });
     (files, port)

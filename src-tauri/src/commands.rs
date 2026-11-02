@@ -769,7 +769,7 @@ pub struct SyncSummary {
 }
 
 fn to_summary(r: &SyncResult) -> SyncSummary {
-    let direction = serde_json::to_value(&r.direction)
+    let direction = serde_json::to_value(r.direction)
         .ok()
         .and_then(|v| v.as_str().map(String::from))
         .unwrap_or_default();
