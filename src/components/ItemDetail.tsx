@@ -50,6 +50,8 @@ export function ItemDetail({
   onRestore,
   onPurge,
   notify,
+  isNew,
+  onSaveAndCreate,
 }: {
   item: VaultItem;
   labels: Label[];
@@ -65,6 +67,10 @@ export function ItemDetail({
   /** 彻底删除（后端 purge） */
   onPurge: () => Promise<void>;
   notify: (msg: string, kind?: "info" | "success" | "error") => void;
+  /** 当前条目是否"刚从模板新建未保存"（对齐手机端 existing==null） */
+  isNew: boolean;
+  /** 「保存并新建」：保存当前后开新 LOGIN 条目 */
+  onSaveAndCreate: () => void;
 }) {
   const [draft, setDraft] = useState<VaultItem>(item);
   const [shown, setShown] = useState<Record<string, boolean>>({});
@@ -95,19 +101,26 @@ export function ItemDetail({
     setDirty(true);
   };
 
-  const save = async () => {
+  const save = async (): Promise<boolean> => {
     // 对齐手机端 validateItem（ItemEditScreen.kt:142）
     if (!draft.title.trim()) {
       notify("请填写标题后再进行操作", "error");
-      return;
+      return false;
     }
     try {
       await onSave({ ...draft, updatedAt: Date.now() });
       setDirty(false);
       notify("已保存", "success");
+      return true;
     } catch (e) {
       notify(String(e), "error");
+      return false;
     }
+  };
+
+  /** 对齐手机端「保存并新建」（ItemEditScreen.kt:431-446）：先保存当前，成功后开新 LOGIN 条目 */
+  const saveAndCreate = async () => {
+    if (await save()) onSaveAndCreate();
   };
 
   const fileRef = useRef<HTMLInputElement>(null);
@@ -517,6 +530,11 @@ export function ItemDetail({
             <button className="btn" onClick={() => onDelete().catch((e) => notify(String(e), "error"))}>
               删除
             </button>
+            {isNew && (
+              <button className="btn" onClick={() => void saveAndCreate()}>
+                保存并新建
+              </button>
+            )}
           </>
         )}
         {trashed && (
