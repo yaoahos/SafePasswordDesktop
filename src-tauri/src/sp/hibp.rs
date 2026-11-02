@@ -86,7 +86,7 @@ impl HibpClient {
             .client
             .get(&url)
             .header("hibp-api-key", api_key)
-            .header("user-agent", "SafeInCloudClient-Android")
+            .header("user-agent", "SafePassword-Desktop")
             .send()
             .await
             .map_err(|e| HibpError::Network(e.to_string()))?;

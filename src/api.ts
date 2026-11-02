@@ -71,14 +71,18 @@ export const checkPasswordBreach = (password: string) =>
 
 export const exportCsv = () => invoke<string>("export_csv");
 
-export const exportSafeincloudXml = () => invoke<string>("export_safeincloud_xml");
+export const exportXml = () => invoke<string>("export_xml");
 
 export const exportVaultJson = () => invoke<string>("export_vault_json");
 
+/** 弹出系统保存对话框并写入（base64 内容，返回实际保存路径；取消返回 null） */
+export const saveExport = (defaultName: string, base64Data: string) =>
+  invoke<string | null>("save_export", { defaultName, base64Data });
+
 export const importCsv = (text: string) => invoke<number>("import_csv", { text });
 
-export const importSafeincloudXml = (text: string) =>
-  invoke<number>("import_safeincloud_xml", { text });
+export const importXml = (text: string) =>
+  invoke<number>("import_xml", { text });
 
 export const backupCreate = () => invoke<BackupInfo>("backup_create");
 

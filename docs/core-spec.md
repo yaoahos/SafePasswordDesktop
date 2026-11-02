@@ -7,8 +7,8 @@
 > 所有常量均直接摘自源码并标注 `文件名:行号`。凡源码行为存在歧义或历史不一致之处，
 > 集中列在第 15 节「已知歧义」，实现前请务必阅读。
 >
-> 源文件（均位于 `E:\DSH\SafePassword\core\src\main\kotlin\com\safeincloud\core\`，行号以 2026-11 时点版本为准）：
-> `crypto/Crypto.kt`、`crypto/VaultContainer.kt`、`io/VaultCodec.kt`、`io/SafeInCloudXml.kt`、
+> 源文件（均位于 `E:\DSH\SafePassword\core\src\main\kotlin\com\\yaoahos\\safepassword\\core\\`，行号以 2026-11 时点版本为准）：
+> `crypto/Crypto.kt`、`crypto/VaultContainer.kt`、`io/VaultCodec.kt`、`io/VaultXml.kt`、
 > `io/AtomicFiles.kt`、`json/AppJson.kt`、`model/Model.kt`、`model/TemplateCatalog.kt`、
 > `storage/VaultStore.kt`、`storage/BackupManager.kt`、`storage/AttachmentStore.kt`、
 > `sync/WebDavClient.kt`、`sync/SyncEngine.kt`、`sync/VaultMerger.kt`、
@@ -646,16 +646,16 @@ wood wren zephyr
 - 空 email ⇒ `[]`；空 apiKey ⇒ `HibpException("邮箱泄露检查需要填写 HIBP API Key")`。
 - `GET https://haveibeenpwned.com/api/v3/breachedaccount/<URLEncoder.encode(email,"UTF-8")>?truncateResponse=true`
   （注意 `URLEncoder` 是 form 编码：空格 → `+`）。
-- 请求头：`hibp-api-key: <apiKey>`、`user-agent: SafeInCloudClient-Android`。
+- 请求头：`hibp-api-key: <apiKey>`、`user-agent: SafePassword-Android`。
 - 响应：200 → JSON 数组，收集每个对象的 `"Name"` 字段（解析失败抛
   `HibpException("无法解析 HIBP 响应")`）；404 → `[]`（无泄露）；401 → `"HIBP API Key 无效"`；
   429 → `"HIBP 请求过于频繁，请稍后再试"`；其他 → `"邮箱查询失败（HTTP n）"`。
 
 ---
 
-## 12. SafeInCloud XML 导入/导出（SafeInCloudXml.kt）
+## 12. XML 导入/导出（VaultXml.kt）
 
-与原版 SafeInCloud 客户端互通的**明文** XML（不含任何加密；导出的是已解锁库的内容，属敏感文件）。
+与移动端/桌面端互通的**明文** XML（不含任何加密；导出的是已解锁库的内容，属敏感文件）。
 
 ### 12.1 结构
 
@@ -702,7 +702,7 @@ wood wren zephyr
 
 ### 12.3 导入（parse，:40-56, 177-258）
 
-返回 `List<SafeInCloudCard{ item: VaultItem, labelNames: List<String> }>`（:24-27）——**标签以名字
+返回 `List<XmlCard{ item: VaultItem, labelNames: List<String> }>`（:24-27）——**标签以名字
 返回，不带数字 id**，由调用方决定匹配/新建逻辑。
 
 - XML 安全：禁用 DTD（`disallow-doctype-decl`）、外部通用/参数实体、`ACCESS_EXTERNAL_DTD/SCHEMA`
@@ -740,7 +740,7 @@ wood wren zephyr
 往返行为（`ToolsTest.kt:53-123`）：label 名、favorite、备注（元素与 notes 字段拼接）、自定义图标
 base64、`login` 字段名的邮箱识别等都有测试断言，可直接作为 Rust 侧单测蓝本。
 
-### 12.4 附：CSV 导入/导出（VaultCodec.kt，非 SafeInCloud 格式）
+### 12.4 附：CSV 导入/导出（VaultCodec.kt，不同格式）
 
 - 导出（:18-31）：表头固定 `标题,用户名,密码,网址,备注,标签`（CRLF 行尾）；跳过 TRASHED
   （ARCHIVED 会导出）；用户名 = 第一个 label ∈ {用户名, 邮箱, 账号} 的字段值；密码 =
@@ -794,7 +794,7 @@ base64、`login` 字段名的邮箱识别等都有测试断言，可直接作为
    但 `PasswordStrength.hasRun/hasSequence`、CSV/label 的 `contains` 等按 Char 迭代的逻辑，
    对 BMP 外字符（emoji 等）Rust 按 `char` 迭代会有细微差异——如需逐位一致请按 UTF-16 码元处理。
 7. **UUID**：`uuid` crate v4，`to_string()` 输出小写带连字符，与 `UUID.randomUUID().toString()` 一致。
-8. **时间**：全程 epoch millis（i64）；仅 SafeInCloud XML 的 `time_stamp` 是秒（导出时 `/1000`，
+8. **时间**：全程 epoch millis（i64）；仅 XML 的 `time_stamp` 是秒（导出时 `/1000`，
    导入时启发式 ×1000）。
 9. **密码生成**：`rand::rngs::OsRng` + `Rng::gen_range`。注意 Kotlin `random.nextInt(10, 100)`
    是 [10, 100) 即 10–99；`nextInt(n)` 是 [0, n)。Fisher–Yates 从尾部向前。
@@ -817,7 +817,7 @@ base64、`login` 字段名的邮箱识别等都有测试断言，可直接作为
 
 - **A. 远端文件名固定为 `SafePassword.spv`**：`WebDavConfig.remotePath()` 完全忽略 `vaultKey`
   参数（WebDavClient.kt:40），一个 WebDAV 账号下一个远端文件。但 `WebDavClientTest.kt:34` 使用
-  `SafeInCloud/vault-test.sicv` 这类旧式路径，说明**旧版本**曾用 `<dir>/<key>.sicv`。桌面端应
+  `<dir>/<key>.sicv` 这类旧式路径，说明**旧版本**曾用 `<dir>/<key>.sicv`。桌面端应
   跟随**当前** Android 行为（`SafePassword.spv`）才能互通；如桌面端生成别的文件名，两端永远互相
   看不见。`vaultKey` 仅剩附件目录在用（SyncEngine.kt:223）。
 - **B. PBKDF2 口令编码**：JCE `PBKDF2WithHmacSHA256` 按 UTF-8 编码口令（无 NUL 终止）是 JDK 实现
@@ -839,7 +839,7 @@ base64、`login` 字段名的邮箱识别等都有测试断言，可直接作为
 - **I. 导入（importEncrypted/Plain）保留 contentKey 但换 DEK**（VaultStore.kt:127-147）：
   导入库与源库附件互通（同 contentKey），但附件目录换成了新 vault id，文件需另行拷贝/同步。
 - **J. XML 导出 type 判定是 label 子串启发式**（12.2 节），中文 label 命中规则与原版
-  SafeInCloud 的真实 type 集合未必完全一致；往返本实现是自洽的（ToolsTest 有断言）。
+  其它客户端的真实 type 集合未必完全一致；往返本实现是自洽的（ToolsTest 有断言）。
 - **K. `stat()` 的 `size` 在无 Content-Length 时为 -1，`lastModified` 无头时为 0**——调用方
   必须容忍。
 - **L. 合并结果的 `name`/`schema`/`id`/`contentKey` 取本地侧**（VaultMerger.kt:78 用
@@ -879,7 +879,7 @@ base64、`login` 字段名的邮箱识别等都有测试断言，可直接作为
   百分号编码；Basic 认证与 401 报错文案（可参照 WebDavClient.kt:24-71 三个测试）。
 - **T13 备份/恢复**：Android 备份 → Rust 复制还原 → Android 打开；文件名模式
   `<safeName>-<yyyyMMdd-HHmmss>.sicv` 与 prune(keep=10) 行为一致（中文库名、特殊字符库名）。
-- **T14 SafeInCloud XML 往返**：Android 导出 XML → Rust parse → 逐字段比对（labelNames、favorite、
+- **T14 XML 往返**：Android 导出 XML → Rust parse → 逐字段比对（labelNames、favorite、
   notes 拼接、iconData、time_stamp 秒）；Rust export → Android parse（可用 ToolsTest.kt:53-123
   的样例 XML 与断言作为固定用例）。另加：`deleted="1"`/`template="true"` 卡跳过、秒/毫秒
   time_stamp 各一例。
