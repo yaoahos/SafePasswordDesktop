@@ -38,6 +38,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoLockMinutes: 5,
   hibpApiKey: "",
   webdav: { baseUrl: "", username: "", password: "", remoteDir: "/SafePassword", enabled: false },
+  autoBackupDays: 1,
+  lastBackupAt: 0,
 };
 
 const SECTION_TITLES: Record<SectionFilter, string> = {

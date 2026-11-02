@@ -125,6 +125,10 @@ export interface AppSettings {
   autoLockMinutes: number;
   hibpApiKey: string;
   webdav: WebDavConfig;
+  /** 0 = 关闭自动备份，否则每 N 天（对齐手机端） */
+  autoBackupDays: number;
+  /** 上次备份时间（epoch millis） */
+  lastBackupAt: number;
 }
 
 export type SyncStrategy = "DETECT" | "KEEP_LOCAL" | "KEEP_REMOTE" | "MERGE";
