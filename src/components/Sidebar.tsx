@@ -1,11 +1,12 @@
 import type { Label, VaultMeta } from "../types";
 import type { SectionFilter } from "../app-context";
 import { LabelGlyph } from "./LabelGlyph";
+import { Icon, type IconName } from "./icons";
 
-const SECTIONS: { key: SectionFilter; label: string; icon: string }[] = [
-  { key: "ALL", label: "全部", icon: "☰" },
-  { key: "FAVORITES", label: "收藏", icon: "★" },
-  { key: "TRASH", label: "回收站", icon: "🗑" },
+const SECTIONS: { key: SectionFilter; label: string; icon: IconName }[] = [
+  { key: "ALL", label: "全部", icon: "menu" },
+  { key: "FAVORITES", label: "收藏", icon: "star" },
+  { key: "TRASH", label: "回收站", icon: "trash" },
 ];
 
 /**
@@ -47,13 +48,17 @@ export function Sidebar({
             onSection(s.key);
           }}
         >
-          <span className="ico">{s.icon}</span>
+          <span className="ico">
+            <Icon name={s.icon} size={18} strokeWidth={1.9} />
+          </span>
           <span>{s.label}</span>
         </button>
       ))}
 
       <button className="sidebar-row" onClick={onManageLabels}>
-        <span className="ico">🏷</span>
+        <span className="ico">
+          <Icon name="tag" size={18} strokeWidth={1.9} />
+        </span>
         <span>标签管理</span>
       </button>
 
