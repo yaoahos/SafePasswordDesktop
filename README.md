@@ -5,7 +5,7 @@ Windows 桌面端（Tauri 2 + React + TypeScript），与 Android 端 `E:\DSH\Sa
 
 ## 当前状态（v0.1.0-demo）
 
-- **功能**：密码库管理（建库 / 条目 / 标签 / 收藏 / 归档 / 回收站）、密码生成器、强度与安全检查（HIBP）、CSV / SafeInCloud XML / JSON 导入导出、导出 `.sicv`（可拷回手机）、本地备份（自动备份间隔可调 + 保留 10 份）、WebDAV 同步（手动 / 自动 / 拉取 + 四种冲突策略）、附件（≤10 MB 加密存储）、设置（主题 / 自动锁定 / 同步参数等 5 组）。
+- **功能**：密码库管理（建库 / 条目 / 标签 / 收藏 / 归档 / 回收站）、条目编辑（字段增删改与上下移、备注内联与位置调整、生成密码回填、图标更换、保存并新建、标题空校验）、复制敏感内容 30 秒自动清空、URL 一键打开（opener）、密码生成器、强度与安全检查（HIBP）、CSV / SafeInCloud XML / JSON 导入导出、导出 `.sicv`（可拷回手机）、本地备份（自动备份间隔可调 + 保留 10 份）、WebDAV 同步（手动 / 自动 / 拉取 + 四种冲突策略）、附件（≤10 MB 加密存储）、设置（主题 / 自动锁定 / 同步参数等 5 组）。
 - **字节兼容**：`interop/` 用 Android core 生成夹具做双向逐字节比对（T1 通过）；格式规格见 `docs/core-spec.md`。
 - **测试**：86 个（81 单元 + 3 命令层 E2E + 1 WebDAV 双设备同步 E2E〔内嵌 mock 服务器，走真实 HTTP〕+ 1 mock 冒烟），另有 1 个实网 HIBP 测试默认跳过（手动 `cargo test -- --ignored`）。**全绿是底线**。
 - **安全**：`settings.json` 敏感字段 Windows DPAPI 加密落盘（`dpapi:` 前缀，见 `sp/dpapi.rs`）；主密码仅存内存；CSP 收紧；保险库 AES-GCM + PBKDF2 210k 与手机端同参。
