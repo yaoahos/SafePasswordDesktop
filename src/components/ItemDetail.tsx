@@ -245,6 +245,38 @@ export function ItemDetail({
     const target = resolvedUrl.includes("://") ? resolvedUrl : `http://${resolvedUrl}`;
     void openUrl(target).catch(() => notify("无法打开网址", "error"));
   };
+  /** 对齐手机端 ItemEditScreen.kt:276-280 备注插入位（<0 → 尾部，越界钳到 [0,size]） */
+  const notesIndex =
+    draft.notesPosition < 0 ? draft.fields.length : Math.min(Math.max(draft.notesPosition, 0), draft.fields.length);
+  const hasNotes = draft.notes.trim().length > 0;
+  /** 渲染序列：字段按位插入备注（cursor 语义镜像 Kotlin repeat 循环，见 ItemEditScreen.kt:283-327） */
+  const rowSeq = (() => {
+    const seq: Array<number | "notes"> = [];
+    let cursor = 0;
+    for (let p = 0; p <= draft.fields.length; p++) {
+      if (p === notesIndex) {
+        if (hasNotes) seq.push("notes");
+      } else {
+        seq.push(cursor++);
+      }
+    }
+    return seq;
+  })();
+  /** 字段相邻交换（对齐手机端 EditorFieldBox onMoveUp/onMoveDown） */
+  const swapField = (index: number, delta: number) => {
+    const to = index + delta;
+    if (to < 0 || to >= draft.fields.length) return;
+    const next = [...draft.fields];
+    const tmp = next[index];
+    next[index] = next[to];
+    next[to] = tmp;
+    patch({ fields: next });
+  };
+  const openNotesMeta = () => {
+    setFLabel(draft.notesLabel || "备注");
+    setFType(draft.notesType);
+    setFieldDlg({ mode: "notes" });
+  };
 
   return (
     <div className="detail">
@@ -310,8 +342,59 @@ export function ItemDetail({
             </button>
           )}
         </div>
-        {draft.fields.length === 0 && <div className="muted small">无字段，可在下方备注中记录</div>}
-        {draft.fields.map((f) => {
+        {draft.fields.length === 0 && !hasNotes && (
+          <div className="muted small">无字段，可在下方备注中记录</div>
+        )}
+        {rowSeq.map((row) => {
+          if (row === "notes") {
+            return (
+              <div className="field-row" key="notes-inline">
+                <div className="field-label" title={draft.notesLabel}>
+                  {draft.notesLabel || "备注"}
+                </div>
+                <textarea
+                  className="input field-value"
+                  rows={2}
+                  value={draft.notes}
+                  disabled={trashed}
+                  onChange={(e) => patch({ notes: e.target.value })}
+                />
+                {!trashed && (
+                  <>
+                    <button
+                      className="icon-btn"
+                      title="上移"
+                      disabled={notesIndex <= 0}
+                      onClick={() => patch({ notesPosition: notesIndex - 1 })}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      className="icon-btn"
+                      title="下移"
+                      disabled={notesIndex >= draft.fields.length}
+                      onClick={() => patch({ notesPosition: notesIndex + 1 })}
+                    >
+                      ↓
+                    </button>
+                    <button className="icon-btn" title="编辑字段" onClick={openNotesMeta}>
+                      ✎
+                    </button>
+                    <button
+                      className="icon-btn"
+                      title="删除备注"
+                      onClick={() =>
+                        patch({ notes: "", notesLabel: "备注", notesType: "MULTILINE", notesPosition: -1 })
+                      }
+                    >
+                      🗑
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          }
+          const f = draft.fields[row];
           const masked = isMaskedField(f.type, f.sensitive) && !shown[f.id];
           return (
             <div className="field-row" key={f.id}>
@@ -358,6 +441,22 @@ export function ItemDetail({
               </button>
               {!trashed && (
                 <>
+                  <button
+                    className="icon-btn"
+                    title="上移"
+                    disabled={row === 0}
+                    onClick={() => swapField(row, -1)}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    className="icon-btn"
+                    title="下移"
+                    disabled={row === draft.fields.length - 1}
+                    onClick={() => swapField(row, 1)}
+                  >
+                    ↓
+                  </button>
                   <button className="icon-btn" title="生成密码" onClick={() => setGenFieldId(f.id)}>
                     🎲
                   </button>
@@ -411,6 +510,7 @@ export function ItemDetail({
         )}
       </div>
 
+      {!hasNotes && (
       <div className="card">
         <div className="row" style={{ alignItems: "center", gap: 8 }}>
           <div className="card-title grow" style={{ marginBottom: 0 }}>
@@ -420,11 +520,7 @@ export function ItemDetail({
             <button
               className="icon-btn"
               title="编辑字段"
-              onClick={() => {
-                setFLabel(draft.notesLabel || "备注");
-                setFType(draft.notesType);
-                setFieldDlg({ mode: "notes" });
-              }}
+              onClick={openNotesMeta}
             >
               ✎
             </button>
@@ -442,6 +538,7 @@ export function ItemDetail({
           />
         )}
       </div>
+      )}
 
       <div className="card">
         <div className="card-title">标签</div>
