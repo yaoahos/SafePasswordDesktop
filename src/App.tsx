@@ -528,7 +528,7 @@ export default function App() {
           )}
         </div>
 
-      {dialog === "GENERATOR" && <GeneratorDialog ctx={ctx} onClose={closeDialog} />}
+      {dialog === "GENERATOR" && <GeneratorDialog notify={ctx.notify} onClose={closeDialog} />}
       {dialog === "SECURITY" && <SecurityDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "WEBDAV" && <WebDavDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "THEME" && <ThemeDialog ctx={ctx} onClose={closeDialog} />}

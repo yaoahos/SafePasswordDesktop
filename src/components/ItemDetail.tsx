@@ -3,6 +3,7 @@ import type { AttachmentRef, FieldType, Label, Vault, VaultItem } from "../types
 import { attachmentAdd, attachmentRead, attachmentRemove } from "../api";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Dialog } from "./Dialog";
+import { GeneratorDialog } from "../dialogs/GeneratorDialog";
 import {
   MASK,
   arrayBufferToBase64,
@@ -68,10 +69,12 @@ export function ItemDetail({
   const [draft, setDraft] = useState<VaultItem>(item);
   const [shown, setShown] = useState<Record<string, boolean>>({});
   const [dirty, setDirty] = useState(false);
-  /** 字段添加/编辑弹窗（对齐手机端 FieldDialog） */
-  const [fieldDlg, setFieldDlg] = useState<null | { mode: "add" } | { mode: "edit"; id: string }>(null);
+  /** 字段添加/编辑弹窗（对齐手机端 FieldDialog；notes=备注元数据编辑） */
+  const [fieldDlg, setFieldDlg] = useState<null | { mode: "add" } | { mode: "edit"; id: string } | { mode: "notes" }>(null);
   const [fLabel, setFLabel] = useState("");
   const [fType, setFType] = useState<FieldType>("TEXT");
+  /** 字段行内生成密码的目标字段（对齐手机端 generatorTarget） */
+  const [genFieldId, setGenFieldId] = useState<string | null>(null);
 
   useEffect(() => {
     setDraft(item);
@@ -103,6 +106,7 @@ export function ItemDetail({
   };
 
   const fileRef = useRef<HTMLInputElement>(null);
+  const iconRef = useRef<HTMLInputElement>(null);
 
   const b64ToBytes = (b64: string) => {
     const bin = atob(b64);
@@ -159,6 +163,46 @@ export function ItemDetail({
     }
   };
 
+  /** 对齐手机端 encodeIcon（ItemEditScreen.kt:1020）：正方形、≤256×256、重编码为 PNG 裸 base64 */
+  const pickIcon = (f: File) => {
+    const url = URL.createObjectURL(f);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      if (!w || !h) {
+        notify("图片尺寸无效", "error");
+        return;
+      }
+      if (w !== h) {
+        notify("图片必须为正方形（宽高像素一致）", "error");
+        return;
+      }
+      if (w > 256) {
+        notify("图片尺寸不能超过 256×256 像素", "error");
+        return;
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const c2d = canvas.getContext("2d");
+      if (!c2d) {
+        notify("无法压缩图片", "error");
+        return;
+      }
+      c2d.drawImage(img, 0, 0);
+      const dataUrl = canvas.toDataURL("image/png");
+      patch({ iconKey: "custom", iconData: dataUrl.slice(dataUrl.indexOf(",") + 1) });
+      notify("已更新图标", "success");
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      notify("无法读取图片", "error");
+    };
+    img.src = url;
+  };
+
   const icon = itemIcon(draft);
   const sub = itemSubtitle(draft);
   const trashed = draft.status === "TRASHED";
@@ -187,9 +231,27 @@ export function ItemDetail({
   return (
     <div className="detail">
       <div className="detail-header">
-        <span className={`detail-icon${icon.kind === "emoji" ? " emoji" : ""}`}>
+        <span
+          className={`detail-icon${icon.kind === "emoji" ? " emoji" : ""}`}
+          title={trashed ? undefined : "更换图标"}
+          style={trashed ? undefined : { cursor: "pointer" }}
+          onClick={() => {
+            if (!trashed) iconRef.current?.click();
+          }}
+        >
           {icon.kind === "img" ? <img src={icon.src} alt="" /> : icon.kind === "char" ? icon.char : icon.emoji}
         </span>
+        <input
+          ref={iconRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) pickIcon(f);
+            e.target.value = "";
+          }}
+        />
         <div className="grow">
           <input
             className="input"
@@ -214,7 +276,9 @@ export function ItemDetail({
 
       <div className="card">
         <div className="row" style={{ alignItems: "center", gap: 8 }}>
-          <div className="grow">字段</div>
+          <div className="card-title grow" style={{ marginBottom: 0 }}>
+            字段
+          </div>
           {!trashed && (
             <button
               className="btn sm"
@@ -276,6 +340,9 @@ export function ItemDetail({
               </button>
               {!trashed && (
                 <>
+                  <button className="icon-btn" title="生成密码" onClick={() => setGenFieldId(f.id)}>
+                    🎲
+                  </button>
                   <button
                     className="icon-btn"
                     title="编辑字段"
@@ -327,7 +394,24 @@ export function ItemDetail({
       </div>
 
       <div className="card">
-        <div className="card-title">{draft.notesLabel || "备注"}</div>
+        <div className="row" style={{ alignItems: "center", gap: 8 }}>
+          <div className="card-title grow" style={{ marginBottom: 0 }}>
+            {draft.notesLabel || "备注"}
+          </div>
+          {!trashed && (
+            <button
+              className="icon-btn"
+              title="编辑字段"
+              onClick={() => {
+                setFLabel(draft.notesLabel || "备注");
+                setFType(draft.notesType);
+                setFieldDlg({ mode: "notes" });
+              }}
+            >
+              ✎
+            </button>
+          )}
+        </div>
         {trashed ? (
           <div className="notes-text">{draft.notes || "—"}</div>
         ) : (
@@ -479,6 +563,8 @@ export function ItemDetail({
                   patch({
                     fields: [...draft.fields, { id: newId(), label, value: "", type: fType, sensitive }],
                   });
+                } else if (fieldDlg.mode === "notes") {
+                  patch({ notesLabel: label, notesType: fType });
                 } else {
                   patchField(fieldDlg.id, { label, type: fType, sensitive });
                 }
@@ -489,6 +575,13 @@ export function ItemDetail({
             </button>
           </div>
         </Dialog>
+      )}
+      {genFieldId && (
+        <GeneratorDialog
+          notify={notify}
+          onClose={() => setGenFieldId(null)}
+          onUse={(pw) => patchField(genFieldId, { value: pw })}
+        />
       )}
       <div className="spacer-16" />
     </div>
