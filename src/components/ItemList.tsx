@@ -34,27 +34,29 @@ export function ItemList({
   return (
     <div className="item-list">
       <div className="item-list-top">
-        <div className="row list-ctl-row">
-          <div className="grow" style={{ fontWeight: 600 }}>
+        <div className="list-head">
+          <div className="list-title" title={sectionTitle}>
             {sectionTitle}
           </div>
-          <select
-            className="input list-ctl"
-            value={sortMode}
-            title="排序方式"
-            onChange={(e) => onChangeSort(e.target.value as SortMode)}
-          >
-            <option value="CREATED">最近创建</option>
-            <option value="UPDATED">最近更新</option>
-            <option value="TITLE">标题</option>
-          </select>
-          <button className="btn list-ctl" title="切换升 / 降序" onClick={() => onChangeSort(sortMode)}>
-            <Icon name={sortAsc ? "arrow-up" : "arrow-down"} size={16} className="bold-ico" />
-          </button>
-          <button className="btn primary list-ctl" onClick={onNew}>
-            <Icon name="plus" size={16} />
-            新建
-          </button>
+          <div className="list-ctls">
+            <select
+              className="input list-ctl list-ctl-sel"
+              value={sortMode}
+              title="排序方式"
+              onChange={(e) => onChangeSort(e.target.value as SortMode)}
+            >
+              <option value="CREATED">最近创建</option>
+              <option value="UPDATED">最近更新</option>
+              <option value="TITLE">标题</option>
+            </select>
+            <button className="btn list-ctl" title="切换升 / 降序" onClick={() => onChangeSort(sortMode)}>
+              <Icon name={sortAsc ? "arrow-up" : "arrow-down"} size={16} className="bold-ico" />
+            </button>
+            <button className="btn primary list-ctl" onClick={onNew}>
+              <Icon name="plus" size={16} />
+              新建
+            </button>
+          </div>
         </div>
         <div className="input-wrap">
           <span className="ico">

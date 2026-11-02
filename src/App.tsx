@@ -49,7 +49,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 };
 
 const SECTION_TITLES: Record<SectionFilter, string> = {
-  ALL: "全部条目",
+  ALL: "全部",
   FAVORITES: "收藏",
   TRASH: "回收站",
 };
@@ -469,7 +469,7 @@ export default function App() {
   );
 
   const sectionTitle = labelFilter
-    ? `标签：${vault?.labels.find((l) => l.id === labelFilter)?.name ?? ""}`
+    ? (vault?.labels.find((l) => l.id === labelFilter)?.name ?? "")
     : SECTION_TITLES[section];
 
   // ------------------------------------------------------------ 上下文

@@ -1574,6 +1574,32 @@ select.input {
   gap: 8px;
 }
 
+/* 列表头：标题 + 控件一行不换行（标题可省略号，控件固定宽度） */
+.list-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.list-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.list-ctls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
 .list-ctl {
   height: 34px;
   min-width: 34px;
@@ -1583,6 +1609,13 @@ select.input {
   align-items: center;
   justify-content: center;
   gap: 6px;
+  flex: none;
+  white-space: nowrap;
+}
+
+.list-ctl-sel {
+  width: 118px;
+  padding: 0 8px;
 }
 
 .bold-ico {
