@@ -3,7 +3,7 @@ import type { VaultMeta } from "../types";
 import { evaluateStrength } from "../api";
 import { arrayBufferToBase64, formatTime } from "../utils";
 import { Icon } from "./icons";
-import { WindowControls } from "./WindowControls";
+import { AppTitleBar } from "./TopBar";
 
 type Mode = "empty" | "select" | "create" | "restore";
 
@@ -135,10 +135,9 @@ export function AuthScreens({
 
   return (
     <div className="auth-wrap">
-      <div className="auth-topbar" data-tauri-drag-region="true">
-        <WindowControls />
-      </div>
-      <div className="auth-panel">
+      <AppTitleBar />
+      <div className="auth-center">
+        <div className="auth-panel">
         <div className="auth-hero">
           <img className="auth-appicon" src="/icon.png" alt="" />
           <div className="auth-appname">SafePassword</div>
@@ -325,6 +324,7 @@ export function AuthScreens({
         )}
 
         {error && <div className="err-text">{error}</div>}
+        </div>
       </div>
     </div>
   );

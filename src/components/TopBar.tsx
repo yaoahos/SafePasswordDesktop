@@ -23,16 +23,27 @@ export const TOP_ACTIONS: { key: TopAction; label: string; icon: IconName; color
   { key: "LOCK", label: "锁定", icon: "lock", color: "#C2185B" },
 ];
 
-/** 顶栏 = 自绘标题栏：左侧软件名 + 版本号，动作紧随其后靠左，右侧窗口按钮 */
+/** 应用标题栏（标准桌面软件样式）：左侧图标 + 应用名 + 版本，右侧窗口按钮 */
+export function AppTitleBar() {
+  return (
+    <div className="titlebar" data-tauri-drag-region="true">
+      <div className="titlebar-brand" data-tauri-drag-region="true">
+        <img className="titlebar-logo" src="/icon.png" alt="" draggable={false} />
+        <span className="titlebar-title">SafePassword</span>
+        <span className="titlebar-version">v{APP_VERSION}</span>
+      </div>
+      <div className="titlebar-grow" data-tauri-drag-region="true" />
+      <WindowControls />
+    </div>
+  );
+}
+
+/** 顶栏 = 标题栏（上）+ 工具栏（下，动作按钮靠左） */
 export function TopBar({ onAction }: { onAction: (a: TopAction) => void }) {
   return (
-    <div className="topbar" data-tauri-drag-region="true">
-      <div className="topbar-brand" data-tauri-drag-region="true">
-        <img className="topbar-logo" src="/icon.png" alt="" draggable={false} />
-        <span className="topbar-title">SafePassword</span>
-        <span className="topbar-version">v{APP_VERSION}</span>
-      </div>
-      <div className="topbar-actions" data-tauri-drag-region="false">
+    <div className="topbar">
+      <AppTitleBar />
+      <div className="toolbar">
         {TOP_ACTIONS.map((a) => (
           <button key={a.key} className="topbar-btn" onClick={() => onAction(a.key)} title={a.label}>
             <span className="topbar-icon" style={{ color: a.color }}>
@@ -42,8 +53,6 @@ export function TopBar({ onAction }: { onAction: (a: TopAction) => void }) {
           </button>
         ))}
       </div>
-      <div className="topbar-grow" data-tauri-drag-region="true" />
-      <WindowControls />
     </div>
   );
 }
