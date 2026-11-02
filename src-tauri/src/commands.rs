@@ -17,6 +17,7 @@ use crate::sp::attachment::AttachmentStore;
 use crate::sp::backup::{BackupInfo, BackupManager};
 use crate::sp::codec;
 use crate::sp::container::VaultContainer;
+use crate::sp::dpapi;
 use crate::sp::fsutil::write_atomic;
 use crate::sp::generator::{self, GeneratorOptions};
 use crate::sp::hibp::HibpClient;
@@ -109,10 +110,13 @@ impl AppState {
         fs::create_dir_all(data_root).map_err(err)?;
         let store = VaultStore::new(data_root).map_err(err)?;
         let settings_path = data_root.join("settings.json");
-        let settings = match fs::read_to_string(&settings_path) {
+        let mut settings: AppSettings = match fs::read_to_string(&settings_path) {
             Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
             Err(_) => AppSettings::default(),
         };
+        // 敏感字段落盘是 DPAPI 密文，读入时解码为内存明文（旧版明文无前缀原样通过）
+        settings.hibp_api_key = dpapi::decode_secret(&settings.hibp_api_key);
+        settings.webdav.password = dpapi::decode_secret(&settings.webdav.password);
         Ok(AppState {
             inner: Mutex::new(AppStateInner {
                 data_root: data_root.clone(),
@@ -129,7 +133,11 @@ impl AppState {
 
 impl AppStateInner {
     fn persist_settings(&self) -> CmdResult<()> {
-        let text = serde_json::to_string_pretty(&self.settings).map_err(err)?;
+        // 敏感字段以 DPAPI 密文落盘，内存中保持明文
+        let mut s = self.settings.clone();
+        s.hibp_api_key = dpapi::encode_secret(&s.hibp_api_key);
+        s.webdav.password = dpapi::encode_secret(&s.webdav.password);
+        let text = serde_json::to_string_pretty(&s).map_err(err)?;
         write_atomic(&self.settings_path, text.as_bytes()).map_err(err)
     }
 
