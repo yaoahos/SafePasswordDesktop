@@ -1601,8 +1601,9 @@ select.input {
 .list-title {
   flex: 1 1 auto;
   min-width: 0;
-  font-weight: 600;
-  font-size: 14px;
+  font-weight: 700;
+  font-size: 16.5px;
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1644,6 +1645,59 @@ select.input {
   font-size: 12px;
   color: var(--text-2);
   margin-right: 10px;
+}
+
+/* 设置页分区（云端同步 / 本地备份）：卡片化，区域边界清晰 */
+.settings-group {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px 16px;
+  margin-bottom: 14px;
+  background: var(--surface);
+}
+
+.settings-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.settings-group-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary);
+  flex: none;
+}
+
+/* 细滚动条：对话框与列表不再出现粗重系统滚动条 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
 }
 
 .chip-dot .dot {

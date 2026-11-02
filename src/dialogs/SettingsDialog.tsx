@@ -244,7 +244,11 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
 
   return (
     <>
-      <div className="info-card">
+      <div className="settings-group">
+        <div className="settings-group-title">
+          <span className="settings-group-dot" /> 云端同步（WebDAV）
+        </div>
+        <div className="info-card">
         <span className="info-ico">☁</span>
         <div>
           <div className="setting-title">只同步加密文件</div>
@@ -346,9 +350,15 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
         </div>
       )}
 
-      <div className="hr" />
-      <div className="section-cap">本地备份</div>
-      <div className="form-row">
+      </div>
+
+      <div className="spacer-10" />
+
+      <div className="settings-group">
+        <div className="settings-group-title">
+          <span className="settings-group-dot" /> 本地备份
+        </div>
+        <div className="form-row">
         <label className="field-caption">自动备份</label>
         <div className="seg">
           {[
@@ -437,6 +447,7 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
           )}
         </div>
       ))}
+      </div>
       {msg && <div className={msg.ok ? "ok-text" : "err-text"}>{msg.text}</div>}
     </>
   );
