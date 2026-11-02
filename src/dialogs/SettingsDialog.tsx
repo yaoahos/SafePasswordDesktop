@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Dialog } from "../components/Dialog";
+import { Icon } from "../components/icons";
 import {
   backupCreate,
   backupDelete,
@@ -13,15 +14,17 @@ import {
   exportVaultJson,
   exportVaultSpv,
   importCsv,
+  importJsonItems,
   importXml,
   importVaultBytes,
-  importVaultJson,
   renameVault,
   saveExport,
+  webdavGetVault,
+  webdavListCloud,
   webdavPull,
   webdavSync,
 } from "../api";
-import type { BackupInfo, WebDavConfig } from "../types";
+import type { BackupInfo, CloudVaultEntry, VaultMeta, WebDavConfig } from "../types";
 import { arrayBufferToBase64, exportStamp, formatSize, formatTime } from "../utils";
 import type { AppCtx } from "../app-context";
 
@@ -49,7 +52,7 @@ export function SettingsDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => v
       <div className="spacer-10" />
       {tab === "security" && <SecurityTab ctx={ctx} />}
       {tab === "sync" && <SyncTab ctx={ctx} />}
-      {tab === "vault" && <VaultTab ctx={ctx} onClose={onClose} />}
+      {tab === "vault" && <VaultTab ctx={ctx} />}
       {tab === "display" && <DisplayTab ctx={ctx} />}
       {tab === "transfer" && <TransferTab ctx={ctx} />}
     </Dialog>
@@ -336,6 +339,14 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
       <div className="setting-sub" style={{ marginTop: 6 }}>
         坚果云用户请使用应用密码；远端建议使用 HTTPS。
       </div>
+      {msg && (
+        <div
+          className="setting-sub"
+          style={{ marginTop: 6, color: msg.ok ? "var(--primary)" : "var(--danger)", fontWeight: 600 }}
+        >
+          {msg.text}
+        </div>
+      )}
 
       {confirmPull && (
         <div className="confirm-box">
@@ -449,25 +460,31 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
         </div>
       ))}
       </div>
-      {msg && <div className={msg.ok ? "ok-text" : "err-text"}>{msg.text}</div>}
     </>
   );
 }
 
 // ---------------------------------------------------------------- 密码库（当前库用主题色标识，列表改下拉）
 
-function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
+function VaultTab({ ctx }: { ctx: AppCtx }) {
   const vault = ctx.vault;
+  const cfg = ctx.settings.webdav;
   const [newName, setNewName] = useState("");
   const [newPw, setNewPw] = useState("");
+  const [renameTo, setRenameTo] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [confirmDel, setConfirmDel] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [delId, setDelId] = useState<string | null>(null);
+  const [cloud, setCloud] = useState<CloudVaultEntry[] | null>(null);
+  const [cloudErr, setCloudErr] = useState<string | null>(null);
+  const [dlKey, setDlKey] = useState<string | null>(null);
+  const [dlPw, setDlPw] = useState("");
 
-  if (!vault) return null;
+  const localNames = ctx.vaults.map((v) => v.name);
 
   const rename = async () => {
-    const trimmed = newName.trim();
+    if (!vault) return;
+    const trimmed = renameTo.trim();
     if (!trimmed) {
       setMsg({ ok: false, text: "请输入新名称" });
       return;
@@ -475,8 +492,8 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
     try {
       await renameVault(vault.id, trimmed);
       await ctx.refreshFromBackend();
+      setRenameTo("");
       setMsg({ ok: true, text: "密码库已改名" });
-      setNewName("");
     } catch (e) {
       setMsg({ ok: false, text: String(e) });
     }
@@ -487,122 +504,238 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
       setMsg({ ok: false, text: "请填写名称和至少 8 位的主密码" });
       return;
     }
-    setBusy(true);
+    setBusy("create");
     try {
       await createVault(newName.trim(), newPw);
       await ctx.refreshFromBackend();
-      setMsg({ ok: true, text: "已创建并切换到新密码库" });
       setNewName("");
       setNewPw("");
+      setMsg({ ok: true, text: "已创建并切换到新密码库" });
     } catch (e) {
       setMsg({ ok: false, text: String(e) });
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
-  const remove = async () => {
-    setBusy(true);
+  const removeLocal = async (m: VaultMeta) => {
+    setBusy(`del-${m.id}`);
     try {
-      await deleteVault(vault.id);
-      setMsg({ ok: true, text: "密码库已删除" });
-      ctx.gotoSelect();
+      await deleteVault(m.id);
+      const wasCurrent = vault?.id === m.id;
+      setDelId(null);
+      setMsg({ ok: true, text: `已删除「${m.name}」` });
+      if (wasCurrent) {
+        ctx.gotoSelect();
+      } else {
+        await ctx.refreshFromBackend();
+      }
     } catch (e) {
       setMsg({ ok: false, text: String(e) });
     } finally {
-      setBusy(false);
-      setConfirmDel(false);
+      setBusy(null);
+    }
+  };
+
+  const refreshCloud = async () => {
+    if (!cfg.baseUrl.trim()) {
+      setCloudErr("请先在「同步与备份」里填写 WebDAV 服务器地址");
+      return;
+    }
+    setBusy("cloud");
+    setCloudErr(null);
+    try {
+      setCloud(await webdavListCloud(cfg));
+    } catch (e) {
+      setCloudErr(String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const downloadCloud = async (c: CloudVaultEntry) => {
+    if (dlPw.length < 8) {
+      setMsg({ ok: false, text: "请输入该密码库的主密码（至少 8 位）" });
+      return;
+    }
+    setBusy(`dl-${c.key}`);
+    try {
+      const b64 = await webdavGetVault(cfg, c.key);
+      if (!b64) throw new Error("云端没有找到该密码库文件");
+      const meta = await importVaultBytes(b64, dlPw, c.name);
+      await ctx.refreshFromBackend();
+      setDlKey(null);
+      setDlPw("");
+      setMsg({ ok: true, text: `已下载并切换到「${meta.name}」` });
+    } catch (e) {
+      setMsg({ ok: false, text: String(e) });
+    } finally {
+      setBusy(null);
     }
   };
 
   return (
     <>
-      <div className="section-cap">密码库</div>
-      <select
-        className="input"
-        value={vault.id}
-        onChange={(e) => {
-          if (e.target.value === vault.id) return;
-          ctx.gotoSelect();
-          onClose();
-        }}
-      >
-        {ctx.vaults.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.id === vault.id ? `${v.name}（当前）` : v.name}
-          </option>
-        ))}
-      </select>
-      <div className="vault-current" style={{ marginTop: 8 }}>
-        <span className="vault-dot" />
-        <span className="grow">
-          <b style={{ color: "var(--primary)" }}>{vault.name}</b>
-          <div className="muted small">
-            条目 {vault.items.length} 个 · 标签 {vault.labels.length} 个 · 上次打开 {formatTime(vault.createdAt)}
-          </div>
-        </span>
-      </div>
-      <div className="setting-sub" style={{ marginTop: 6 }}>
-        每个密码库有独立的主密码和文件。切换后请在解锁页输入该库主密码。
-      </div>
-
-      <div className="hr" />
-      <div className="section-cap">改名</div>
-      <div className="row">
-        <input
-          className="input grow"
-          placeholder="新名称"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-        />
-        <button className="btn sm" onClick={() => void rename()}>
-          重命名
-        </button>
-      </div>
-
-      <div className="hr" />
-      <div className="section-cap">新建密码库</div>
-      <div className="form-row">
-        <label className="field-caption">名称</label>
-        <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} />
-      </div>
-      <div className="form-row">
-        <label className="field-caption">主密码（至少 8 位）</label>
-        <input className="input" type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
-      </div>
-      <button className="btn primary tall block" disabled={busy} onClick={() => void create()}>
-        新建并切换
-      </button>
-
-      <div className="hr" />
-      <div className="section-cap" style={{ color: "var(--danger)" }}>
-        删除密码库
-      </div>
-      {!confirmDel && (
-        <button className="btn sm danger" disabled={busy} onClick={() => setConfirmDel(true)}>
-          删除当前密码库
-        </button>
-      )}
-      {confirmDel && (
-        <div className="confirm-box">
-          <div>
-            将删除「{vault.name}」及其本地文件，无法撤销。确定继续？
-          </div>
-          <div className="row" style={{ justifyContent: "flex-end", marginTop: 10 }}>
-            <button className="btn sm" onClick={() => setConfirmDel(false)}>
-              取消
-            </button>
-            <button className="btn sm danger" disabled={busy} onClick={() => void remove()}>
-              删除
-            </button>
-          </div>
+      <div className="settings-group">
+        <div className="settings-group-title">
+          <span className="settings-group-dot" /> 本地密码库
         </div>
+        <div className="setting-sub" style={{ marginBottom: 8 }}>
+          每个密码库有独立的主密码和文件；切换后需要在解锁页输入该库主密码。
+        </div>
+        {ctx.vaults.map((m) => {
+          const current = m.id === vault?.id;
+          return (
+            <div className="vault-row" key={m.id}>
+              <div className="grow">
+                <div className="vault-row-name">
+                  {current && <span className="vault-dot" />}
+                  <b style={current ? { color: "var(--primary)" } : undefined}>{m.name}</b>
+                  {current && <span className="vault-badge">当前</span>}
+                </div>
+                <div className="muted small">
+                  上次打开 {m.lastOpenedAt > 0 ? formatTime(m.lastOpenedAt) : "从未"}
+                </div>
+              </div>
+              {!current && (
+                <button
+                  className="btn sm"
+                  onClick={() => {
+                    ctx.gotoSelect();
+                  }}
+                >
+                  切换
+                </button>
+              )}
+              {delId === m.id ? (
+                <span className="row" style={{ gap: 6 }}>
+                  <button
+                    className="btn sm danger"
+                    disabled={busy !== null}
+                    onClick={() => void removeLocal(m)}
+                  >
+                    确认删除
+                  </button>
+                  <button className="btn sm" onClick={() => setDelId(null)}>
+                    取消
+                  </button>
+                </span>
+              ) : (
+                <button className="icon-btn" title="删除" onClick={() => setDelId(m.id)}>
+                  <Icon name="trash" size={16} />
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="spacer-10" />
+      <div className="settings-group">
+        <div className="settings-group-title">
+          <span className="settings-group-dot" /> 云端密码库
+          <button className="btn sm" style={{ marginLeft: "auto" }} disabled={busy !== null} onClick={() => void refreshCloud()}>
+            {busy === "cloud" ? "读取中…" : "刷新"}
+          </button>
+        </div>
+        <div className="setting-sub" style={{ marginBottom: 8 }}>
+          云端只保存密文；下载并切换时需要输入该库的主密码。
+        </div>
+        {cloudErr && <div className="err-text">{cloudErr}</div>}
+        {cloud === null && !cloudErr && (
+          <div className="muted small">点击「刷新」读取 WebDAV 上的密码库清单。</div>
+        )}
+        {cloud?.length === 0 && <div className="muted small">云端还没有密码库。</div>}
+        {cloud?.map((c) => {
+          const local = localNames.includes(c.name);
+          return (
+            <div className="vault-row" key={c.key}>
+              <div className="grow">
+                <div className="vault-row-name">
+                  <Icon name="cloud" size={15} />
+                  <b>{c.name}</b>
+                  {local && <span className="vault-badge">已在本机</span>}
+                </div>
+                <div className="muted small">
+                  {formatSize(c.size)} · 更新于 {formatTime(c.updatedAt)}
+                </div>
+              </div>
+              {!local && dlKey !== c.key && (
+                <button className="btn sm" onClick={() => setDlKey(c.key)}>
+                  下载并切换
+                </button>
+              )}
+              {dlKey === c.key && (
+                <span className="row" style={{ gap: 6 }}>
+                  <input
+                    className="input"
+                    type="password"
+                    style={{ width: 160, height: 32 }}
+                    placeholder="该库主密码"
+                    value={dlPw}
+                    onChange={(e) => setDlPw(e.target.value)}
+                  />
+                  <button
+                    className="btn sm primary"
+                    disabled={busy !== null}
+                    onClick={() => void downloadCloud(c)}
+                  >
+                    确认
+                  </button>
+                  <button className="btn sm" onClick={() => setDlKey(null)}>
+                    取消
+                  </button>
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="spacer-10" />
+      <div className="settings-group">
+        <div className="settings-group-title">
+          <span className="settings-group-dot" /> 新建密码库
+        </div>
+        <div className="form-row">
+          <label className="field-caption">名称</label>
+          <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} />
+        </div>
+        <div className="form-row">
+          <label className="field-caption">主密码（至少 8 位）</label>
+          <input className="input" type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
+        </div>
+        <button className="btn primary tall block" disabled={busy !== null} onClick={() => void create()}>
+          新建并切换
+        </button>
+      </div>
+
+      {vault && (
+        <>
+          <div className="spacer-10" />
+          <div className="settings-group">
+            <div className="settings-group-title">
+              <span className="settings-group-dot" /> 重命名当前库
+            </div>
+            <div className="row">
+              <input
+                className="input grow"
+                placeholder="新名称"
+                value={renameTo}
+                onChange={(e) => setRenameTo(e.target.value)}
+              />
+              <button className="btn sm" onClick={() => void rename()}>
+                重命名
+              </button>
+            </div>
+          </div>
+        </>
       )}
+
       {msg && <div className={msg.ok ? "ok-text" : "err-text"}>{msg.text}</div>}
     </>
   );
 }
-
 // ---------------------------------------------------------------- 显示与搜索（主题已移到顶部“主题”页）
 
 function DisplayTab({ ctx }: { ctx: AppCtx }) {
@@ -645,8 +778,6 @@ function DisplayTab({ ctx }: { ctx: AppCtx }) {
 // ---------------------------------------------------------------- 导入与导出（只允许文件选择，不提供文本输入）
 
 function TransferTab({ ctx }: { ctx: AppCtx }) {
-  const [jsonPw, setJsonPw] = useState("");
-  const [jsonName, setJsonName] = useState("");
   const [sicvPw, setSicvPw] = useState("");
   const [sicvName, setSicvName] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -680,7 +811,7 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
       setMsg(saved ? { ok: true, text: `已保存到 ${saved}` } : { ok: true, text: "已取消保存" });
     });
 
-  const doExportSicv = () =>
+  const doExportSpv = () =>
     void run("exp-spv", async () => {
       const b64 = await exportVaultSpv();
       const saved = await saveExport(exportName("spv"), b64);
@@ -700,24 +831,25 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
         await ctx.refreshFromBackend();
         setMsg({ ok: true, text: `成功导入 ${n} 条（XML）` });
       } else if (ext === "json") {
-        if (!jsonPw) throw new Error("导入 JSON 需要先填写新库主密码");
-        const meta = await importVaultJson(text, jsonPw, jsonName.trim() || "导入的密码库");
+        const n = await importJsonItems(text);
         await ctx.refreshFromBackend();
-        setJsonPw("");
-        setJsonName("");
-        setMsg({ ok: true, text: `已导入密码库「${meta.name}」并切换过去` });
+        setMsg({ ok: true, text: `成功导入 ${n} 条（JSON）` });
       } else {
         throw new Error("不支持的文件类型（仅支持 .csv / .xml / .json）");
       }
     });
 
-  const importSicv = (f: File) =>
-    void run("imp-sicv", async () => {
+  const spvReady = sicvName.trim().length > 0 && sicvPw.length > 0;
+
+  const importSpv = (f: File) =>
+    void run("imp-spv", async () => {
+      if (!sicvName.trim()) throw new Error("请先填写库名称");
+      if (!sicvPw) throw new Error("请先填写主密码");
       const buf = await f.arrayBuffer();
       const meta = await importVaultBytes(
         arrayBufferToBase64(buf),
         sicvPw,
-        sicvName.trim() || f.name.replace(/\.(sicv|spv)$/i, "") || "导入的密码库",
+        sicvName.trim(),
       );
       await ctx.refreshFromBackend();
       setSicvPw("");
@@ -728,11 +860,11 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
   return (
     <>
       <div className="section-cap">导出</div>
-      <button className="btn primary tall block" disabled={busy !== null || !ctx.vault} onClick={doExportSicv}>
-        {busy === "exp-spv" ? "导出中…" : "导出加密备份（.spv，可拷回手机）"}
+      <button className="btn primary tall block" disabled={busy !== null || !ctx.vault} onClick={doExportSpv}>
+        {busy === "exp-spv" ? "导出中…" : "导出加密备份（.spv）"}
       </button>
       <div className="setting-sub" style={{ marginTop: 6 }}>
-        加密备份与手机端同格式，可直接放回手机或 WebDAV；下面的导出为明文格式，注意保管。
+        加密备份与手机端同一格式，可直接放回手机或通过 WebDAV 同步。
       </div>
       <div className="row" style={{ marginTop: 10, flexWrap: "wrap" }}>
         <button className="btn sm" disabled={busy !== null} onClick={() => doExport("csv")}>
@@ -742,27 +874,12 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
           导出 XML
         </button>
         <button className="btn sm" disabled={busy !== null} onClick={() => doExport("json")}>
-          导出明文 JSON（不安全）
+          导出 JSON
         </button>
       </div>
 
       <div className="hr" />
-      <div className="section-cap">导入条目（CSV / XML / 明文 JSON）</div>
-      <div className="row" style={{ marginBottom: 8 }}>
-        <input
-          className="input grow"
-          type="password"
-          placeholder="新库主密码（仅 JSON 导入需要）"
-          value={jsonPw}
-          onChange={(e) => setJsonPw(e.target.value)}
-        />
-        <input
-          className="input grow"
-          placeholder="库名称（默认：导入的密码库）"
-          value={jsonName}
-          onChange={(e) => setJsonName(e.target.value)}
-        />
-      </div>
+      <div className="section-cap">导入条目（CSV / XML / JSON）</div>
       <FilePicker
         label="选择文件导入…"
         accept=".csv,.xml,.json"
@@ -770,39 +887,45 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
         onFile={importTextFile}
       />
       <div className="setting-sub" style={{ marginTop: 6 }}>
-        CSV / XML 导入到当前密码库；JSON 会新建一个密码库并切换过去。
+        导入的条目会添加到当前密码库。
       </div>
 
       <div className="hr" />
-      <div className="section-cap">导入加密备份（.spv，兼容旧版 .sicv）</div>
-      <div className="row" style={{ marginBottom: 8 }}>
+      <div className="section-cap">导入加密备份（.spv）</div>
+      <div className="form-row">
+        <label className="field-caption">库名称</label>
         <input
-          className="input grow"
-          type="password"
-          placeholder="备份主密码"
-          value={sicvPw}
-          onChange={(e) => setSicvPw(e.target.value)}
-        />
-        <input
-          className="input grow"
-          placeholder="库名称（默认取文件名）"
+          className="input"
+          placeholder="导入后的密码库名称"
           value={sicvName}
           onChange={(e) => setSicvName(e.target.value)}
         />
       </div>
+      <div className="form-row">
+        <label className="field-caption">主密码</label>
+        <input
+          className="input"
+          type="password"
+          placeholder="该备份的主密码"
+          value={sicvPw}
+          onChange={(e) => setSicvPw(e.target.value)}
+        />
+      </div>
       <FilePicker
         label="选择加密备份文件…"
-        accept=".sicv,.spv"
-        disabled={busy !== null}
-        onFile={importSicv}
+        accept=".spv,.sicv"
+        disabled={busy !== null || !spvReady}
+        onFile={importSpv}
       />
+      <div className="setting-sub" style={{ marginTop: 6 }}>
+        {spvReady ? "选择备份文件后将导入并切换到该密码库。" : "请先填写库名称与主密码，再选择备份文件。"}
+      </div>
 
       {msg && <div className="ok-text">{msg.text}</div>}
       {err && <div className="err-text">{err}</div>}
     </>
   );
 }
-
 function FilePicker({
   label,
   accept,

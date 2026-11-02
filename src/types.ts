@@ -9,6 +9,14 @@ export interface VaultMeta {
   lastSyncedAt: number;
 }
 
+/** 云端密码库清单条目（对应 sp/cloud.rs CloudVaultEntry） */
+export interface CloudVaultEntry {
+  key: string;
+  name: string;
+  updatedAt: number;
+  size: number;
+}
+
 export interface Vault {
   schema: number;
   id: string;

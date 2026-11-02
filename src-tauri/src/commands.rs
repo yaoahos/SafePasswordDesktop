@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::sp::backup::{BackupInfo, BackupManager};
+use crate::sp::cloud::{CloudManifest, CloudVaultEntry};
 use crate::sp::codec;
 use crate::sp::container::VaultContainer;
 use crate::sp::dpapi;
@@ -415,7 +416,38 @@ pub fn import_vault_json(
     Ok(meta)
 }
 
-// ---------------------------------------------------------------- 生成器 / 强度 / 安全检查
+/// 导入明文 JSON 导出文件里的**条目**到当前密码库（对齐手机端「导入条目」，不新建库）。
+#[tauri::command]
+pub fn import_json_items(state: State<AppState>, json: String) -> CmdResult<u32> {
+    let vault = codec::from_json(&json).map_err(err)?;
+    if vault.items.is_empty() {
+        return Err("JSON 里没有可导入的条目".to_string());
+    }
+    let labels: Vec<(String, String)> = vault
+        .labels
+        .iter()
+        .map(|l| (l.id.clone(), l.name.clone()))
+        .collect();
+    let pairs: Vec<(VaultItem, Vec<String>)> = vault
+        .items
+        .into_iter()
+        .map(|it| {
+            let names = it
+                .label_ids
+                .iter()
+                .filter_map(|id| {
+                    labels
+                        .iter()
+                        .find(|(lid, _)| lid == id)
+                        .map(|(_, name)| name.clone())
+                })
+                .collect::<Vec<_>>();
+            (it, names)
+        })
+        .collect();
+    let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+    append_items(&mut inner, pairs)
+}
 
 #[tauri::command]
 pub fn generate_password(options: Option<GeneratorOptions>) -> String {
@@ -779,6 +811,27 @@ pub async fn webdav_test_connection(config: WebDavConfig) -> CmdResult<String> {
     let client = WebDavClient::new(config).map_err(err)?;
     client.test().await.map_err(err)?;
     Ok("连接成功".to_string())
+}
+
+/// 列出云端密码库（读取 WebDAV 上的清单 SafePassword-index.json）。
+#[tauri::command]
+pub async fn webdav_list_cloud(config: WebDavConfig) -> CmdResult<Vec<CloudVaultEntry>> {
+    let client = WebDavClient::new(config.clone()).map_err(err)?;
+    match client.get(&config.manifest_path()).await.map_err(err)? {
+        Some(bytes) => Ok(CloudManifest::parse(Some(&String::from_utf8_lossy(&bytes))).vaults),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// 下载指定云端密码库的密文（Base64），供前端用主密码导入并切换。
+#[tauri::command]
+pub async fn webdav_get_vault(config: WebDavConfig, key: String) -> CmdResult<Option<String>> {
+    let client = WebDavClient::new(config.clone()).map_err(err)?;
+    let bytes = client.get(&config.remote_path(&key)).await.map_err(err)?;
+    Ok(bytes.map(|b| {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(b)
+    }))
 }
 
 fn build_engine(inner: &AppStateInner, config: &WebDavConfig) -> CmdResult<SyncEngine> {
