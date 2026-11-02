@@ -218,3 +218,35 @@ fn export_and_util_commands() {
 
     let _ = fs::remove_dir_all(&root);
 }
+
+/// settings.json 敏感字段 DPAPI 落盘：内存明文、磁盘密文、重启回读一致。
+#[test]
+fn settings_secrets_are_dpapi_on_disk() {
+    let root = tmp_root("dpapi");
+    let app = mock_app(&root);
+
+    // 设置 WebDAV 密码 + HIBP key（内存里是明文）
+    let mut s = c::get_settings(app.state::<AppState>()).unwrap();
+    s.webdav.password = "明文口令🚀".to_string();
+    s.hibp_api_key = "hibp-key-123".to_string();
+    c::set_settings(app.state::<AppState>(), s).unwrap();
+
+    // 1) 磁盘必须是 dpapi: 密文，明文绝不出现在文件里
+    let raw = fs::read_to_string(root.join("settings.json")).unwrap();
+    assert!(raw.contains("dpapi:"), "敏感字段应为 DPAPI 密文，实际：{raw}");
+    assert!(!raw.contains("明文口令"), "WebDAV 明文口令不得出现在磁盘");
+    assert!(!raw.contains("hibp-key-123"), "HIBP key 不得出现在磁盘");
+
+    // 2) 同进程读回仍是明文
+    let back = c::get_settings(app.state::<AppState>()).unwrap();
+    assert_eq!(back.webdav.password, "明文口令🚀");
+    assert_eq!(back.hibp_api_key, "hibp-key-123");
+
+    // 3) 模拟重启：新 AppState 从同一磁盘读，回读一致（旧明文迁移路径由 dpapi 单测覆盖）
+    let app2 = mock_app(&root);
+    let back2 = c::get_settings(app2.state::<AppState>()).unwrap();
+    assert_eq!(back2.webdav.password, "明文口令🚀");
+    assert_eq!(back2.hibp_api_key, "hibp-key-123");
+
+    let _ = fs::remove_dir_all(&root);
+}
