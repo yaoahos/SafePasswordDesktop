@@ -168,6 +168,21 @@ fn ui_full_flow_roundtrip() {
     assert_eq!(v3.items.len(), 1);
     assert_ne!(m2.id, id);
 
+    // 8b. JSON 导出 → import_vault_json 回导（新 id 新库且当前切换，对齐手机端"导入 JSON"）
+    let json_txt = c::export_vault_json(app2.state::<AppState>()).unwrap();
+    let m3 = c::import_vault_json(
+        app2.state::<AppState>(),
+        json_txt,
+        "pw-json".into(),
+        "JSON回导库".into(),
+    )
+    .unwrap();
+    assert_ne!(m3.id, id);
+    let vj = c::current_vault(app2.state::<AppState>()).unwrap().unwrap();
+    assert_eq!(vj.name, "JSON回导库");
+    assert_eq!(vj.items.len(), 1);
+    assert_eq!(vj.items[0].title, "GitHub");
+
     // 9. 设置持久化
     let mut st = c::get_settings(app2.state::<AppState>()).unwrap();
     st.theme = "dark".to_string();
