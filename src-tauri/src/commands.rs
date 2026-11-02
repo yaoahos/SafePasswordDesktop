@@ -51,6 +51,10 @@ pub struct AppStateInner {
     pub current: Option<CurrentVault>,
     pub settings: AppSettings,
     pub settings_path: PathBuf,
+    /// 自动拉取：上次远端 Last-Modified 缓存（对齐 Android lastRemoteMtime）
+    pub last_remote_mtime: i64,
+    /// 自动拉取：上次检查时间（对齐 Android lastPullCheckAt，防坚果云限流）
+    pub last_pull_check_at: i64,
 }
 
 pub struct AppState {
@@ -70,6 +74,16 @@ pub struct AppSettings {
     pub auto_backup_days: i32,
     /// 上次备份时间（epoch millis，对齐手机端 lastBackupAt）
     pub last_backup_at: i64,
+    /// 保存后自动同步（对齐手机端 autoSync，默认开）
+    pub auto_sync: bool,
+    /// 自动拉取云端更新间隔秒数（0 = 关闭，对齐手机端 pullIntervalSeconds）
+    pub pull_interval_seconds: i32,
+    /// 搜索是否匹配密码/机密字段（对齐手机端 searchPasswords）
+    pub search_passwords: bool,
+    /// 默认展示的标签（对齐手机端 defaultLabelId，null = 全部条目）
+    pub default_label_id: Option<String>,
+    /// 最近打开的密码库（对齐手机端 lastVaultId）
+    pub last_vault_id: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -81,6 +95,11 @@ impl Default for AppSettings {
             webdav: WebDavConfig::default(),
             auto_backup_days: 1,
             last_backup_at: 0,
+            auto_sync: true,
+            pull_interval_seconds: 60,
+            search_passwords: false,
+            default_label_id: None,
+            last_vault_id: None,
         }
     }
 }
@@ -101,6 +120,8 @@ impl AppState {
                 current: None,
                 settings,
                 settings_path,
+                last_remote_mtime: 0,
+                last_pull_check_at: 0,
             }),
         })
     }
@@ -120,6 +141,15 @@ impl AppStateInner {
     fn save_current(&mut self) -> CmdResult<()> {
         let cur = self.current.as_mut().ok_or(NO_OPEN_VAULT)?;
         self.store.save(&mut cur.container, &cur.meta).map_err(err)
+    }
+
+    /// 记录最近打开的密码库（对齐手机端 lastVaultId；写盘失败不致命）。
+    fn mark_last_vault(&mut self, id: &str) {
+        if self.settings.last_vault_id.as_deref() == Some(id) {
+            return;
+        }
+        self.settings.last_vault_id = Some(id.to_string());
+        let _ = self.persist_settings();
     }
 
     /// 对齐手机端 AppViewModel.maybeAutoBackup：创建/解锁后检查间隔，超期则
@@ -170,6 +200,7 @@ pub fn create_vault(state: State<AppState>, name: String, password: String) -> C
         meta: meta.clone(),
         password,
     });
+    inner.mark_last_vault(&meta.id);
     inner.maybe_auto_backup();
     Ok(meta)
 }
@@ -186,11 +217,13 @@ pub fn open_vault(state: State<AppState>, id: String, password: String) -> CmdRe
         .ok_or("找不到该密码库")?;
     let container = inner.store.open(&meta, &password).map_err(err)?;
     let vault = container.vault.clone();
+    let meta_id = meta.id.clone();
     inner.current = Some(CurrentVault {
         container,
         meta,
         password,
     });
+    inner.mark_last_vault(&meta_id);
     inner.maybe_auto_backup();
     Ok(vault)
 }
@@ -324,6 +357,7 @@ pub fn import_vault_bytes(
         meta: meta.clone(),
         password,
     });
+    inner.mark_last_vault(&meta.id);
     Ok(meta)
 }
 
@@ -345,6 +379,7 @@ pub fn import_vault_json(
         meta: meta.clone(),
         password,
     });
+    inner.mark_last_vault(&meta.id);
     Ok(meta)
 }
 
@@ -665,6 +700,7 @@ pub fn backup_restore(state: State<AppState>, path: String, password: String) ->
             let mut c = container;
             inner.store.save(&mut c, &meta).map_err(err)?;
             let vault = c.vault.clone();
+            inner.mark_last_vault(&meta.id);
             inner.current = Some(CurrentVault {
                 container: c,
                 meta,
@@ -680,6 +716,7 @@ pub fn backup_restore(state: State<AppState>, path: String, password: String) ->
                 .map_err(err)?;
             let vault = c.vault.clone();
             let _ = name;
+            inner.mark_last_vault(&meta.id);
             inner.current = Some(CurrentVault {
                 container: c,
                 meta,
@@ -835,4 +872,74 @@ pub async fn webdav_pull(
     config: WebDavConfig,
 ) -> CmdResult<SyncSummary> {
     run_sync(state, config, None, true).await
+}
+
+/// 自动拉取：只做 HEAD 比对，云端没变化时不下载整库（对齐 Android pullIfRemoteChanged）。
+/// 返回 Some(summary) 表示检测到云端变化并已按“本地修改优先”静默同步。
+#[tauri::command]
+pub async fn webdav_pull_if_changed(
+    state: State<'_, AppState>,
+    config: WebDavConfig,
+) -> CmdResult<Option<SyncSummary>> {
+    if !config.is_configured() {
+        return Ok(None);
+    }
+    let (name, last_synced, interval) = {
+        let inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+        let cur = match inner.current.as_ref() {
+            Some(c) => c,
+            None => return Ok(None),
+        };
+        (
+            cur.container.vault.name.clone(),
+            cur.container.vault.last_synced_at,
+            inner.settings.pull_interval_seconds,
+        )
+    };
+    if interval <= 0 {
+        return Ok(None);
+    }
+    let now = now_ms();
+    {
+        // 限流（坚果云免费版 600 次 / 30 分钟）：先记时间再发请求
+        let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+        if now - inner.last_pull_check_at < i64::from(interval) * 1_000 {
+            return Ok(None);
+        }
+        inner.last_pull_check_at = now;
+    }
+    let client = WebDavClient::new(config.clone()).map_err(err)?;
+    let path = config.remote_path(&name);
+    let stat = match client.stat(&path).await.map_err(err)? {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+    let mtime = stat.last_modified as i64;
+    let changed = {
+        let inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+        if mtime <= 0 {
+            // 服务器没给 Last-Modified，只能保守地认为有变化
+            true
+        } else if inner.last_remote_mtime <= 0 {
+            // 首次检查：比本机上次同步时间新才算有更新
+            mtime > last_synced
+        } else {
+            mtime != inner.last_remote_mtime
+        }
+    };
+    {
+        let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+        inner.last_remote_mtime = mtime;
+    }
+    if !changed {
+        return Ok(None);
+    }
+    // 确有变化 → 静默同步（本地修改优先，对齐 doSync 默认 KEEP_LOCAL）
+    let summary = run_sync(state.clone(), config, Some(ConflictStrategy::KeepLocal), false).await?;
+    // 同步后服务器时间会变，重新记录，避免下一次把自己刚上传的当成远端更新
+    if let Ok(Some(s2)) = client.stat(&path).await {
+        let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+        inner.last_remote_mtime = s2.last_modified as i64;
+    }
+    Ok(Some(summary))
 }

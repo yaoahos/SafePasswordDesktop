@@ -10,8 +10,10 @@ import {
   putItem,
   setSettings as setSettingsApi,
   currentVault,
+  webdavSync,
+  webdavPullIfChanged,
 } from "./api";
-import type { AppSettings, Vault, VaultItem, VaultMeta } from "./types";
+import type { AppSettings, SortMode, Vault, VaultItem, VaultMeta } from "./types";
 import type { AppCtx, SectionFilter, ToastKind } from "./app-context";
 import { AuthScreens } from "./components/AuthScreens";
 import { ItemDetail } from "./components/ItemDetail";
@@ -40,6 +42,11 @@ const DEFAULT_SETTINGS: AppSettings = {
   webdav: { baseUrl: "", username: "", password: "", remoteDir: "/SafePassword", enabled: false },
   autoBackupDays: 1,
   lastBackupAt: 0,
+  autoSync: true,
+  pullIntervalSeconds: 60,
+  searchPasswords: false,
+  defaultLabelId: null,
+  lastVaultId: null,
 };
 
 const SECTION_TITLES: Record<SectionFilter, string> = {
@@ -59,9 +66,8 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [selectItemId, setSelectItemId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ id: number; msg: string; kind: ToastKind } | null>(null);
-  const [searchPasswords, setSearchPasswordsState] = useState<boolean>(
-    () => typeof localStorage !== "undefined" && localStorage.getItem("sp.searchPasswords") === "1",
-  );
+  const [sortMode, setSortMode] = useState<SortMode>("CREATED");
+  const [sortAsc, setSortAsc] = useState(false);
 
   // ------------------------------------------------------------ 基础加载
 
@@ -126,14 +132,41 @@ export default function App() {
     }
   }, [notify]);
 
-  const setSearchPasswords = useCallback((v: boolean) => {
-    setSearchPasswordsState(v);
-    try {
-      localStorage.setItem("sp.searchPasswords", v ? "1" : "0");
-    } catch {
-      // localStorage 不可用时忽略
-    }
-  }, []);
+  const setSearchPasswords = useCallback(
+    (v: boolean) => {
+      void applySettings({ ...settings, searchPasswords: v });
+    },
+    [applySettings, settings],
+  );
+
+  /** 对齐手机端 setSortMode：同模式翻转方向；切模式则标题升序、时间类降序（不持久化） */
+  const changeSort = useCallback(
+    (m: SortMode) => {
+      if (m === sortMode) setSortAsc(!sortAsc);
+      else {
+        setSortMode(m);
+        setSortAsc(m === "TITLE");
+      }
+    },
+    [sortMode, sortAsc],
+  );
+
+  // 开库时应用“默认展示”标签（对齐手机端 filterLabelId = defaultLabelIdFor）
+  useEffect(() => {
+    if (!vault) return;
+    const d = settings.defaultLabelId;
+    setLabelFilter(d && vault.labels.some((l) => l.id === d) ? d : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vault?.id]);
+
+  // 设置里改“默认展示”时立即应用（对齐手机端 setDefaultLabel）
+  useEffect(() => {
+    if (!vault) return;
+    const d = settings.defaultLabelId;
+    if (d && !vault.labels.some((l) => l.id === d)) return; // 失效 id 忽略
+    setLabelFilter(d);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.defaultLabelId]);
 
   // ------------------------------------------------------------ 流程
 
@@ -230,6 +263,53 @@ export default function App() {
     };
   }, [vault, settings.autoLockMinutes, lockNow, notify]);
 
+  // ------------------------------------------------------------ 自动同步（保存后延迟上传，对齐手机端 scheduleSync）
+
+  const syncSigRef = useRef<string>("");
+  useEffect(() => {
+    if (!vault) {
+      syncSigRef.current = "";
+      return;
+    }
+    const sig = `${vault.updatedAt}:${vault.revision}`;
+    const prev = syncSigRef.current;
+    syncSigRef.current = sig;
+    if (!prev || prev === sig) return; // 首次装载或无变化：不触发
+    const cfg = settings.webdav;
+    if (!settings.autoSync || !cfg.enabled || !/^https?:\/\//i.test(cfg.baseUrl)) return;
+    const t = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await webdavSync(cfg, "KEEP_LOCAL"); // 本地修改优先，对齐手机端 doSync 默认策略
+          await refreshFromBackend();
+        } catch (e) {
+          notify(`自动同步失败：${String(e)}`, "error");
+        }
+      })();
+    }, 1500); // 对齐手机端 scheduleSync 的 1500ms 防抖
+    return () => window.clearTimeout(t);
+  }, [vault, settings.autoSync, settings.webdav, refreshFromBackend, notify]);
+
+  // ------------------------------------------------------------ 自动拉取（对齐手机端 restartPullLoop）
+
+  useEffect(() => {
+    const secs = settings.pullIntervalSeconds;
+    const cfg = settings.webdav;
+    if (!vault || secs <= 0 || !cfg.enabled || !/^https?:\/\//i.test(cfg.baseUrl)) return;
+    const iv = window.setInterval(() => {
+      void (async () => {
+        try {
+          const r = await webdavPullIfChanged(cfg);
+          if (r) await refreshFromBackend(); // 有更新才刷新（静默，对齐手机端 silent pull）
+        } catch (e) {
+          // 对齐手机端 runCatching：拉取失败不打扰用户
+          console.warn("自动拉取失败", e);
+        }
+      })();
+    }, secs * 1000);
+    return () => window.clearInterval(iv);
+  }, [vault, settings.pullIntervalSeconds, settings.webdav, refreshFromBackend]);
+
   // ------------------------------------------------------------ 条目操作
 
   const saveItem = useCallback(
@@ -307,7 +387,7 @@ export default function App() {
   const items = vault?.items ?? [];
   const filtered = useMemo(() => {
     const q = query.trim();
-    return items.filter((i) => {
+    const arr = items.filter((i) => {
       if (labelFilter) {
         if (i.status === "TRASHED") return false;
         if (!i.labelIds.includes(labelFilter)) return false;
@@ -318,9 +398,15 @@ export default function App() {
       } else if (i.status === "TRASHED") {
         return false;
       }
-      return itemMatches(i, q, searchPasswords);
+      return itemMatches(i, q, settings.searchPasswords);
     });
-  }, [items, section, labelFilter, query, searchPasswords]);
+    // 排序（对齐手机端 SortMode：标题拼音升序 / 最近更新 / 最近创建，时间类默认降序）
+    if (sortMode === "TITLE") arr.sort((a, b) => a.title.localeCompare(b.title, "zh-Hans-CN"));
+    else if (sortMode === "UPDATED") arr.sort((a, b) => a.updatedAt - b.updatedAt);
+    else arr.sort((a, b) => a.createdAt - b.createdAt);
+    if (!sortAsc) arr.reverse();
+    return arr;
+  }, [items, section, labelFilter, query, settings.searchPasswords, sortMode, sortAsc]);
 
   // 选中项不在可见列表时，自动落到第一个
   useEffect(() => {
@@ -355,7 +441,7 @@ export default function App() {
     gotoSelect,
     selectItemId,
     setSelectItemId,
-    searchPasswords,
+    searchPasswords: settings.searchPasswords,
     setSearchPasswords,
   };
 
@@ -371,7 +457,14 @@ export default function App() {
   }
 
   if (!vault) {
-    return <AuthScreens vaults={vaults} onUnlock={handleUnlock} onCreate={handleCreate} />;
+    return (
+      <AuthScreens
+        vaults={vaults}
+        defaultVaultId={settings.lastVaultId}
+        onUnlock={handleUnlock}
+        onCreate={handleCreate}
+      />
+    );
   }
 
   const closeDialog = () => setDialog(null);
@@ -404,7 +497,10 @@ export default function App() {
             sectionTitle={sectionTitle}
             query={query}
             onQuery={setQuery}
-            searchPasswords={searchPasswords}
+            searchPasswords={settings.searchPasswords}
+            sortMode={sortMode}
+            sortAsc={sortAsc}
+            onChangeSort={changeSort}
             selectedId={selectItemId}
             onSelect={setSelectItemId}
             onNew={() => setDialog("TEMPLATE")}

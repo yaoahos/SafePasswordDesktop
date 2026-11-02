@@ -129,9 +129,22 @@ export interface AppSettings {
   autoBackupDays: number;
   /** 上次备份时间（epoch millis） */
   lastBackupAt: number;
+  /** 保存后自动同步（对齐手机端 autoSync，默认开） */
+  autoSync: boolean;
+  /** 自动拉取云端更新间隔秒数（0 = 关闭，对齐 pullIntervalSeconds） */
+  pullIntervalSeconds: number;
+  /** 搜索是否匹配密码/机密字段（对齐 searchPasswords） */
+  searchPasswords: boolean;
+  /** 默认展示的标签 id（对齐 defaultLabelId，null = 全部条目） */
+  defaultLabelId: string | null;
+  /** 最近打开的密码库（对齐 lastVaultId） */
+  lastVaultId: string | null;
 }
 
 export type SyncStrategy = "DETECT" | "KEEP_LOCAL" | "KEEP_REMOTE" | "MERGE";
+
+/** 对齐手机端 SortMode（仅会话内，不持久化） */
+export type SortMode = "TITLE" | "UPDATED" | "CREATED";
 
 export interface SyncSummary {
   direction: "NONE" | "UPLOADED" | "DOWNLOADED" | "MERGED" | "CONFLICT";
