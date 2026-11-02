@@ -15,6 +15,7 @@ export function ItemList({
   sortMode,
   sortAsc,
   onChangeSort,
+  syncText,
 }: {
   items: VaultItem[];
   allLabels: Label[];
@@ -28,6 +29,8 @@ export function ItemList({
   sortMode: SortMode;
   sortAsc: boolean;
   onChangeSort: (m: SortMode) => void;
+  /** 同步瞬时状态（对齐手机端 3 秒状态文本，显示在分类标题右侧） */
+  syncText?: string | null;
 }) {
   const visible = items.filter((i) => itemMatches(i, query, searchPasswords));
 
@@ -38,6 +41,7 @@ export function ItemList({
           <div className="list-title" title={sectionTitle}>
             {sectionTitle}
           </div>
+          {syncText && <div className="list-sync">{syncText}</div>}
           <div className="list-ctls">
             <select
               className="input list-ctl list-ctl-sel"

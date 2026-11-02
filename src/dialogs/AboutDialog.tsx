@@ -109,7 +109,7 @@ export function AboutDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void
       <div className="about-card">
         <div className="about-title">更新</div>
         <div className="row" style={{ gap: 10 }}>
-          <button className="btn primary sm" disabled={checking || installing} onClick={() => void check()}>
+          <button className="btn sm" disabled={checking || installing} onClick={() => void check()}>
             {checking ? "正在检查…" : "检查更新"}
           </button>
           {info?.hasUpdate && (

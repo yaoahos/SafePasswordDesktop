@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Dialog } from "../components/Dialog";
+import { Icon } from "../components/icons";
 import { generatePassphrase, generatePassword, evaluateStrength } from "../api";
 import { copyText } from "../utils";
 
@@ -151,18 +152,12 @@ export function GeneratorDialog({
       {result && (
         <>
           <div className="spacer-10" />
-          <div className="card" style={{ boxShadow: "none", border: "1px solid var(--border)" }}>
-            <div className="row">
-              <div
-                className="grow"
-                style={{ fontFamily: "Consolas, monospace", fontSize: 16, wordBreak: "break-all" }}
-              >
-                {result}
-              </div>
+          <div className="gen-result">
+            <div className="gen-value">{result}</div>
+            <div className="gen-actions">
               {onUse && (
                 <button
                   className="btn primary sm"
-                  style={{ marginRight: 8 }}
                   onClick={() => {
                     onUse(result);
                     onClose();
@@ -180,17 +175,21 @@ export function GeneratorDialog({
                   );
                 }}
               >
+                <Icon name="copy" size={15} />
                 复制
+              </button>
+              <button className="btn sm" onClick={() => void generate()}>
+                <Icon name="refresh" size={15} />
+                换一个
               </button>
             </div>
             {strength && (
-              <>
-                <div className="spacer-10" />
-                <div className="row small muted">
-                  <span className="grow">强度：{strength.label}</span>
+              <div className="gen-strength">
+                <div className="gen-strength-row">
+                  <span>强度：{strength.label}</span>
                   <span>{strength.entropyBits.toFixed(1)} bits</span>
                 </div>
-                <div className="strength-bar" style={{ marginTop: 5 }}>
+                <div className="strength-bar" style={{ marginTop: 6 }}>
                   <div
                     className="strength-fill"
                     style={{
@@ -200,7 +199,7 @@ export function GeneratorDialog({
                     }}
                   />
                 </div>
-              </>
+              </div>
             )}
           </div>
         </>

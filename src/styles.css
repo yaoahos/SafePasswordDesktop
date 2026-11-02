@@ -155,8 +155,10 @@ button {
   font-size: 11.5px;
   font-weight: 700;
   color: var(--text-2);
-  align-self: flex-end;
-  padding-bottom: 10px;
+  align-self: center;
+  line-height: 1;
+  margin-left: 2px;
+  transform: translateY(1px);
 }
 
 .titlebar-grow {
@@ -1734,4 +1736,54 @@ select.input option:checked {
 
 .field-row .input {
   height: 36px;
+}
+
+/* 生成结果卡片（v1 反馈：更精致的展示） */
+.gen-result {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2, rgba(22, 119, 255, 0.05));
+  padding: 14px 16px;
+}
+.gen-value {
+  font-family: Consolas, "Cascadia Mono", ui-monospace, monospace;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  line-height: 1.5;
+  word-break: break-all;
+  color: var(--text);
+}
+.gen-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.gen-strength {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.gen-strength-row {
+  display: flex;
+  justify-content: space-between;
+}
+
+/* 隐藏 WebView 原生密码显示按钮（避免与自绘眼睛重复） */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+
+/* 第二栏分类标题右侧的同步状态（对齐手机端 3 秒瞬时文本） */
+.list-sync {
+  font-size: 12.5px;
+  color: var(--primary);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+  margin-left: 4px;
 }
