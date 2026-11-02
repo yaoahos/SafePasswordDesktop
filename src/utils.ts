@@ -224,7 +224,7 @@ export function newItemFromTemplate(templateId: string): VaultItem {
     updatedAt: now,
     deletedAt: null,
     attachments: [],
-    iconKey: "",
+    iconKey: TEMPLATE_ICON[tpl.id] ?? "",
     iconData: "",
   };
 }
@@ -259,10 +259,40 @@ export function itemIcon(item: VaultItem): ItemIcon {
     return { kind: "img", src };
   }
   if (item.iconKey && item.iconKey !== "custom") {
+    const sym = ICON_SYMBOLS[item.iconKey.toLowerCase()];
+    if (sym) return { kind: "emoji", emoji: sym };
     return { kind: "char", char: item.iconKey.charAt(0).toUpperCase() };
   }
   return { kind: "emoji", emoji: templateEmoji(item.templateId) };
 }
+
+/** 模板默认图标（对齐移动端 templateIcon：登录/卡/邮箱/网络/证件/笔记） */
+const TEMPLATE_ICON: Record<string, string> = {
+  login: "key",
+  bank_card: "card",
+  email: "email",
+  wifi: "wifi",
+  identity: "id",
+  note: "note",
+  custom: "",
+};
+
+/** iconKey 符号 → 图标（对齐移动端 ItemIcon 的符号映射） */
+const ICON_SYMBOLS: Record<string, string> = {
+  web_site: "🌐",
+  website: "🌐",
+  web: "🌐",
+  url: "🌐",
+  key: "🔑",
+  password: "🔑",
+  email: "✉️",
+  mail: "✉️",
+  note: "📝",
+  notes: "📝",
+  card: "💳",
+  wifi: "📶",
+  id: "🪪",
+};
 
 /** 掩码：与 Demo 一致的固定 12 个圆点 */
 export const MASK = "••••••••••••";

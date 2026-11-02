@@ -10,6 +10,7 @@ import {
   putItem,
   setSettings as setSettingsApi,
   currentVault,
+  importVaultBytes,
   webdavSync,
   webdavPullIfChanged,
 } from "./api";
@@ -22,21 +23,19 @@ import { Sidebar } from "./components/Sidebar";
 import { TopBar, type TopAction } from "./components/TopBar";
 import { AboutDialog } from "./dialogs/AboutDialog";
 import { GeneratorDialog } from "./dialogs/GeneratorDialog";
-import { ImportDialog } from "./dialogs/ImportDialog";
 import { LabelManagerDialog } from "./dialogs/LabelManagerDialog";
 import { LockDialog } from "./dialogs/LockDialog";
 import { SecurityDialog } from "./dialogs/SecurityDialog";
 import { SettingsDialog } from "./dialogs/SettingsDialog";
 import { SyncDialog } from "./dialogs/SyncDialog";
-import { TemplatePickerDialog } from "./dialogs/TemplatePickerDialog";
 import { ThemeDialog } from "./dialogs/ThemeDialog";
-import { WebDavDialog } from "./dialogs/WebDavDialog";
 import { duplicateItem, itemMatches, newItemFromTemplate } from "./utils";
 
-type DialogKind = TopAction | "LABELS" | "TEMPLATE" | null;
+type DialogKind = TopAction | "LABELS" | null;
 
 const DEFAULT_SETTINGS: AppSettings = {
   theme: "system",
+  accent: "#1677FF",
   autoLockMinutes: 5,
   hibpApiKey: "",
   webdav: { baseUrl: "", username: "", password: "", remoteDir: "/SafePassword", enabled: false },
@@ -112,6 +111,17 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, [toast]);
 
+  // 去掉网页感右键菜单（刷新/打印/另存为…）；输入框内保留系统菜单以便粘贴（v1 项 0）
+  useEffect(() => {
+    const onCtx = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+      e.preventDefault();
+    };
+    document.addEventListener("contextmenu", onCtx);
+    return () => document.removeEventListener("contextmenu", onCtx);
+  }, []);
+
   // ------------------------------------------------------------ 主题
 
   useEffect(() => {
@@ -119,11 +129,16 @@ export default function App() {
     const apply = () => {
       const dark = settings.theme === "dark" || (settings.theme === "system" && mq.matches);
       document.documentElement.dataset.theme = dark ? "dark" : "light";
+      // 强调色（对齐手机端 ThemeScreen：预设/自定义色覆盖 --primary）
+      const accent = /^#[0-9a-fA-F]{6}$/.test(settings.accent || "") ? settings.accent : "#1677FF";
+      const root = document.documentElement.style;
+      root.setProperty("--primary", accent);
+      root.setProperty("--primary-soft", `${accent}1F`);
     };
     apply();
     mq.addEventListener("change", apply);
     return () => mq.removeEventListener("change", apply);
-  }, [settings.theme]);
+  }, [settings.theme, settings.accent]);
 
   const applySettings = useCallback(async (next: AppSettings) => {
     setSettings(next);
@@ -231,6 +246,26 @@ export default function App() {
         await createVault(name, password);
         await refreshFromBackend();
         // create_vault 已切换 current，这里再把条目选中状态理顺
+        setSelectItemId(null);
+        setSection("ALL");
+        setLabelFilter(null);
+        setQuery("");
+        return null;
+      } catch (e) {
+        return String(e);
+      }
+    },
+    [refreshFromBackend],
+  );
+
+  // ------------------------------------------------------------ 从本地恢复（对齐手机端 UnlockScreen）
+
+  const handleRestoreLocal = useCallback(
+    async (fileName: string, base64Data: string, password: string): Promise<string | null> => {
+      try {
+        const base = fileName.replace(/\.(sicv|spv)$/i, "");
+        await importVaultBytes(base64Data, password, base || "恢复的密码库");
+        await refreshFromBackend();
         setSelectItemId(null);
         setSection("ALL");
         setLabelFilter(null);
@@ -468,6 +503,7 @@ export default function App() {
         defaultVaultId={settings.lastVaultId}
         onUnlock={handleUnlock}
         onCreate={handleCreate}
+        onRestoreLocal={handleRestoreLocal}
       />
     );
   }
@@ -480,6 +516,7 @@ export default function App() {
       <div className="main-row">
           <Sidebar
             vault={vaults.find((v) => v.id === vault.id) ?? { id: vault.id, name: vault.name, fileName: "", createdAt: vault.createdAt, lastOpenedAt: 0, lastSyncedAt: vault.lastSyncedAt }}
+            itemCount={vault.items.filter((i) => i.status !== "TRASHED").length}
             labels={vault.labels}
             section={section}
             labelFilter={labelFilter}
@@ -491,9 +528,7 @@ export default function App() {
               setLabelFilter(id);
               if (id) setSection("ALL");
             }}
-            onSwitchVault={gotoSelect}
             onManageLabels={() => setDialog("LABELS")}
-            onLock={() => setDialog("LOCK")}
           />
           <div className="col-divider" />
           <ItemList
@@ -508,7 +543,7 @@ export default function App() {
             onChangeSort={changeSort}
             selectedId={selectItemId}
             onSelect={setSelectItemId}
-            onNew={() => setDialog("TEMPLATE")}
+            onNew={() => void createFromTemplate("login")}
           />
           <div className="col-divider" />
           {selected ? (
@@ -516,7 +551,6 @@ export default function App() {
               item={selected}
               labels={vault.labels}
               onSave={saveItem}
-              onVault={setVault}
               onToggleFavorite={toggleFavorite}
               onDuplicate={duplicateSelected}
               onDelete={trashSelected}
@@ -537,17 +571,12 @@ export default function App() {
 
       {dialog === "GENERATOR" && <GeneratorDialog notify={ctx.notify} onClose={closeDialog} />}
       {dialog === "SECURITY" && <SecurityDialog ctx={ctx} onClose={closeDialog} />}
-      {dialog === "WEBDAV" && <WebDavDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "THEME" && <ThemeDialog ctx={ctx} onClose={closeDialog} />}
-      {dialog === "IMPORT" && <ImportDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "SETTINGS" && <SettingsDialog ctx={ctx} onClose={closeDialog} />}
-      {dialog === "ABOUT" && <AboutDialog onClose={closeDialog} />}
+      {dialog === "ABOUT" && <AboutDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "SYNC" && <SyncDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "LOCK" && <LockDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "LABELS" && <LabelManagerDialog ctx={ctx} onClose={closeDialog} />}
-      {dialog === "TEMPLATE" && (
-        <TemplatePickerDialog onPick={(id) => void createFromTemplate(id)} onClose={closeDialog} />
-      )}
 
       {toast && <div className={`toast ${toast.kind}`}>{toast.msg}</div>}
     </div>

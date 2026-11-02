@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Dialog } from "../components/Dialog";
-import { WebDavForm } from "./WebDavDialog";
 import {
   backupCreate,
   backupDelete,
@@ -21,7 +20,7 @@ import {
   webdavPull,
   webdavSync,
 } from "../api";
-import type { BackupInfo, ThemeMode } from "../types";
+import type { BackupInfo, WebDavConfig } from "../types";
 import { arrayBufferToBase64, downloadBase64, downloadText, formatSize, formatTime } from "../utils";
 import type { AppCtx } from "../app-context";
 
@@ -35,16 +34,10 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "transfer", label: "导入与导出" },
 ];
 
-const THEMES: { key: ThemeMode; label: string; icon: string }[] = [
-  { key: "system", label: "跟随系统", icon: "🖥" },
-  { key: "light", label: "浅色", icon: "☀️" },
-  { key: "dark", label: "深色", icon: "🌙" },
-];
-
 export function SettingsDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
   const [tab, setTab] = useState<Tab>("security");
   return (
-    <Dialog title="设置" onClose={onClose} showCloseButton={false} width={540}>
+    <Dialog title="设置" onClose={onClose} width={560}>
       <div className="tabs" style={{ marginBottom: 8 }}>
         {TABS.map((t) => (
           <button key={t.key} className={`tab${tab === t.key ? " active" : ""}`} onClick={() => setTab(t.key)}>
@@ -83,8 +76,8 @@ function SecurityTab({ ctx }: { ctx: AppCtx }) {
   };
 
   const changePw = async () => {
-    if (newPw.length < 4) {
-      setMsg({ ok: false, text: "新主密码至少 4 位" });
+    if (newPw.length < 8) {
+      setMsg({ ok: false, text: "新主密码至少 8 位" });
       return;
     }
     if (newPw !== confirmPw) {
@@ -132,7 +125,7 @@ function SecurityTab({ ctx }: { ctx: AppCtx }) {
         <input className="input" type="password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} />
       </div>
       <div className="form-row">
-        <label className="field-caption">新主密码</label>
+        <label className="field-caption">新主密码（至少 8 位）</label>
         <input className="input" type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
       </div>
       <div className="form-row">
@@ -147,18 +140,54 @@ function SecurityTab({ ctx }: { ctx: AppCtx }) {
   );
 }
 
-// ---------------------------------------------------------------- 同步与备份
+// ---------------------------------------------------------------- 同步与备份（对齐移动端 WebDAV 页）
 
 function SyncTab({ ctx }: { ctx: AppCtx }) {
-  const [backups, setBackups] = useState<BackupInfo[] | null>(null);
+  const [cfg, setCfg] = useState<WebDavConfig>({ ...ctx.settings.webdav });
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [backups, setBackups] = useState<BackupInfo[] | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<BackupInfo | null>(null);
   const [restorePw, setRestorePw] = useState("");
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
-  const [importText, setImportText] = useState("");
+  const [confirmPull, setConfirmPull] = useState(false);
 
-  const cfg = ctx.settings.webdav;
+  const patch = (p: Partial<WebDavConfig>) => setCfg((c) => ({ ...c, ...p }));
+
+  const saveCfg = async () => {
+    await ctx.applySettings({ ...ctx.settings, webdav: cfg });
+  };
+
+  const doSaveAndSync = async () => {
+    setBusy("sync");
+    setMsg(null);
+    try {
+      await saveCfg();
+      const s = await webdavSync(cfg, "KEEP_LOCAL");
+      await ctx.refreshFromBackend();
+      setMsg({ ok: true, text: `${s.message || "同步完成"}（${s.direction}）` });
+    } catch (e) {
+      setMsg({ ok: false, text: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doPull = async () => {
+    setBusy("pull");
+    setMsg(null);
+    try {
+      await saveCfg();
+      const s = await webdavPull(cfg);
+      await ctx.refreshFromBackend();
+      setMsg({ ok: true, text: `${s.message || "已拉取云端数据"}（${s.direction}）` });
+      setConfirmPull(false);
+    } catch (e) {
+      setMsg({ ok: false, text: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const refreshBackups = async () => {
     try {
@@ -168,23 +197,8 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
     }
   };
 
-  const doSync = async (kind: "sync" | "pull") => {
-    setBusy(kind);
-    setMsg(null);
-    try {
-      const s = kind === "sync" ? await webdavSync(cfg, "DETECT") : await webdavPull(cfg);
-      await ctx.refreshFromBackend();
-      setMsg({ ok: true, text: `${s.message || "同步完成"}（${s.direction}，冲突 ${s.conflicts}）` });
-    } catch (e) {
-      setMsg({ ok: false, text: String(e) });
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const createBackup = async () => {
     setBusy("create");
-    setMsg(null);
     try {
       const b = await backupCreate();
       setMsg({ ok: true, text: `备份已创建：${b.name}` });
@@ -199,7 +213,6 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
   const doRestore = async () => {
     if (!restoreTarget) return;
     setBusy("restore");
-    setMsg(null);
     try {
       await backupRestore(restoreTarget.path, restorePw);
       await ctx.refreshFromBackend();
@@ -227,19 +240,111 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
     }
   };
 
+  const lastSync = ctx.vault?.lastSyncedAt ?? 0;
+
   return (
     <>
-      <div className="section-cap">WebDAV</div>
-      <WebDavForm ctx={ctx} />
+      <div className="info-card">
+        <span className="info-ico">☁</span>
+        <div>
+          <div className="setting-title">只同步加密文件</div>
+          <div className="setting-sub">WebDAV 服务器只看到密文；主密码和明文不会上传。</div>
+        </div>
+      </div>
+
+      <div className="form-row">
+        <label className="field-caption">服务器地址</label>
+        <input
+          className="input"
+          placeholder="https://dav.jianguoyun.com/dav/"
+          value={cfg.baseUrl}
+          onChange={(e) => patch({ baseUrl: e.target.value })}
+        />
+      </div>
+      <div className="form-row">
+        <label className="field-caption">用户名</label>
+        <input className="input" value={cfg.username} onChange={(e) => patch({ username: e.target.value })} />
+      </div>
+      <div className="form-row">
+        <label className="field-caption">密码 / 应用密码</label>
+        <input
+          className="input"
+          type="password"
+          value={cfg.password}
+          onChange={(e) => patch({ password: e.target.value })}
+        />
+      </div>
+      <div className="form-row">
+        <label className="field-caption">远程目录</label>
+        <input
+          className="input"
+          placeholder="/SafePassword"
+          value={cfg.remoteDir}
+          onChange={(e) => patch({ remoteDir: e.target.value })}
+        />
+      </div>
+
+      <div className="setting-row">
+        <div className="setting-text">
+          <div className="setting-title">保存后自动同步</div>
+          <div className="setting-sub">
+            {lastSync > 0 ? `上次同步：${formatTime(lastSync)}` : "上次同步：从未"}
+          </div>
+        </div>
+        <input
+          type="checkbox"
+          checked={cfg.enabled && ctx.settings.autoSync}
+          onChange={(e) => {
+            const on = e.target.checked;
+            patch({ enabled: on });
+            void ctx.applySettings({ ...ctx.settings, autoSync: on, webdav: { ...cfg, enabled: on } });
+          }}
+        />
+      </div>
+
+      <div className="hr" />
+      <div className="section-cap">自动拉取云端更新</div>
+      <div className="seg">
+        {[0, 30, 60, 300].map((v) => (
+          <button
+            key={v}
+            className={ctx.settings.pullIntervalSeconds === v ? "active" : ""}
+            onClick={() => void ctx.applySettings({ ...ctx.settings, pullIntervalSeconds: v })}
+          >
+            {v === 0 ? "关闭" : v < 60 ? `${v} 秒` : `${v / 60} 分钟`}
+          </button>
+        ))}
+      </div>
+      <div className="setting-sub" style={{ marginTop: 4 }}>
+        解锁后与回到前台时也会各检查一次；只有云端变化时才下载。
+      </div>
+
       <div className="spacer-10" />
-      <div className="row">
-        <button className="btn primary sm" disabled={busy !== null} onClick={() => void doSync("sync")}>
-          {busy === "sync" ? "同步中…" : "立即同步"}
+      <div className="row" style={{ justifyContent: "flex-end" }}>
+        <button className="btn primary" disabled={busy !== null} onClick={() => void doSaveAndSync()}>
+          {busy === "sync" ? "同步中…" : "保存并立即同步"}
         </button>
-        <button className="btn sm" disabled={busy !== null} onClick={() => void doSync("pull")}>
-          {busy === "pull" ? "拉取中…" : "立即拉取"}
+        <button className="btn" disabled={busy !== null} onClick={() => setConfirmPull(true)}>
+          拉取云端数据（覆盖本地）
         </button>
       </div>
+      <div className="setting-sub" style={{ marginTop: 6 }}>
+        坚果云用户请使用应用密码；远端建议使用 HTTPS。
+      </div>
+
+      {confirmPull && (
+        <div className="confirm-box">
+          <div className="small">将用云端密码库覆盖本地密码库。本地尚未同步的修改会丢失，是否继续？</div>
+          <div className="row" style={{ marginTop: 8, justifyContent: "flex-end" }}>
+            <button className="btn sm" onClick={() => setConfirmPull(false)}>
+              取消
+            </button>
+            <button className="btn sm danger" disabled={busy !== null} onClick={() => void doPull()}>
+              覆盖本地
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="hr" />
       <div className="section-cap">本地备份</div>
@@ -268,7 +373,7 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
           上次备份：{formatTime(ctx.settings.lastBackupAt)}
         </div>
       )}
-      <div className="row">
+      <div className="row" style={{ marginTop: 8, justifyContent: "flex-end" }}>
         <button className="btn sm" disabled={busy !== null} onClick={() => void createBackup()}>
           {busy === "create" ? "创建中…" : "创建备份"}
         </button>
@@ -335,42 +440,12 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
           )}
         </div>
       ))}
-
-      <div className="hr" />
-      <div className="section-cap">从文本导入（CSV）</div>
-      <textarea
-        className="input"
-        rows={3}
-        placeholder="粘贴 CSV 文本…"
-        value={importText}
-        onChange={(e) => setImportText(e.target.value)}
-      />
-      <div className="spacer-10" />
-      <button
-        className="btn sm primary"
-        disabled={!importText.trim() || busy !== null}
-        onClick={async () => {
-          setBusy("import");
-          try {
-            const n = await importCsv(importText);
-            await ctx.refreshFromBackend();
-            setImportText("");
-            setMsg({ ok: true, text: `成功导入 ${n} 条` });
-          } catch (e) {
-            setMsg({ ok: false, text: String(e) });
-          } finally {
-            setBusy(null);
-          }
-        }}
-      >
-        导入 CSV
-      </button>
       {msg && <div className={msg.ok ? "ok-text" : "err-text"}>{msg.text}</div>}
     </>
   );
 }
 
-// ---------------------------------------------------------------- 密码库
+// ---------------------------------------------------------------- 密码库（当前库用主题色标识，列表改下拉）
 
 function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
   const vault = ctx.vault;
@@ -399,8 +474,8 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
   };
 
   const create = async () => {
-    if (!newName.trim() || newPw.length < 4) {
-      setMsg({ ok: false, text: "请填写名称和至少 4 位的主密码" });
+    if (!newName.trim() || newPw.length < 8) {
+      setMsg({ ok: false, text: "请填写名称和至少 8 位的主密码" });
       return;
     }
     setBusy(true);
@@ -437,21 +512,33 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
 
   return (
     <>
-      <div className="section-cap">当前密码库</div>
-      <div className="setting-row">
-        <div className="setting-text">
-          <div className="setting-title">{vault.name}</div>
-          <div className="setting-sub">条目 {ctx.vault?.items.length ?? 0} 个 · 标签 {ctx.vault?.labels.length ?? 0} 个</div>
-        </div>
-        <button
-          className="btn sm"
-          onClick={() => {
-            onClose();
-            ctx.gotoSelect();
-          }}
-        >
-          切换
-        </button>
+      <div className="section-cap">密码库</div>
+      <select
+        className="input"
+        value={vault.id}
+        onChange={(e) => {
+          if (e.target.value === vault.id) return;
+          ctx.gotoSelect();
+          onClose();
+        }}
+      >
+        {ctx.vaults.map((v) => (
+          <option key={v.id} value={v.id}>
+            {v.id === vault.id ? `${v.name}（当前）` : v.name}
+          </option>
+        ))}
+      </select>
+      <div className="vault-current" style={{ marginTop: 8 }}>
+        <span className="vault-dot" />
+        <span className="grow">
+          <b style={{ color: "var(--primary)" }}>{vault.name}</b>
+          <div className="muted small">
+            条目 {vault.items.length} 个 · 标签 {vault.labels.length} 个 · 上次打开 {formatTime(vault.createdAt)}
+          </div>
+        </span>
+      </div>
+      <div className="setting-sub" style={{ marginTop: 6 }}>
+        每个密码库有独立的主密码和文件。切换后请在解锁页输入该库主密码。
       </div>
 
       <div className="hr" />
@@ -475,7 +562,7 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
         <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} />
       </div>
       <div className="form-row">
-        <label className="field-caption">主密码（至少 4 位）</label>
+        <label className="field-caption">主密码（至少 8 位）</label>
         <input className="input" type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
       </div>
       <button className="btn sm primary" disabled={busy} onClick={() => void create()}>
@@ -501,26 +588,11 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
   );
 }
 
-// ---------------------------------------------------------------- 显示与搜索
+// ---------------------------------------------------------------- 显示与搜索（主题已移到顶部“主题”页）
 
 function DisplayTab({ ctx }: { ctx: AppCtx }) {
   return (
     <>
-      <div className="section-cap">主题</div>
-      <div className="choice-grid">
-        {THEMES.map((t) => (
-          <button
-            key={t.key}
-            className={`choice-card${ctx.settings.theme === t.key ? " active" : ""}`}
-            onClick={() => void ctx.applySettings({ ...ctx.settings, theme: t.key })}
-          >
-            <span className="big">{t.icon}</span>
-            <span>{t.label}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="hr" />
       <div className="section-cap">默认展示</div>
       <select
         className="input"
@@ -555,12 +627,9 @@ function DisplayTab({ ctx }: { ctx: AppCtx }) {
   );
 }
 
-// ---------------------------------------------------------------- 导入与导出
+// ---------------------------------------------------------------- 导入与导出（只允许文件选择，不提供文本输入）
 
 function TransferTab({ ctx }: { ctx: AppCtx }) {
-  const [csvIn, setCsvIn] = useState("");
-  const [xmlIn, setXmlIn] = useState("");
-  const [jsonIn, setJsonIn] = useState("");
   const [jsonPw, setJsonPw] = useState("");
   const [jsonName, setJsonName] = useState("");
   const [sicvPw, setSicvPw] = useState("");
@@ -591,7 +660,6 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
       setMsg({ ok: true, text: `已导出 ${name}.${ext}` });
     });
 
-  // 加密 .sicv：与手机端同格式，拷回手机 / 同步盘均可直接使用
   const doExportSicv = () =>
     void run("exp-sicv", async () => {
       const b64 = await exportVaultSicv();
@@ -600,10 +668,54 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
       setMsg({ ok: true, text: `已导出 ${name}.sicv（加密，可拷回手机）` });
     });
 
+  const importTextFile = (f: File) =>
+    void run("imp-file", async () => {
+      const text = await f.text();
+      const ext = (f.name.split(".").pop() ?? "").toLowerCase();
+      if (ext === "csv") {
+        const n = await importCsv(text);
+        await ctx.refreshFromBackend();
+        setMsg({ ok: true, text: `成功导入 ${n} 条（CSV）` });
+      } else if (ext === "xml") {
+        const n = await importSafeincloudXml(text);
+        await ctx.refreshFromBackend();
+        setMsg({ ok: true, text: `成功导入 ${n} 条（XML）` });
+      } else if (ext === "json") {
+        if (!jsonPw) throw new Error("导入 JSON 需要先填写新库主密码");
+        const meta = await importVaultJson(text, jsonPw, jsonName.trim() || "导入的密码库");
+        await ctx.refreshFromBackend();
+        setJsonPw("");
+        setJsonName("");
+        setMsg({ ok: true, text: `已导入密码库「${meta.name}」并切换过去` });
+      } else {
+        throw new Error("不支持的文件类型（仅支持 .csv / .xml / .json）");
+      }
+    });
+
+  const importSicv = (f: File) =>
+    void run("imp-sicv", async () => {
+      const buf = await f.arrayBuffer();
+      const meta = await importVaultBytes(
+        arrayBufferToBase64(buf),
+        sicvPw,
+        sicvName.trim() || f.name.replace(/\.(sicv|spv)$/i, "") || "导入的密码库",
+      );
+      await ctx.refreshFromBackend();
+      setSicvPw("");
+      setSicvName("");
+      setMsg({ ok: true, text: `已导入密码库「${meta.name}」并切换过去` });
+    });
+
   return (
     <>
       <div className="section-cap">导出</div>
-      <div className="row" style={{ flexWrap: "wrap" }}>
+      <button className="btn primary tall block" disabled={busy !== null || !ctx.vault} onClick={doExportSicv}>
+        {busy === "exp-sicv" ? "导出中…" : "导出加密备份（.sicv，可拷回手机）"}
+      </button>
+      <div className="setting-sub" style={{ marginTop: 6 }}>
+        加密备份与手机端同格式，可直接放回手机或 WebDAV；下面的导出为明文格式，注意保管。
+      </div>
+      <div className="row" style={{ marginTop: 10, flexWrap: "wrap" }}>
         <button className="btn sm" disabled={busy !== null} onClick={() => doExport("csv")}>
           导出 CSV
         </button>
@@ -613,68 +725,15 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
         <button className="btn sm" disabled={busy !== null} onClick={() => doExport("json")}>
           导出明文 JSON（不安全）
         </button>
-        <button className="btn sm" disabled={busy !== null || !ctx.vault} onClick={doExportSicv}>
-          导出 .sicv（加密，可拷回手机）
-        </button>
       </div>
 
       <div className="hr" />
-      <div className="section-cap">导入 CSV</div>
-      <textarea
-        className="input"
-        rows={4}
-        placeholder={"title,username,password,url,notes\n…"}
-        value={csvIn}
-        onChange={(e) => setCsvIn(e.target.value)}
-      />
-      <div className="spacer-10" />
-      <button
-        className="btn sm primary"
-        disabled={busy !== null || !csvIn.trim()}
-        onClick={() =>
-          void run("imp-csv", async () => {
-            const n = await importCsv(csvIn);
-            await ctx.refreshFromBackend();
-            setCsvIn("");
-            setMsg({ ok: true, text: `成功导入 ${n} 条` });
-          })
-        }
-      >
-        {busy === "imp-csv" ? "导入中…" : "导入 CSV"}
-      </button>
-
-      <div className="hr" />
-      <div className="section-cap">导入 SafeInCloud XML</div>
-      <textarea
-        className="input"
-        rows={4}
-        placeholder="<vault>…</vault>"
-        value={xmlIn}
-        onChange={(e) => setXmlIn(e.target.value)}
-      />
-      <div className="spacer-10" />
-      <button
-        className="btn sm primary"
-        disabled={busy !== null || !xmlIn.trim()}
-        onClick={() =>
-          void run("imp-xml", async () => {
-            const n = await importSafeincloudXml(xmlIn);
-            await ctx.refreshFromBackend();
-            setXmlIn("");
-            setMsg({ ok: true, text: `成功导入 ${n} 条` });
-          })
-        }
-      >
-        {busy === "imp-xml" ? "导入中…" : "导入 XML"}
-      </button>
-
-      <div className="hr" />
-      <div className="section-cap">导入明文 JSON（来自"导出明文 JSON"）</div>
+      <div className="section-cap">导入条目（CSV / SafeInCloud XML / 明文 JSON）</div>
       <div className="row" style={{ marginBottom: 8 }}>
         <input
           className="input grow"
           type="password"
-          placeholder="新库主密码（用于加密导入的库）"
+          placeholder="新库主密码（仅 JSON 导入需要）"
           value={jsonPw}
           onChange={(e) => setJsonPw(e.target.value)}
         />
@@ -685,38 +744,23 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
           onChange={(e) => setJsonName(e.target.value)}
         />
       </div>
-      <textarea
-        className="input"
-        rows={4}
-        placeholder='{"schema":1,"items":[…]}'
-        value={jsonIn}
-        onChange={(e) => setJsonIn(e.target.value)}
+      <FilePicker
+        label="选择文件导入…"
+        accept=".csv,.xml,.json"
+        disabled={busy !== null}
+        onFile={importTextFile}
       />
-      <div className="spacer-10" />
-      <button
-        className="btn sm primary"
-        disabled={busy !== null || !jsonIn.trim() || !jsonPw}
-        onClick={() =>
-          void run("imp-json", async () => {
-            const meta = await importVaultJson(jsonIn, jsonPw, jsonName.trim() || "导入的密码库");
-            await ctx.refreshFromBackend();
-            setJsonIn("");
-            setJsonPw("");
-            setJsonName("");
-            setMsg({ ok: true, text: `已导入密码库「${meta.name}」并切换过去` });
-          })
-        }
-      >
-        {busy === "imp-json" ? "导入中…" : "导入 JSON"}
-      </button>
+      <div className="setting-sub" style={{ marginTop: 6 }}>
+        CSV / XML 导入到当前密码库；JSON 会新建一个密码库并切换过去。
+      </div>
 
       <div className="hr" />
-      <div className="section-cap">导入 .sicv 备份</div>
+      <div className="section-cap">导入加密备份（.sicv / .spv）</div>
       <div className="row" style={{ marginBottom: 8 }}>
         <input
           className="input grow"
           type="password"
-          placeholder="备份主密码（未加密留空）"
+          placeholder="备份主密码"
           value={sicvPw}
           onChange={(e) => setSicvPw(e.target.value)}
         />
@@ -727,22 +771,11 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
           onChange={(e) => setSicvName(e.target.value)}
         />
       </div>
-      <SicvPicker
+      <FilePicker
+        label="选择加密备份文件…"
+        accept=".sicv,.spv"
         disabled={busy !== null}
-        onFile={(f) =>
-          void run("imp-sicv", async () => {
-            const buf = await f.arrayBuffer();
-            const meta = await importVaultBytes(
-              arrayBufferToBase64(buf),
-              sicvPw,
-              sicvName.trim() || f.name.replace(/\.sicv$/i, "") || "导入的密码库",
-            );
-            await ctx.refreshFromBackend();
-            setSicvPw("");
-            setSicvName("");
-            setMsg({ ok: true, text: `已导入密码库「${meta.name}」并切换过去` });
-          })
-        }
+        onFile={importSicv}
       />
 
       {msg && <div className="ok-text">{msg.text}</div>}
@@ -751,13 +784,23 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
   );
 }
 
-function SicvPicker({ disabled, onFile }: { disabled: boolean; onFile: (f: File) => void }) {
+function FilePicker({
+  label,
+  accept,
+  disabled,
+  onFile,
+}: {
+  label: string;
+  accept: string;
+  disabled: boolean;
+  onFile: (f: File) => void;
+}) {
   return (
     <label className="btn sm" style={{ display: "inline-block", cursor: "pointer" }}>
-      选择 .sicv 文件…
+      {label}
       <input
         type="file"
-        accept=".sicv"
+        accept={accept}
         style={{ display: "none" }}
         disabled={disabled}
         onChange={(e) => {

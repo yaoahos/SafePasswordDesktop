@@ -7,6 +7,7 @@ import type {
   StrengthResult,
   SyncStrategy,
   SyncSummary,
+  UpdateInfo,
   Vault,
   VaultItem,
   VaultMeta,
@@ -118,3 +119,11 @@ export const attachmentRemove = (itemId: string, attachmentId: string) =>
 // ---- 导出加密 .sicv（Base64，前端转 Blob 下载，可拷回手机） ----
 
 export const exportVaultSicv = () => invoke<string>("export_vault_sicv");
+
+// ---- 检查更新 / 软件内自更新（对齐手机端 AboutScreen）----
+
+export const checkUpdate = (appVersion: string) =>
+  invoke<UpdateInfo>("check_update", { appVersion });
+
+export const updateDownloadAndInstall = (assetUrl: string) =>
+  invoke<string>("update_download_and_install", { assetUrl });

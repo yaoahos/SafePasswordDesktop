@@ -67,6 +67,8 @@ pub struct AppState {
 pub struct AppSettings {
     /// "system" | "light" | "dark"
     pub theme: String,
+    /// 主题强调色（#RRGGBB，对齐手机端 ThemeScreen 的 themePresets）
+    pub accent: String,
     /// 0 = 不自动锁定
     pub auto_lock_minutes: i32,
     pub hibp_api_key: String,
@@ -91,6 +93,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
             theme: "system".to_string(),
+            accent: "#1677FF".to_string(),
             auto_lock_minutes: 5,
             hibp_api_key: String::new(),
             webdav: WebDavConfig::default(),
@@ -950,4 +953,132 @@ pub async fn webdav_pull_if_changed(
         inner.last_remote_mtime = s2.last_modified as i64;
     }
     Ok(Some(summary))
+}
+
+// ---------------------------------------------------------------- 更新检查（对齐手机端 AboutScreen）
+
+/// 更新信息
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    pub current: String,
+    pub latest: String,
+    pub has_update: bool,
+    pub url: String,
+    pub asset_url: String,
+    pub notes: String,
+}
+
+fn version_tuple(v: &str) -> (u32, u32, u32) {
+    let clean = v.trim().trim_start_matches(['v', 'V']);
+    let mut parts = clean.split('.').map(|p| p.trim().parse::<u32>().unwrap_or(0));
+    (
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+    )
+}
+
+/// 桌面版 Release 仓库（推送后即可用；未发布时返回可读错误）
+const UPDATE_REPO: &str = "yaoahos/SafePasswordDesktop";
+
+#[tauri::command]
+pub async fn check_update(app_version: String) -> CmdResult<UpdateInfo> {
+    let client = reqwest::Client::builder()
+        .user_agent("SafePassword-Desktop")
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("无法初始化网络：{e}"))?;
+    let url = format!("https://api.github.com/repos/{UPDATE_REPO}/releases/latest");
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("无法连接 GitHub：{e}"))?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err("GitHub 上还没有桌面版 Release，暂时无法检查更新".to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(format!("检查更新失败（HTTP {}）", resp.status().as_u16()));
+    }
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("解析更新信息失败：{e}"))?;
+    let tag = body
+        .get("tag_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let html_url = body
+        .get("html_url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let notes = body
+        .get("body")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let asset_url = body
+        .get("assets")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| {
+            arr.iter()
+                .map(|a| {
+                    a.get("browser_download_url")
+                        .and_then(|u| u.as_str())
+                        .unwrap_or("")
+                })
+                .find(|u| u.ends_with(".exe") || u.ends_with(".msi"))
+        })
+        .unwrap_or("")
+        .to_string();
+    let latest = tag.trim_start_matches(['v', 'V']).to_string();
+    let has_update = version_tuple(&latest) > version_tuple(&app_version);
+    Ok(UpdateInfo {
+        current: app_version,
+        latest,
+        has_update,
+        url: html_url,
+        asset_url,
+        notes,
+    })
+}
+
+/// 下载安装包并启动安装（软件内自更新）
+#[tauri::command]
+pub async fn update_download_and_install(asset_url: String) -> CmdResult<String> {
+    if !asset_url.starts_with("https://") {
+        return Err("安装包地址无效".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .user_agent("SafePassword-Desktop")
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("无法初始化网络：{e}"))?;
+    let resp = client
+        .get(&asset_url)
+        .send()
+        .await
+        .map_err(|e| format!("下载失败：{e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("下载失败（HTTP {}）", resp.status().as_u16()));
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("读取安装包失败：{e}"))?;
+    let dir = std::env::temp_dir().join("SafePassword-update");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建临时目录失败：{e}"))?;
+    let name = asset_url
+        .rsplit('/')
+        .next()
+        .unwrap_or("SafePassword-setup.exe");
+    let path = dir.join(name);
+    std::fs::write(&path, &bytes).map_err(|e| format!("写入安装包失败：{e}"))?;
+    std::process::Command::new(&path)
+        .spawn()
+        .map_err(|e| format!("启动安装程序失败：{e}"))?;
+    Ok(path.to_string_lossy().to_string())
 }
