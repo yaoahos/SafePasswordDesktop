@@ -96,6 +96,11 @@ export function ItemDetail({
   };
 
   const save = async () => {
+    // 对齐手机端 validateItem（ItemEditScreen.kt:142）
+    if (!draft.title.trim()) {
+      notify("请填写标题后再进行操作", "error");
+      return;
+    }
     try {
       await onSave({ ...draft, updatedAt: Date.now() });
       setDirty(false);
