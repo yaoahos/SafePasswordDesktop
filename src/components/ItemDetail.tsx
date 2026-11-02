@@ -422,7 +422,7 @@ export function ItemDetail({
           </div>
         </div>
         <button className="icon-btn" title={draft.favorite ? "取消收藏" : "收藏"} onClick={() => void onToggleFavorite()}>
-          <span className="star" style={{ fontSize: 17 }}>
+          <span className="star" style={{ fontSize: 17, color: draft.favorite ? "var(--primary)" : "var(--text-3)" }}>
             {draft.favorite ? <Icon name="star-filled" size={17} /> : <Icon name="star" size={17} />}
           </span>
         </button>
@@ -596,7 +596,7 @@ export function ItemDetail({
         })}
       </div>
 
-      {!hasNotes && (
+      {!hasNotes && !isNew && (
       <div className="card">
         <div className="row" style={{ alignItems: "center", gap: 8 }}>
           <div className="card-title grow" style={{ marginBottom: 0 }}>

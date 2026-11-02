@@ -139,24 +139,24 @@ button {
 }
 
 .titlebar-logo {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
+  width: 23px;
+  height: 23px;
+  border-radius: 6px;
 }
 
 .titlebar-title {
-  font-size: 17px;
+  font-size: 15.5px;
   font-weight: 800;
   color: var(--text);
   letter-spacing: 0.2px;
 }
 
 .titlebar-version {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 700;
   color: var(--text-2);
   align-self: flex-end;
-  padding-bottom: 9px;
+  padding-bottom: 10px;
 }
 
 .titlebar-grow {
@@ -545,7 +545,7 @@ select.input {
 }
 
 .star {
-  color: var(--star);
+  color: var(--primary);
   font-size: 13px;
   flex: none;
 }

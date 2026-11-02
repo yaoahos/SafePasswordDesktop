@@ -7,6 +7,8 @@
 
 use std::time::Duration;
 
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -130,9 +132,19 @@ const PROPFIND_BODY: &str = "<?xml version=\"1.0\" encoding=\"utf-8\"?><D:propfi
 
 impl WebDavClient {
     pub fn new(config: WebDavConfig) -> Result<Self, WebDavError> {
+        // Basic 认证：全部请求默认带 Authorization（桌面端所有 URL 都由 base_url 派生，等价 Kotlin 的 authHost 守卫）
+        let mut headers = reqwest::header::HeaderMap::new();
+        if !config.username.is_empty() {
+            let raw = format!("{}:{}", config.username, config.password);
+            let encoded = BASE64_STANDARD.encode(raw.as_bytes());
+            if let Ok(value) = reqwest::header::HeaderValue::from_str(&format!("Basic {encoded}")) {
+                headers.insert(reqwest::header::AUTHORIZATION, value);
+            }
+        }
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(20))
             .timeout(Duration::from_secs(60))
+            .default_headers(headers)
             .build()?;
         Ok(WebDavClient { config, client })
     }
