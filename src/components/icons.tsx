@@ -29,7 +29,8 @@ export type IconName =
   | "file-export"
   | "back"
   | "menu"
-  | "tag";
+  | "tag"
+  | "wand";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   key: (
@@ -181,6 +182,15 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <path d="M4 4.8h8.6l7 7a2 2 0 0 1 0 2.8l-4.9 4.9a2 2 0 0 1-2.8 0l-7-7V4.8Z" />
       <circle cx="8.6" cy="8.6" r="1.5" />
+    </>
+  ),
+  /** 生成密码：魔杖 + 星芒（比 key/dice 更直观） */
+  wand: (
+    <>
+      <path d="M4.5 19.5 L14.4 9.6" />
+      <path d="M13.2 8.4 L15.6 10.8" />
+      <path d="M18 3.2 l0.9 2.3 2.3 0.9 -2.3 0.9 -0.9 2.3 -0.9-2.3 -2.3-0.9 2.3-0.9Z" fill="currentColor" stroke="none" />
+      <path d="M20.6 12.4 v2.2 M19.5 13.5 h2.2" />
     </>
   ),
 };

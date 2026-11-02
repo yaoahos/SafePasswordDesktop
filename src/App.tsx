@@ -360,14 +360,6 @@ export default function App() {
     [],
   );
 
-  const toggleFavorite = useCallback(async () => {
-    if (!vault || !selectItemId) return;
-    const item = vault.items.find((i) => i.id === selectItemId);
-    if (!item) return;
-    const v = await putItem({ ...item, favorite: !item.favorite, updatedAt: Date.now() });
-    setVault(v);
-  }, [vault, selectItemId]);
-
   const duplicateSelected = useCallback(async () => {
     if (!vault || !selectItemId) return;
     const item = vault.items.find((i) => i.id === selectItemId);
@@ -560,7 +552,6 @@ export default function App() {
               item={selected}
               labels={vault.labels}
               onSave={saveItem}
-              onToggleFavorite={toggleFavorite}
               onDuplicate={duplicateSelected}
               onDelete={draftNew ? async () => discardDraft() : trashSelected}
               onRestore={restoreSelected}

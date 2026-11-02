@@ -43,7 +43,6 @@ export function ItemDetail({
   item,
   labels,
   onSave,
-  onToggleFavorite,
   onDuplicate,
   onDelete,
   onRestore,
@@ -56,7 +55,6 @@ export function ItemDetail({
   labels: Label[];
   /** 保存编辑（putItem） */
   onSave: (next: VaultItem) => Promise<void>;
-  onToggleFavorite: () => Promise<void>;
   onDuplicate: () => Promise<void>;
   /** 移回收站（status=TRASHED） */
   onDelete: () => Promise<void>;
@@ -294,7 +292,7 @@ export function ItemDetail({
                 <div className="preview-field" key={f.id}>
                   <div className="preview-field-label">{f.label}</div>
                   <div className="preview-field-value">
-                    {masked ? MASK : f.value.trim() ? f.value : <span className="muted">未填写</span>}
+                    {masked ? MASK : f.value}
                   </div>
                   <div className="preview-field-actions">
                     {f.type === "URL" && f.value.trim() && (
@@ -348,6 +346,11 @@ export function ItemDetail({
         )}
 
         <div className="detail-actions">
+          {dirty && (
+            <button className="btn primary" onClick={() => void save()}>
+              保存
+            </button>
+          )}
           <button
             className="btn primary"
             onClick={() => {
@@ -421,7 +424,7 @@ export function ItemDetail({
             {draft.status === "ARCHIVED" ? " · 已归档" : trashed ? " · 回收站" : ""}
           </div>
         </div>
-        <button className="icon-btn" title={draft.favorite ? "取消收藏" : "收藏"} onClick={() => void onToggleFavorite()}>
+        <button className="icon-btn" title={draft.favorite ? "取消收藏" : "收藏"} onClick={() => patch({ favorite: !draft.favorite })}>
           <span className="star" style={{ fontSize: 17, color: draft.favorite ? "var(--primary)" : "var(--text-3)" }}>
             {draft.favorite ? <Icon name="star-filled" size={17} /> : <Icon name="star" size={17} />}
           </span>
@@ -506,14 +509,13 @@ export function ItemDetail({
                 {f.label}
               </div>
               {trashed ? (
-                <div className="field-value">{masked ? MASK : f.value || "未填写"}</div>
+                <div className="field-value">{masked ? MASK : f.value}</div>
               ) : f.type === "PASSWORD" || f.type === "SECRET" ? (
                 <div className="input-wrap grow">
                   <input
                     className="input with-eye"
                     type={masked ? "password" : "text"}
                     value={f.value}
-                    placeholder="未填写"
                     onChange={(e) => patchField(f.id, { value: e.target.value })}
                   />
                   <button
@@ -528,7 +530,6 @@ export function ItemDetail({
                 <input
                   className="input field-value"
                   value={f.value}
-                  placeholder="未填写"
                   onChange={(e) => patchField(f.id, { value: e.target.value })}
                 />
               )}
@@ -563,7 +564,7 @@ export function ItemDetail({
                     ↓
                   </button>
                   <button className="icon-btn" title="生成密码" onClick={() => setGenFieldId(f.id)}>
-                    <Icon name="dice" size={15} />
+                    <Icon name="wand" size={15} />
                   </button>
                   <button
                     className="icon-btn"

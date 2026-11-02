@@ -14,7 +14,7 @@ export const APP_VERSION = "0.1.0";
 
 /** 顶部动作：线性图标、放大加深；WebDAV 与导入入口已移除（改由设置页承载） */
 export const TOP_ACTIONS: { key: TopAction; label: string; icon: IconName; color: string }[] = [
-  { key: "GENERATOR", label: "密码生成器", icon: "key", color: "#1677FF" },
+  { key: "GENERATOR", label: "密码生成器", icon: "wand", color: "#1677FF" },
   { key: "SECURITY", label: "安全中心", icon: "shield", color: "#DC2626" },
   { key: "THEME", label: "主题", icon: "palette", color: "#9333EA" },
   { key: "SETTINGS", label: "设置", icon: "sliders", color: "#374151" },
