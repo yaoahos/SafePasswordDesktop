@@ -1,7 +1,7 @@
 //! 命令层端到端测试：模拟 UI 的完整调用流。
 //!
-//! 覆盖本轮新增的胶水逻辑（base64 + Mutex + store/attachment/backup 串联）：
-//! 创建 → 加条目 → 附件加/读/删 → 导出 .sicv → 备份/恢复 → 改主密码 → 模拟重启重开 → 导入副本。
+//! 覆盖本轮新增的胶水逻辑（base64 + Mutex + store/backup 串联）：
+//! 创建 → 加条目 → 导出 .spv → 备份/恢复 → 改主密码 → 模拟重启重开 → 导入副本。
 //!
 //! State 通过 tauri::test 的 mock app 构造（StateManager 的 new/set 是 pub(crate），
 //! 外部只能走 `mock_builder().manage(...)`；tauri/test 只开在 dev-dependencies，不影响 release）。
@@ -40,7 +40,7 @@ fn tmp_root(tag: &str) -> PathBuf {
     root
 }
 
-/// UI 主流程：建库 → 条目 → 附件 → 导出 .sicv → 备份/恢复 → 改密 → 重启重开 → 导入副本。
+/// UI 主流程：建库 → 条目 → 导出 .spv → 备份/恢复 → 改密 → 重启重开 → 导入副本。
 #[test]
 fn ui_full_flow_roundtrip() {
     let root = tmp_root("flow");
@@ -53,7 +53,7 @@ fn ui_full_flow_roundtrip() {
     let meta = c::create_vault(
         app.state::<AppState>(),
         "命令层测试库".into(),
-        "pw-主密码🚀".into(),
+        "pw-主密码123🚀".into(),
     )
     .unwrap();
     assert_eq!(c::list_vaults(app.state::<AppState>()).unwrap().len(), 1);
@@ -74,44 +74,11 @@ fn ui_full_flow_roundtrip() {
     let v = c::put_item(app.state::<AppState>(), item).unwrap();
     assert_eq!(v.items.len(), 1);
 
-    // 3. 附件：加 → 读回字节比对 → 删（引用 + .sica 文件都消失）
-    let payload = b"hello attachment \xE4\xB8\xAD\xE6\x96\x87 \xF0\x9F\x94\x90";
-    let v = c::attachment_add(
-        app.state::<AppState>(),
-        "item-e2e-1".into(),
-        "秘密.txt".into(),
-        "text/plain".into(),
-        b64(payload),
-    )
-    .unwrap();
-    let att = v.items[0].attachments[0].clone();
-    assert_eq!(att.name, "秘密.txt");
-    let back = unb64(
-        &c::attachment_read(app.state::<AppState>(), att.id.clone()).unwrap(),
-    );
-    assert_eq!(back, payload, "附件读回字节不一致");
-
-    let v = c::attachment_remove(
-        app.state::<AppState>(),
-        "item-e2e-1".into(),
-        att.id.clone(),
-    )
-    .unwrap();
-    assert!(v.items[0].attachments.is_empty());
-    assert!(
-        !root
-            .join("attachments")
-            .join(&meta.id)
-            .join(format!("{}.sica", att.id))
-            .exists(),
-        ".sica 文件应已删除"
-    );
-
-    // 4. 导出 .sicv → 独立容器打开（SICV 魔数 + 条目还在）
-    let sicv = c::export_vault_sicv(app.state::<AppState>()).unwrap();
-    let bytes = unb64(&sicv);
+    // 3. 导出 .spv → 独立容器打开（SICV 魔数 + 条目还在）
+    let spv = c::export_vault_spv(app.state::<AppState>()).unwrap();
+    let bytes = unb64(&spv);
     assert_eq!(&bytes[..4], b"SICV");
-    let c2 = VaultContainer::open(&bytes, "pw-主密码🚀").unwrap();
+    let c2 = VaultContainer::open(&bytes, "pw-主密码123🚀").unwrap();
     assert_eq!(c2.vault.items.len(), 1);
     assert_eq!(c2.vault.items[0].title, "GitHub");
 
@@ -126,7 +93,7 @@ fn ui_full_flow_roundtrip() {
     let restored = c::backup_restore(
         app.state::<AppState>(),
         info.path.to_string_lossy().to_string(),
-        "pw-主密码🚀".into(),
+        "pw-主密码123🚀".into(),
     )
     .unwrap();
     assert_eq!(restored.items.len(), 1);
@@ -137,14 +104,14 @@ fn ui_full_flow_roundtrip() {
     );
     c::change_master_password(
         app.state::<AppState>(),
-        "pw-主密码🚀".into(),
+        "pw-主密码123🚀".into(),
         "新主密码123".into(),
     )
     .unwrap();
     let id = meta.id.clone();
     c::close_vault(app.state::<AppState>()).unwrap();
     assert!(
-        c::open_vault(app.state::<AppState>(), id.clone(), "pw-主密码🚀".into()).is_err(),
+        c::open_vault(app.state::<AppState>(), id.clone(), "pw-主密码123🚀".into()).is_err(),
         "旧主密码应失效"
     );
     let v = c::open_vault(app.state::<AppState>(), id.clone(), "新主密码123".into()).unwrap();
@@ -156,11 +123,11 @@ fn ui_full_flow_roundtrip() {
     assert_eq!(v2.items[0].title, "GitHub");
     assert!(v2.items[0].attachments.is_empty());
 
-    // 8. 导入第 4 步导出的 .sicv（旧口令加密）→ 新 id 新库
+    // 8. 导入第 3 步导出的 .spv（旧口令加密）→ 新 id 新库
     let m2 = c::import_vault_bytes(
         app2.state::<AppState>(),
-        sicv,
-        "pw-主密码🚀".into(),
+        spv,
+        "pw-主密码123🚀".into(),
         "导入副本".into(),
     )
     .unwrap();

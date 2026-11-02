@@ -32,9 +32,10 @@ impl BackupManager {
     pub fn backup(&self, vault_file: &Path, vault_name: &str) -> Result<BackupInfo, String> {
         fs::create_dir_all(&self.root).map_err(io)?;
         let now = chrono::Local::now();
-        let stamp = now.format("%Y%m%d-%H%M%S").to_string();
+        // 与手机端一致：yyMMdd-HHmmss（例 1-260102-193015.spv）
+        let stamp = now.format("%y%m%d-%H%M%S").to_string();
         let safe_name = sanitize_name(vault_name);
-        let target = self.root.join(format!("{safe_name}-{stamp}.sicv"));
+        let target = self.root.join(format!("{safe_name}-{stamp}.spv"));
         fs::copy(vault_file, &target).map_err(io)?;
         info_of(&target)
     }
@@ -47,7 +48,9 @@ impl BackupManager {
         for entry in fs::read_dir(&self.root).map_err(io)? {
             let entry = entry.map_err(io)?;
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("sicv") {
+            // 兼容历史 .sicv 备份
+            let ext = path.extension().and_then(|e| e.to_str());
+            if ext != Some("spv") && ext != Some("sicv") {
                 continue;
             }
             if let Ok(info) = info_of(&path) {
@@ -137,11 +140,11 @@ mod tests {
         let src_dir = std::env::temp_dir().join(format!("sp-backup-src-{}", std::process::id()));
         let _ = fs::remove_dir_all(&src_dir);
         fs::create_dir_all(&src_dir).unwrap();
-        let src = src_dir.join("src.sicv");
+        let src = src_dir.join("src.spv");
         fs::write(&src, b"dummy-vault-bytes").unwrap();
         let info = bm.backup(&src, "测试库").unwrap();
         assert!(info.name.starts_with("测试库-"));
-        assert!(info.name.ends_with(".sicv"));
+        assert!(info.name.ends_with(".spv"));
         assert_eq!(info.size, 17);
         let listed = bm.list().unwrap();
         assert_eq!(listed.len(), 1);

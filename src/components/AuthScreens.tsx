@@ -2,6 +2,8 @@ import { useRef, useState } from "react";
 import type { VaultMeta } from "../types";
 import { evaluateStrength } from "../api";
 import { arrayBufferToBase64, formatTime } from "../utils";
+import { Icon } from "./icons";
+import { WindowControls } from "./WindowControls";
 
 type Mode = "empty" | "select" | "create" | "restore";
 
@@ -133,6 +135,9 @@ export function AuthScreens({
 
   return (
     <div className="auth-wrap">
+      <div className="auth-topbar" data-tauri-drag-region="true">
+        <WindowControls />
+      </div>
       <div className="auth-panel">
         <div className="auth-hero">
           <img className="auth-appicon" src="/icon.png" alt="" />
@@ -170,7 +175,7 @@ export function AuthScreens({
                       setError(null);
                     }}
                   >
-                    🔒 {v.name}
+                    <Icon name="lock" size={13} /> {v.name}
                   </button>
                 ))}
               </div>
@@ -183,7 +188,7 @@ export function AuthScreens({
               <label className="field-caption">主密码</label>
               <div className="input-wrap">
                 <input
-                  className="input"
+                  className="input with-eye"
                   type={showPw ? "text" : "password"}
                   autoFocus
                   value={password}
@@ -193,23 +198,18 @@ export function AuthScreens({
                     if (e.key === "Enter") void doUnlock();
                   }}
                 />
-                <button className="icon-btn" title={showPw ? "隐藏" : "显示"} onClick={() => setShowPw((v) => !v)}>
-                  {showPw ? "🙈" : "👁"}
+                <button
+                  className="icon-btn in-frame"
+                  title={showPw ? "隐藏" : "显示"}
+                  onClick={() => setShowPw((v) => !v)}
+                >
+                  <Icon name={showPw ? "eye-off" : "eye"} size={17} />
                 </button>
               </div>
             </div>
             <button className="btn primary block tall" disabled={busy || !selected} onClick={() => void doUnlock()}>
               {busy ? "解锁中…" : "解锁"}
             </button>
-            <div className="spacer-10" />
-            <div className="row" style={{ justifyContent: "center", gap: 18 }}>
-              <button className="link-btn" onClick={() => setMode("create")}>
-                ＋ 新建密码库
-              </button>
-              <button className="link-btn" onClick={() => setMode("restore")}>
-                从本地恢复
-              </button>
-            </div>
           </>
         )}
 
@@ -282,7 +282,7 @@ export function AuthScreens({
           <>
             <div className="field-caption">从本地恢复</div>
             <div className="muted small" style={{ marginBottom: 10 }}>
-              选择手机端导出的备份文件（.sicv / .spv），输入该库的主密码。
+              选择手机端导出的备份文件（.spv，兼容旧版 .sicv），输入该库的主密码。
             </div>
             <button className="btn block" onClick={() => fileRef.current?.click()}>
               {restoreFile ? `已选择：${restoreFile.name}` : "选择保险库文件…"}

@@ -17,8 +17,8 @@ body,
   --text-2: #5c6370;
   --text-3: #6b7280;
   --text-faint: #9aa0a6;
-  --border: #e3e6eb;
-  --border-soft: #eff1f4;
+  --border: #cfd5dd;
+  --border-soft: #e3e7ec;
   --primary: #1677ff;
   --primary-soft: #e8f1ff;
   --hover: rgba(22, 119, 255, 0.06);
@@ -37,8 +37,8 @@ body,
   --text-2: #b6bcc4;
   --text-3: #a2a9b3;
   --text-faint: #7c8593;
-  --border: #2a2e35;
-  --border-soft: #23262c;
+  --border: #3a3f48;
+  --border-soft: #2c3037;
   --primary: #4d9bff;
   --primary-soft: #14294a;
   --hover: rgba(77, 155, 255, 0.1);
@@ -111,52 +111,90 @@ button {
 /* ---------------------------------------------------------------- 顶栏 */
 
 .topbar {
-  height: 62px;
+  height: 66px;
   flex: none;
   background: var(--surface);
   box-shadow: var(--shadow);
   display: flex;
   align-items: center;
-  padding: 0 16px;
+  padding: 0 8px 0 18px;
   gap: 6px;
   z-index: 5;
+  user-select: none;
 }
 
 .topbar-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex: none;
-  margin-right: 6px;
+  margin-right: 12px;
+  cursor: default;
 }
 
 .topbar-logo {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
 }
 
 .topbar-title {
-  font-size: 17px;
+  font-size: 21px;
   font-weight: 800;
   color: var(--text);
   letter-spacing: 0.2px;
 }
 
 .topbar-version {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-3);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-2);
   align-self: flex-end;
-  padding-bottom: 3px;
+  padding-bottom: 4px;
 }
 
 .topbar-actions {
   display: flex;
   align-items: center;
   gap: 2px;
-  flex: 1;
+  flex: none;
   justify-content: flex-end;
+}
+
+.topbar-grow {
+  flex: 1;
+  height: 100%;
+  min-width: 12px;
+}
+
+/* 自绘窗口按钮（decorations:false） */
+.win-ctrls {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex: none;
+  margin-left: 2px;
+}
+
+.win-btn {
+  width: 46px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.win-btn:hover {
+  background: var(--surface-2);
+}
+
+.win-btn.win-close:hover {
+  background: #e81123;
+  color: #fff;
 }
 
 .topbar-btn {
@@ -168,7 +206,7 @@ button {
   color: var(--text);
   font-size: 13.5px;
   font-weight: 600;
-  padding: 6px 9px;
+  padding: 7px 10px;
   border-radius: 9px;
   cursor: pointer;
 }
@@ -178,13 +216,24 @@ button {
 }
 
 .topbar-icon {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   display: grid;
   place-items: center;
-  font-size: 20px;
   line-height: 1;
   flex: none;
+}
+
+/* 解锁页右上角的窗口按钮条（无标题栏时需要能关闭窗口） */
+.auth-topbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  padding: 4px 6px 0 0;
+  z-index: 10;
 }
 
 /* ---------------------------------------------------------------- 侧边栏 */
@@ -330,6 +379,19 @@ button {
   color: var(--text-3);
   font-size: 14px;
   pointer-events: none;
+}
+
+/* 输入框内右侧的眼睛按钮（对齐手机端框内查看主密码） */
+.input-wrap .icon-btn.in-frame {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-2);
+}
+
+.input.with-eye {
+  padding-right: 38px;
 }
 
 .input {
@@ -1111,6 +1173,7 @@ select.input {
 /* ---------------------------------------------------------------- 登录 / 解锁 */
 
 .auth-wrap {
+  position: relative;
   height: 100%;
   display: flex;
   align-items: center;
@@ -1497,3 +1560,70 @@ select.input {
 .pw-meter { margin: 2px 0 10px; }
 .pw-bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
 .pw-bar-fill { height: 100%; border-radius: 3px; transition: width 0.2s ease; }
+
+/* ---------------------------------------------------------------- v1 细化（列表控件 / 实心圆点标签 / 下拉） */
+
+.list-ctl-row {
+  align-items: center;
+  gap: 8px;
+}
+
+.list-ctl {
+  height: 34px;
+  min-width: 34px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.bold-ico {
+  stroke-width: 2.6;
+}
+
+.chip-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-right: 10px;
+}
+
+.chip-dot .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* 原生下拉：选项更紧凑一致，选中项用强调色 */
+select.input {
+  padding-right: 26px;
+}
+
+select.input option {
+  padding: 6px 8px;
+  font-size: 13.5px;
+}
+
+select.input option:checked {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* v1 项 5：字段名加粗、行距收紧 */
+.field-label {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.field-row {
+  gap: 8px;
+}
+
+.field-row .input {
+  height: 36px;
+}

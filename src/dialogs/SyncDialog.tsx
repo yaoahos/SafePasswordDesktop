@@ -71,8 +71,6 @@ export function SyncDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void 
           <div className="hr" />
           <div className="small muted" style={{ lineHeight: 1.9 }}>
             冲突：{summary.conflicts}
-            <br />
-            上传附件：{summary.attachmentsUploaded} · 下载附件：{summary.attachmentsDownloaded}
             {summary.message && (
               <>
                 <br />

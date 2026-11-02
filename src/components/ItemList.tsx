@@ -1,6 +1,6 @@
 import type { Label, SortMode, VaultItem } from "../types";
-import { itemIcon, itemMatches, itemSubtitle, labelColorCss } from "../utils";
-import { LabelGlyph } from "./LabelGlyph";
+import { iconBg, itemIcon, itemMatches, labelColorCss } from "../utils";
+import { Icon } from "./icons";
 
 export function ItemList({
   items,
@@ -34,13 +34,12 @@ export function ItemList({
   return (
     <div className="item-list">
       <div className="item-list-top">
-        <div className="row">
+        <div className="row list-ctl-row">
           <div className="grow" style={{ fontWeight: 600 }}>
             {sectionTitle}
           </div>
           <select
-            className="input"
-            style={{ width: "auto", padding: "4px 6px", fontSize: 12 }}
+            className="input list-ctl"
             value={sortMode}
             title="排序方式"
             onChange={(e) => onChangeSort(e.target.value as SortMode)}
@@ -49,15 +48,18 @@ export function ItemList({
             <option value="UPDATED">最近更新</option>
             <option value="TITLE">标题</option>
           </select>
-          <button className="btn sm" title="切换升 / 降序" onClick={() => onChangeSort(sortMode)}>
-            {sortAsc ? "↑" : "↓"}
+          <button className="btn list-ctl" title="切换升 / 降序" onClick={() => onChangeSort(sortMode)}>
+            <Icon name={sortAsc ? "arrow-up" : "arrow-down"} size={16} className="bold-ico" />
           </button>
-          <button className="btn primary sm" onClick={onNew}>
-            ＋ 新建
+          <button className="btn primary list-ctl" onClick={onNew}>
+            <Icon name="plus" size={16} />
+            新建
           </button>
         </div>
         <div className="input-wrap">
-          <span className="ico">🔍</span>
+          <span className="ico">
+            <Icon name="search" size={16} />
+          </span>
           <input
             className="input with-ico"
             placeholder="搜索标题、账号、网址"
@@ -84,7 +86,10 @@ export function ItemList({
               className={`item-card${selectedId === item.id ? " selected" : ""}`}
               onClick={() => onSelect(item.id)}
             >
-              <span className={`item-icon${icon.kind === "emoji" ? " emoji" : ""}`}>
+              <span
+                className={`item-icon${icon.kind === "emoji" ? " emoji" : ""}`}
+                style={iconBg(icon)}
+              >
                 {icon.kind === "img" ? (
                   <img src={icon.src} alt="" />
                 ) : icon.kind === "char" ? (
@@ -96,18 +101,20 @@ export function ItemList({
               <span className="grow" style={{ minWidth: 0 }}>
                 <span className="item-title-row">
                   <span className="item-title">{item.title || "未命名"}</span>
-                  {item.favorite && <span className="star">★</span>}
+                  {item.favorite && (
+                    <span className="star">
+                      <Icon name="star-filled" size={13} />
+                    </span>
+                  )}
                 </span>
-                <div className="item-sub">{itemSubtitle(item)}</div>
-                {(labels.length > 0 || item.status === "ARCHIVED") && (
+                {labels.length > 0 && (
                   <div className="item-meta">
                     {labels.map((l) => (
-                      <span key={l.id} className="chip" style={{ background: `${labelColorCss(l.color)}22` }}>
-                        <LabelGlyph color={labelColorCss(l.color)} size={11} />
+                      <span key={l.id} className="chip-dot">
+                        <span className="dot" style={{ background: labelColorCss(l.color) }} />
                         {l.name}
                       </span>
                     ))}
-                    {item.status === "ARCHIVED" && <span className="chip archived">已归档</span>}
                   </div>
                 )}
               </span>

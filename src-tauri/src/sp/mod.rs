@@ -3,6 +3,7 @@
 
 pub mod attachment;
 pub mod backup;
+pub mod cloud;
 pub mod codec;
 pub mod container;
 pub mod crypto;

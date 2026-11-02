@@ -2,7 +2,7 @@
 //!
 //! 覆盖真实 HTTP 链路：PROPFIND 连通 → 首传 → 二次幂等 → 设备B 导入副本 MERGE 首同步 →
 //! A 改动上传 / B 下载 → B 改动上传 / A 下载 → 附件跨设备往返。
-//! 远端路径按 Kotlin 语义固定为 `<remoteDir>/SafePassword.spv`（remote_path 忽略 vaultKey）。
+//! 远端路径对齐手机端多库布局：`<remoteDir>/SafePassword-<key>.spv` + 清单 `SafePassword-index.json`（旧单文件路径仅作回退）。
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -204,14 +204,15 @@ async fn two_devices_sync_through_mock_webdav() {
         .unwrap();
     assert_eq!(s.direction, "UPLOADED", "首传方向不对：{s:?}");
     assert_eq!(s.message, "已上传到 WebDAV");
+    let keys: Vec<String> = files.lock().unwrap().keys().cloned().collect();
     assert!(
-        files
-            .lock()
-            .unwrap()
-            .keys()
-            .any(|k| k.ends_with("/SafePassword.spv")),
-        "远端应有固定路径 <dir>/SafePassword.spv，实际：{:?}",
-        files.lock().unwrap().keys().collect::<Vec<_>>()
+        keys.iter()
+            .any(|k| k.contains("/SafePassword-v") && k.ends_with(".spv")),
+        "远端应按库名哈希分文件 SafePassword-<key>.spv，实际：{keys:?}"
+    );
+    assert!(
+        keys.iter().any(|k| k.ends_with("/SafePassword-index.json")),
+        "上传后应维护云端清单，实际：{keys:?}"
     );
 
     // 3. A 二次同步（无变化 → NONE）
@@ -221,15 +222,15 @@ async fn two_devices_sync_through_mock_webdav() {
     assert_eq!(s.direction, "NONE", "二次同步应无变化：{s:?}");
     assert_eq!(s.message, "已是最新状态");
 
-    // ---- 设备 B：导入 A 的加密副本（同 contentKey）→ MERGE 首同步
+    // ---- 设备 B：导出 A 的加密副本并按同名导入（云端 key 由库名派生，两端同名才指同一文件）
     let root_b = tmp_root("b");
     let app_b = mock_app(&root_b);
-    let export_b64 = c::export_vault_sicv(app_a.state::<AppState>()).unwrap();
+    let export_b64 = c::export_vault_spv(app_a.state::<AppState>()).unwrap();
     c::import_vault_bytes(
         app_b.state::<AppState>(),
         export_b64,
         "pw-sync🚀".into(),
-        "同步库B".into(),
+        "同步库".into(),
     )
     .unwrap();
     // 3. B 首同步：import 会复制 A 的 lastSyncedAt 并 bump updatedAt → 判定"本地更新"→
@@ -286,36 +287,11 @@ async fn two_devices_sync_through_mock_webdav() {
         "A 应拿到改后的标题"
     );
 
-    // 6. 附件跨设备：A 上传 → B 下载 → 字节一致
-    let payload = b"cross-device attachment \xE4\xB8\xAD\xE6\x96\x87 bytes";
-    let v = c::attachment_add(
-        app_a.state::<AppState>(),
-        "item-a1".into(),
-        "跨设备.txt".into(),
-        "text/plain".into(),
-        b64(payload),
-    )
-    .unwrap();
-    let att_id = v
-        .items
-        .iter()
-        .find(|i| i.id == "item-a1")
-        .and_then(|i| i.attachments.first())
-        .map(|a| a.id.clone())
-        .expect("附件引用存在");
+    // 6. 多库布局：上传后应落到 SafePassword-<key>.spv，并维护清单
     let s = c::webdav_sync(app_a.state::<AppState>(), cfg(), None)
         .await
         .unwrap();
-    assert_eq!(s.direction, "UPLOADED");
-    assert_eq!(s.attachments_uploaded, 1, "A 应上传 1 个附件：{s:?}");
-    let s = c::webdav_sync(app_b.state::<AppState>(), cfg(), None)
-        .await
-        .unwrap();
-    assert_eq!(s.direction, "DOWNLOADED");
-    assert_eq!(s.attachments_downloaded, 1, "B 应下载 1 个附件：{s:?}");
-    let got = c::attachment_read(app_b.state::<AppState>(), att_id).unwrap();
-    assert_eq!(unb64(&got), payload, "附件字节跨设备一致");
-
+    assert_eq!(s.direction, "NONE", "已是最新状态：{s:?}");
     let _ = std::fs::remove_dir_all(&root_a);
     let _ = std::fs::remove_dir_all(&root_b);
 }

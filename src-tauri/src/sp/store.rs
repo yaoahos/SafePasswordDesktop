@@ -72,7 +72,12 @@ impl VaultStore {
         for entry in entries {
             let entry = entry.map_err(io)?;
             let file_name = entry.file_name().to_string_lossy().into_owned();
-            if !file_name.ends_with(".sicv") || known.contains(&file_name) {
+            // 兼容新旧扩展：当前写 .spv，历史库仍是 .sicv
+            let stem = file_name
+                .strip_suffix(".spv")
+                .or_else(|| file_name.strip_suffix(".sicv"));
+            let Some(stem) = stem else { continue };
+            if known.contains(&file_name) {
                 continue;
             }
             let created_at = entry
@@ -83,7 +88,7 @@ impl VaultStore {
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
             index.vaults.push(VaultMeta {
-                id: file_name[..file_name.len() - ".sicv".len()].to_string(),
+                id: stem.to_string(),
                 name: "密码库".to_string(),
                 file_name,
                 created_at,
@@ -119,7 +124,7 @@ impl VaultStore {
         mut container: VaultContainer,
     ) -> Result<(VaultContainer, VaultMeta), StoreError> {
         let vault_id = container.vault.id.clone();
-        let file_name = format!("{vault_id}.sicv");
+        let file_name = format!("{vault_id}.spv");
         let meta = VaultMeta {
             id: vault_id,
             name: container.vault.name.clone(),

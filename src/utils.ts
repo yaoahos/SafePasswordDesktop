@@ -224,7 +224,8 @@ export function newItemFromTemplate(templateId: string): VaultItem {
     updatedAt: now,
     deletedAt: null,
     attachments: [],
-    iconKey: TEMPLATE_ICON[tpl.id] ?? "",
+    // 默认图标 = 标题首字符 + 按 id/title 取色（对齐手机端 ItemIcon 的 fallback，v1 项 6/11）
+    iconKey: "",
     iconData: "",
   };
 }
@@ -248,8 +249,20 @@ export function itemSubtitle(item: VaultItem): string {
 
 export type ItemIcon =
   | { kind: "img"; src: string }
-  | { kind: "char"; char: string }
+  | { kind: "char"; char: string; color?: string }
   | { kind: "emoji"; emoji: string };
+
+/** 首字符兜底色板（对齐移动端 ItemIcon 的 8 色 hash 板） */
+const FALLBACK_COLORS = [
+  "#2563EB",
+  "#7C3AED",
+  "#DB2777",
+  "#059669",
+  "#EA580C",
+  "#0891B2",
+  "#4F46E5",
+  "#B45309",
+];
 
 export function itemIcon(item: VaultItem): ItemIcon {
   if (item.iconKey === "custom" && item.iconData) {
@@ -263,19 +276,25 @@ export function itemIcon(item: VaultItem): ItemIcon {
     if (sym) return { kind: "emoji", emoji: sym };
     return { kind: "char", char: item.iconKey.charAt(0).toUpperCase() };
   }
-  return { kind: "emoji", emoji: templateEmoji(item.templateId) };
+  // 无图标键：标题首字符 + 按 id+title 取色（手机端 ItemIcon 的 fallback，v1 项 6）
+  const seed = `${item.id}:${item.title}`;
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
+  const color = FALLBACK_COLORS[Math.abs(h) % FALLBACK_COLORS.length];
+  const ch = (item.title.trim().charAt(0) || "?").toUpperCase();
+  return { kind: "char", char: ch, color };
 }
 
-/** 模板默认图标（对齐移动端 templateIcon：登录/卡/邮箱/网络/证件/笔记） */
-const TEMPLATE_ICON: Record<string, string> = {
-  login: "key",
-  bank_card: "card",
-  email: "email",
-  wifi: "wifi",
-  identity: "id",
-  note: "note",
-  custom: "",
-};
+/** 取首字符图标的底色（非首字符图标时返回 undefined） */
+export function iconFallbackColor(item: VaultItem): string | undefined {
+  const ic = itemIcon(item);
+  return ic.kind === "char" ? ic.color : undefined;
+}
+
+/** 首字符图标的行内样式（底色 + 白字），对齐手机端 ItemIcon fallback */
+export function iconBg(ic: ItemIcon): { background: string; color: string } | undefined {
+  return ic.kind === "char" && ic.color ? { background: ic.color, color: "#fff" } : undefined;
+}
 
 /** iconKey 符号 → 图标（对齐移动端 ItemIcon 的符号映射） */
 const ICON_SYMBOLS: Record<string, string> = {

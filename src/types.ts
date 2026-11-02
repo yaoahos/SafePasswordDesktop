@@ -161,7 +161,5 @@ export type SortMode = "TITLE" | "UPDATED" | "CREATED";
 export interface SyncSummary {
   direction: "NONE" | "UPLOADED" | "DOWNLOADED" | "MERGED" | "CONFLICT";
   conflicts: number;
-  attachmentsUploaded: number;
-  attachmentsDownloaded: number;
   message: string;
 }

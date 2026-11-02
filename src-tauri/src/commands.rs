@@ -13,7 +13,6 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::sp::attachment::AttachmentStore;
 use crate::sp::backup::{BackupInfo, BackupManager};
 use crate::sp::codec;
 use crate::sp::container::VaultContainer;
@@ -204,7 +203,22 @@ pub fn create_vault(state: State<AppState>, name: String, password: String) -> C
     if password.is_empty() {
         return Err("主密码不能为空".to_string());
     }
+    if password.chars().count() < 8 {
+        return Err("主密码至少 8 位".to_string());
+    }
     let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+    let trimmed = name.trim();
+    if !trimmed.is_empty() {
+        let exists = inner
+            .store
+            .list()
+            .map_err(err)?
+            .into_iter()
+            .any(|m| m.name.eq_ignore_ascii_case(trimmed));
+        if exists {
+            return Err(format!("已存在同名密码库“{trimmed}”"));
+        }
+    }
     let (container, meta) = inner.store.create(&name, &password).map_err(err)?;
     inner.current = Some(CurrentVault {
         container,
@@ -471,100 +485,6 @@ pub async fn check_email_breaches(state: State<'_, AppState>, email: String) -> 
     hibp.email_breaches(&email, &key).await.map_err(err)
 }
 
-// ---------------------------------------------------------------- 附件
-
-/// 当前库的附件仓库（内容密钥从已解锁的容器里来）。
-fn attachment_store_for(inner: &AppStateInner) -> CmdResult<AttachmentStore> {
-    let cur = inner.current.as_ref().ok_or(NO_OPEN_VAULT)?;
-    let key = base64::engine::general_purpose::STANDARD
-        .decode(cur.container.vault.content_key.trim())
-        .unwrap_or_default();
-    let root = inner.store.attachments_dir_for(&cur.meta.id);
-    AttachmentStore::new(&root, key).map_err(err)
-}
-
-/// 往条目里添加附件（bytes 已解密明文，落盘时用内容密钥加密）。返回更新后的库。
-#[tauri::command]
-pub fn attachment_add(
-    state: State<AppState>,
-    item_id: String,
-    name: String,
-    mime: String,
-    data: String,
-) -> CmdResult<Vault> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(data.trim())
-        .map_err(|_| "附件内容解码失败（应为 Base64）".to_string())?;
-    let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
-    let (root, key) = {
-        let cur = inner.current.as_ref().ok_or(NO_OPEN_VAULT)?;
-        let key = base64::engine::general_purpose::STANDARD
-            .decode(cur.container.vault.content_key.trim())
-            .unwrap_or_default();
-        (inner.store.attachments_dir_for(&cur.meta.id), key)
-    };
-    let store = AttachmentStore::new(&root, key).map_err(err)?;
-    let r#ref = store.add(&bytes, &name, &mime).map_err(err)?;
-    let cur = inner.current.as_mut().ok_or(NO_OPEN_VAULT)?;
-    let item = cur
-        .container
-        .vault
-        .items
-        .iter_mut()
-        .find(|i| i.id == item_id)
-        .ok_or("找不到该条目")?;
-    item.attachments.push(r#ref);
-    cur.container.vault.touch();
-    inner.save_current()?;
-    Ok(inner.current.as_ref().unwrap().container.vault.clone())
-}
-
-/// 读取附件明文，返回 Base64（前端转 Blob 下载）。
-#[tauri::command]
-pub fn attachment_read(
-    state: State<AppState>,
-    attachment_id: String,
-) -> CmdResult<String> {
-    let inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
-    let cur = inner.current.as_ref().ok_or(NO_OPEN_VAULT)?;
-    let store = attachment_store_for(&inner)?;
-    let r#ref = cur
-        .container
-        .vault
-        .items
-        .iter()
-        .flat_map(|i| i.attachments.iter())
-        .find(|a| a.id == attachment_id)
-        .cloned()
-        .ok_or("找不到该附件")?;
-    let bytes = store.read(&r#ref).map_err(err)?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
-}
-
-/// 从条目里移除附件（删 .sica 文件 + 去掉引用）。
-#[tauri::command]
-pub fn attachment_remove(
-    state: State<AppState>,
-    item_id: String,
-    attachment_id: String,
-) -> CmdResult<Vault> {
-    let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
-    let store = attachment_store_for(&inner)?;
-    let cur = inner.current.as_mut().ok_or(NO_OPEN_VAULT)?;
-    let item = cur
-        .container
-        .vault
-        .items
-        .iter_mut()
-        .find(|i| i.id == item_id)
-        .ok_or("找不到该条目")?;
-    item.attachments.retain(|a| a.id != attachment_id);
-    cur.container.vault.touch();
-    inner.save_current()?;
-    let _ = store.delete(&attachment_id); // 引用已摘除，文件尽力删
-    Ok(inner.current.as_ref().unwrap().container.vault.clone())
-}
-
 // ---------------------------------------------------------------- 导入 / 导出
 
 /// 给导入的条目解析标签：按名字找已有标签，找不到就建一个。
@@ -655,9 +575,9 @@ pub fn import_safeincloud_xml(state: State<AppState>, text: String) -> CmdResult
     append_items(&mut inner, pairs)
 }
 
-/// 把当前库导出为加密 .sicv 文件的 Base64（前端 Blob 下载，可拷回手机）。
+/// 把当前库导出为加密 .spv 文件的 Base64（前端 Blob 下载，可拷回手机）。
 #[tauri::command]
-pub fn export_vault_sicv(state: State<AppState>) -> CmdResult<String> {
+pub fn export_vault_spv(state: State<AppState>) -> CmdResult<String> {
     let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
     let file = {
         let cur = inner.current.as_ref().ok_or(NO_OPEN_VAULT)?;
@@ -766,8 +686,6 @@ pub fn set_settings(state: State<AppState>, settings: AppSettings) -> CmdResult<
 pub struct SyncSummary {
     pub direction: String,
     pub conflicts: i32,
-    pub attachments_uploaded: i32,
-    pub attachments_downloaded: i32,
     pub message: String,
 }
 
@@ -779,8 +697,6 @@ fn to_summary(r: &SyncResult) -> SyncSummary {
     SyncSummary {
         direction,
         conflicts: r.conflicts,
-        attachments_uploaded: r.attachments_uploaded,
-        attachments_downloaded: r.attachments_downloaded,
         message: r.message.clone(),
     }
 }
@@ -795,18 +711,7 @@ pub async fn webdav_test_connection(config: WebDavConfig) -> CmdResult<String> {
 fn build_engine(inner: &AppStateInner, config: &WebDavConfig) -> CmdResult<SyncEngine> {
     let cur = inner.current.as_ref().ok_or(NO_OPEN_VAULT)?;
     let client = WebDavClient::new(config.clone()).map_err(err)?;
-    let key = base64::engine::general_purpose::STANDARD
-        .decode(cur.container.vault.content_key.trim())
-        .unwrap_or_default();
-    let attachments_root = inner.store.attachments_dir_for(&cur.meta.id);
-    let attachment_store = AttachmentStore::new(&attachments_root, key).map_err(err)?;
-    Ok(SyncEngine::new(
-        client,
-        config.clone(),
-        attachment_store,
-        &cur.meta.id,
-        &cur.container.vault.name,
-    ))
+    Ok(SyncEngine::new(client, config.clone(), &cur.container.vault.name))
 }
 
 async fn run_sync(
