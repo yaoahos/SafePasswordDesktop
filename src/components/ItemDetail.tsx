@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { AttachmentRef, Label, Vault, VaultItem } from "../types";
+import type { AttachmentRef, FieldType, Label, Vault, VaultItem } from "../types";
 import { attachmentAdd, attachmentRead, attachmentRemove } from "../api";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { Dialog } from "./Dialog";
 import {
   MASK,
   arrayBufferToBase64,
@@ -12,7 +13,30 @@ import {
   itemIcon,
   itemSubtitle,
   labelColorCss,
+  newId,
 } from "../utils";
+
+const FIELD_TYPES: FieldType[] = ["TEXT", "PASSWORD", "SECRET", "URL", "EMAIL", "PHONE", "MULTILINE"];
+
+/** 对齐手机端 ItemEditScreen.kt:901-908 typeLabel */
+function typeLabel(t: FieldType): string {
+  switch (t) {
+    case "TEXT":
+      return "文本";
+    case "PASSWORD":
+      return "密码";
+    case "SECRET":
+      return "秘密";
+    case "URL":
+      return "网址";
+    case "EMAIL":
+      return "邮箱";
+    case "PHONE":
+      return "电话";
+    case "MULTILINE":
+      return "多行文本";
+  }
+}
 
 export function ItemDetail({
   item,
@@ -44,6 +68,10 @@ export function ItemDetail({
   const [draft, setDraft] = useState<VaultItem>(item);
   const [shown, setShown] = useState<Record<string, boolean>>({});
   const [dirty, setDirty] = useState(false);
+  /** 字段添加/编辑弹窗（对齐手机端 FieldDialog） */
+  const [fieldDlg, setFieldDlg] = useState<null | { mode: "add" } | { mode: "edit"; id: string }>(null);
+  const [fLabel, setFLabel] = useState("");
+  const [fType, setFType] = useState<FieldType>("TEXT");
 
   useEffect(() => {
     setDraft(item);
@@ -185,7 +213,21 @@ export function ItemDetail({
       </div>
 
       <div className="card">
-        <div className="card-title">字段</div>
+        <div className="row" style={{ alignItems: "center", gap: 8 }}>
+          <div className="grow">字段</div>
+          {!trashed && (
+            <button
+              className="btn sm"
+              onClick={() => {
+                setFLabel("");
+                setFType("TEXT");
+                setFieldDlg({ mode: "add" });
+              }}
+            >
+              ＋添加字段
+            </button>
+          )}
+        </div>
         {draft.fields.length === 0 && <div className="muted small">无字段，可在下方备注中记录</div>}
         {draft.fields.map((f) => {
           const masked = isMaskedField(f.type, f.sensitive) && !shown[f.id];
@@ -232,6 +274,28 @@ export function ItemDetail({
               >
                 ⧉
               </button>
+              {!trashed && (
+                <>
+                  <button
+                    className="icon-btn"
+                    title="编辑字段"
+                    onClick={() => {
+                      setFLabel(f.label);
+                      setFType(f.type);
+                      setFieldDlg({ mode: "edit", id: f.id });
+                    }}
+                  >
+                    ✎
+                  </button>
+                  <button
+                    className="icon-btn"
+                    title="删除字段"
+                    onClick={() => patch({ fields: draft.fields.filter((x) => x.id !== f.id) })}
+                  >
+                    🗑
+                  </button>
+                </>
+              )}
             </div>
           );
         })}
@@ -377,6 +441,55 @@ export function ItemDetail({
           </>
         )}
       </div>
+      {fieldDlg && (
+        <Dialog
+          title={fieldDlg.mode === "add" ? "添加字段" : "编辑字段"}
+          onClose={() => setFieldDlg(null)}
+          showCloseButton={false}
+          width={360}
+        >
+          <div className="muted small">字段名</div>
+          <input
+            className="input"
+            autoFocus
+            value={fLabel}
+            placeholder="自定义字段"
+            onChange={(e) => setFLabel(e.target.value)}
+          />
+          <div className="muted small" style={{ marginTop: 10 }}>
+            类型
+          </div>
+          <select className="input" value={fType} onChange={(e) => setFType(e.target.value as FieldType)}>
+            {FIELD_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {typeLabel(t)}
+              </option>
+            ))}
+          </select>
+          <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+            <button className="btn" onClick={() => setFieldDlg(null)}>
+              取消
+            </button>
+            <button
+              className="btn primary"
+              onClick={() => {
+                const label = fLabel.trim() || "自定义字段";
+                const sensitive = fType === "PASSWORD" || fType === "SECRET";
+                if (fieldDlg.mode === "add") {
+                  patch({
+                    fields: [...draft.fields, { id: newId(), label, value: "", type: fType, sensitive }],
+                  });
+                } else {
+                  patchField(fieldDlg.id, { label, type: fType, sensitive });
+                }
+                setFieldDlg(null);
+              }}
+            >
+              {fieldDlg.mode === "add" ? "添加" : "保存"}
+            </button>
+          </div>
+        </Dialog>
+      )}
       <div className="spacer-16" />
     </div>
   );
