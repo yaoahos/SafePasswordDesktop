@@ -1,0 +1,14 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/schemas/
+*.log
+interop/build/
+interop/.gradle/
+interop/fixtures/android/reopen*.json
+interop/fixtures/android/from-rust*.json
+interop/fixtures/android/rust-open*.json
+interop/fixtures/android/*.rust-rewritten.sicv
+legacy/cmp-demo/build/
+legacy/cmp-demo/.gradle/
+legacy/cmp-demo/.kotlin/
