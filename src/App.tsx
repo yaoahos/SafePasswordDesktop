@@ -27,7 +27,6 @@ import { LabelManagerDialog } from "./dialogs/LabelManagerDialog";
 import { LockDialog } from "./dialogs/LockDialog";
 import { SecurityDialog } from "./dialogs/SecurityDialog";
 import { SettingsDialog } from "./dialogs/SettingsDialog";
-import { SyncDialog } from "./dialogs/SyncDialog";
 import { ThemeDialog } from "./dialogs/ThemeDialog";
 import { duplicateItem, itemMatches, newItemFromTemplate } from "./utils";
 
@@ -232,12 +231,24 @@ export default function App() {
         setLabelFilter(null);
         setQuery("");
         void listVaults().then(setVaults).catch(() => undefined);
+        // 解锁后检查一次云端更新（对齐手机端：解锁后与回到前台各检查一次）
+        void (async () => {
+          try {
+            const cfg = settings.webdav;
+            if (!cfg.enabled || !/^https?:\/\//i.test(cfg.baseUrl)) return;
+            if (settings.pullIntervalSeconds <= 0) return;
+            const r = await webdavPullIfChanged(cfg);
+            if (r) await refreshFromBackend();
+          } catch {
+            /* 静默失败，对齐手机端 runCatching */
+          }
+        })();
         return null;
       } catch (e) {
         return String(e);
       }
     },
-    [],
+    [settings.webdav, settings.pullIntervalSeconds, refreshFromBackend],
   );
 
   const handleCreate = useCallback(
@@ -347,6 +358,35 @@ export default function App() {
     return () => window.clearInterval(iv);
   }, [vault, settings.pullIntervalSeconds, settings.webdav, refreshFromBackend]);
 
+  // ------------------------------------------------------------ 手动同步（顶栏"同步"直接执行，对齐手机端 doSync）
+
+  const [syncState, setSyncState] = useState<{ kind: "working" | "ok" | "err"; text: string } | null>(null);
+  const syncStateTimer = useRef<number | null>(null);
+
+  const flashSync = useCallback((kind: "ok" | "err", text: string) => {
+    setSyncState({ kind, text });
+    if (syncStateTimer.current !== null) window.clearTimeout(syncStateTimer.current);
+    // 对齐手机端：状态文本 3 秒后自动消失
+    syncStateTimer.current = window.setTimeout(() => setSyncState(null), 3000);
+  }, []);
+
+  const runSync = useCallback(async () => {
+    const cfg = settings.webdav;
+    if (!cfg.enabled || !/^https?:\/\//i.test(cfg.baseUrl)) {
+      notify("请先在设置 → 同步与备份中配置 WebDAV", "error");
+      return;
+    }
+    setSyncState({ kind: "working", text: "同步中…" });
+    try {
+      // 与手机端一致：直接同步、本地优先，无需弹窗确认
+      const r = await webdavSync(cfg, "KEEP_LOCAL");
+      await refreshFromBackend();
+      flashSync("ok", r.message);
+    } catch (e) {
+      flashSync("err", String(e));
+    }
+  }, [settings.webdav, refreshFromBackend, notify, flashSync]);
+
   // ------------------------------------------------------------ 条目操作
 
   const saveItem = useCallback(
@@ -442,6 +482,8 @@ export default function App() {
     else if (sortMode === "UPDATED") arr.sort((a, b) => a.updatedAt - b.updatedAt);
     else arr.sort((a, b) => a.createdAt - b.createdAt);
     if (!sortAsc) arr.reverse();
+    // 收藏置顶（对齐手机端：收藏条目始终排最前，组内保持所选排序）
+    arr.sort((a, b) => (a.favorite === b.favorite ? 0 : a.favorite ? -1 : 1));
     return arr;
   }, [items, section, labelFilter, query, settings.searchPasswords, sortMode, sortAsc]);
 
@@ -510,7 +552,15 @@ export default function App() {
 
   return (
     <div className="app-root">
-      <TopBar onAction={(a) => setDialog(a)} />
+      <TopBar
+        onAction={(a) => {
+          if (a === "SYNC") {
+            void runSync();
+            return;
+          }
+          setDialog(a);
+        }}
+      />
       <div className="main-row">
           <Sidebar
             vault={vaults.find((v) => v.id === vault.id) ?? { id: vault.id, name: vault.name, fileName: "", createdAt: vault.createdAt, lastOpenedAt: 0, lastSyncedAt: vault.lastSyncedAt }}
@@ -545,6 +595,7 @@ export default function App() {
               setSelectItemId(id);
             }}
             onNew={() => createFromTemplate("login")}
+            syncText={syncState?.text ?? null}
           />
           <div className="col-divider" />
           {selected ? (
@@ -576,7 +627,6 @@ export default function App() {
       {dialog === "THEME" && <ThemeDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "SETTINGS" && <SettingsDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "ABOUT" && <AboutDialog ctx={ctx} onClose={closeDialog} />}
-      {dialog === "SYNC" && <SyncDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "LOCK" && <LockDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "LABELS" && <LabelManagerDialog ctx={ctx} onClose={closeDialog} />}
 

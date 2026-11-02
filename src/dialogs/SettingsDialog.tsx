@@ -502,10 +502,6 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
   };
 
   const remove = async () => {
-    if (!confirmDel) {
-      setConfirmDel(true);
-      return;
-    }
     setBusy(true);
     try {
       await deleteVault(vault.id);
@@ -582,16 +578,26 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
       <div className="section-cap" style={{ color: "var(--danger)" }}>
         删除密码库
       </div>
-      <div className="row">
-        <button className="btn sm danger" disabled={busy} onClick={() => void remove()}>
-          {confirmDel ? "再次点击确认删除" : "删除当前密码库"}
+      {!confirmDel && (
+        <button className="btn sm danger" disabled={busy} onClick={() => setConfirmDel(true)}>
+          删除当前密码库
         </button>
-        {confirmDel && (
-          <button className="btn sm" onClick={() => setConfirmDel(false)}>
-            取消
-          </button>
-        )}
-      </div>
+      )}
+      {confirmDel && (
+        <div className="confirm-box">
+          <div>
+            将删除「{vault.name}」及其本地文件，无法撤销。确定继续？
+          </div>
+          <div className="row" style={{ justifyContent: "flex-end", marginTop: 10 }}>
+            <button className="btn sm" onClick={() => setConfirmDel(false)}>
+              取消
+            </button>
+            <button className="btn sm danger" disabled={busy} onClick={() => void remove()}>
+              删除
+            </button>
+          </div>
+        </div>
+      )}
       {msg && <div className={msg.ok ? "ok-text" : "err-text"}>{msg.text}</div>}
     </>
   );
