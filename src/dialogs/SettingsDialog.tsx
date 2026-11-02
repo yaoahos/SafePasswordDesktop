@@ -11,7 +11,7 @@ import {
   exportCsv,
   exportSafeincloudXml,
   exportVaultJson,
-  exportVaultSicv,
+  exportVaultSpv,
   importCsv,
   importSafeincloudXml,
   importVaultBytes,
@@ -320,12 +320,12 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
       </div>
 
       <div className="spacer-10" />
-      <div className="row" style={{ justifyContent: "flex-end" }}>
-        <button className="btn primary" disabled={busy !== null} onClick={() => void doSaveAndSync()}>
-          {busy === "sync" ? "同步中…" : "保存并立即同步"}
-        </button>
+      <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
         <button className="btn" disabled={busy !== null} onClick={() => setConfirmPull(true)}>
           拉取云端数据（覆盖本地）
+        </button>
+        <button className="btn" disabled={busy !== null} onClick={() => void doSaveAndSync()}>
+          {busy === "sync" ? "同步中…" : "保存并立即同步"}
         </button>
       </div>
       <div className="setting-sub" style={{ marginTop: 6 }}>
@@ -374,15 +374,12 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
         </div>
       )}
       <div className="row" style={{ marginTop: 8, justifyContent: "flex-end" }}>
-        <button className="btn sm" disabled={busy !== null} onClick={() => void createBackup()}>
-          {busy === "create" ? "创建中…" : "创建备份"}
-        </button>
-        <button className="btn sm" disabled={busy !== null} onClick={() => void refreshBackups()}>
-          刷新列表
+        <button className="btn" disabled={busy !== null} onClick={() => void createBackup()}>
+          {busy === "create" ? "创建中…" : "立即创建备份"}
         </button>
       </div>
       <div className="spacer-10" />
-      {backups === null && <div className="muted small">点击“刷新列表”查看备份</div>}
+      {backups === null && <div className="muted small">打开此页会自动列出备份；没有则可点“立即创建备份”。</div>}
       {backups !== null && backups.length === 0 && <div className="muted small">暂无备份</div>}
       {backups?.map((b) => (
         <div key={b.path}>
@@ -565,7 +562,7 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
         <label className="field-caption">主密码（至少 8 位）</label>
         <input className="input" type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
       </div>
-      <button className="btn sm primary" disabled={busy} onClick={() => void create()}>
+      <button className="btn primary tall block" disabled={busy} onClick={() => void create()}>
         新建并切换
       </button>
 
@@ -661,11 +658,11 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
     });
 
   const doExportSicv = () =>
-    void run("exp-sicv", async () => {
-      const b64 = await exportVaultSicv();
+    void run("exp-spv", async () => {
+      const b64 = await exportVaultSpv();
       const name = (ctx.vault?.name ?? "vault").replace(/[\\/:*?"<>|]/g, "_");
-      downloadBase64(`${name}.sicv`, b64);
-      setMsg({ ok: true, text: `已导出 ${name}.sicv（加密，可拷回手机）` });
+      downloadBase64(`${name}.spv`, b64);
+      setMsg({ ok: true, text: `已导出 ${name}.spv（加密，可拷回手机）` });
     });
 
   const importTextFile = (f: File) =>
@@ -710,7 +707,7 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
     <>
       <div className="section-cap">导出</div>
       <button className="btn primary tall block" disabled={busy !== null || !ctx.vault} onClick={doExportSicv}>
-        {busy === "exp-sicv" ? "导出中…" : "导出加密备份（.sicv，可拷回手机）"}
+        {busy === "exp-spv" ? "导出中…" : "导出加密备份（.spv，可拷回手机）"}
       </button>
       <div className="setting-sub" style={{ marginTop: 6 }}>
         加密备份与手机端同格式，可直接放回手机或 WebDAV；下面的导出为明文格式，注意保管。
@@ -720,7 +717,7 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
           导出 CSV
         </button>
         <button className="btn sm" disabled={busy !== null} onClick={() => doExport("xml")}>
-          导出 SafeInCloud XML
+          导出 XML
         </button>
         <button className="btn sm" disabled={busy !== null} onClick={() => doExport("json")}>
           导出明文 JSON（不安全）
@@ -728,7 +725,7 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
       </div>
 
       <div className="hr" />
-      <div className="section-cap">导入条目（CSV / SafeInCloud XML / 明文 JSON）</div>
+      <div className="section-cap">导入条目（CSV / XML / 明文 JSON）</div>
       <div className="row" style={{ marginBottom: 8 }}>
         <input
           className="input grow"
@@ -755,7 +752,7 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
       </div>
 
       <div className="hr" />
-      <div className="section-cap">导入加密备份（.sicv / .spv）</div>
+      <div className="section-cap">导入加密备份（.spv，兼容旧版 .sicv）</div>
       <div className="row" style={{ marginBottom: 8 }}>
         <input
           className="input grow"

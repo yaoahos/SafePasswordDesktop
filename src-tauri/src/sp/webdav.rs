@@ -45,17 +45,19 @@ impl WebDavConfig {
         }
     }
 
-    /// 远端固定 "<remoteDir>/SafePassword.spv"（Kotlin 忽略 vaultKey，WebDavClient.kt:40）。
-    pub fn remote_path(&self, _vault_key: &str) -> String {
+    /// 每个密码库一个云端文件：`<remoteDir>/SafePassword-<ASCII 键>.spv`
+    /// （对齐 CloudManifest.keyFor，避免中文文件名与多库互相覆盖）。
+    pub fn remote_path(&self, vault_key: &str) -> String {
+        format!("{}/SafePassword-{vault_key}.spv", self.normalized_dir())
+    }
+
+    /// 旧版单文件布局：升级后只用于读取回退，写入一律走 remote_path。
+    pub fn legacy_remote_path(&self) -> String {
         format!("{}/SafePassword.spv", self.normalized_dir())
     }
 
-    pub fn attachments_dir(&self, vault_key: &str) -> String {
-        format!("{}/attachments/{}", self.normalized_dir(), vault_key)
-    }
-
-    /// 稳定云端键：只依赖密码库名称（多个设备读写同一文件）。
-    pub fn vault_key(&self, name: &str) -> String {
+    /// 1.4.1 那批按库名生成的键（可能含中文），只为升级时认领旧文件。
+    pub fn legacy_name_path(&self, name: &str) -> String {
         let lowered = name.trim().to_lowercase();
         let mut key = String::with_capacity(lowered.len());
         let mut last_dash = false;
@@ -73,12 +75,17 @@ impl WebDavConfig {
         }
         let trimmed = key.trim_matches('-');
         let taken: String = trimmed.chars().take(64).collect();
-        if taken.trim_matches('-').is_empty() {
+        let key = if taken.trim_matches('-').is_empty() {
             "vault".to_string()
         } else {
-            // Kotlin: .take(64) 后再 ifBlank（不重复 trim，这里 take 后可能以 '-' 结尾，保持一致）
             taken
-        }
+        };
+        format!("{}/{key}.sicv", self.normalized_dir())
+    }
+
+    /// 云端密码库清单（key → 显示名），用于「从云端恢复」时列出可选的库。
+    pub fn manifest_path(&self) -> String {
+        format!("{}/SafePassword-index.json", self.normalized_dir())
     }
 
     pub fn is_configured(&self) -> bool {
@@ -383,18 +390,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn vault_key_rules() {
+    fn legacy_name_rules() {
         let config = WebDavConfig::default();
-        assert_eq!(config.vault_key("My Vault"), "my-vault");
-        assert_eq!(config.vault_key("  我的密码库  "), "我的密码库");
-        assert_eq!(config.vault_key("Bank___Card"), "bank-card");
-        assert_eq!(config.vault_key("---"), "vault");
-        assert_eq!(config.vault_key(""), "vault");
-        // 64 字符截断
+        assert_eq!(config.legacy_name_path("My Vault"), "SafePassword/my-vault.sicv");
+        assert_eq!(config.legacy_name_path("  我的密码库  "), "SafePassword/我的密码库.sicv");
+        assert_eq!(config.legacy_name_path("Bank___Card"), "SafePassword/bank-card.sicv");
+        assert_eq!(config.legacy_name_path("---"), "SafePassword/vault.sicv");
+        assert_eq!(config.legacy_name_path(""), "SafePassword/vault.sicv");
+        // 64 字符截断（去掉 .sicv 后缀后）
         let long = "a".repeat(100);
-        assert_eq!(config.vault_key(&long).len(), 64);
-        // 非法字符收敛为单个 -
-        assert_eq!(config.vault_key("a!!!b"), "a-b");
+        assert_eq!(config.legacy_name_path(&long), format!("SafePassword/{}.sicv", "a".repeat(64)));
+        assert_eq!(config.legacy_name_path("a!!!b"), "SafePassword/a-b.sicv");
+    }
+
+    #[test]
+    fn remote_paths_follow_mobile_multi_vault_layout() {
+        let config = WebDavConfig { remote_dir: "/SafePassword/".to_string(), ..Default::default() };
+        assert_eq!(config.remote_path("vabc123"), "SafePassword/SafePassword-vabc123.spv");
+        assert_eq!(config.legacy_remote_path(), "SafePassword/SafePassword.spv");
+        assert_eq!(config.manifest_path(), "SafePassword/SafePassword-index.json");
     }
 
     #[test]
@@ -406,9 +420,9 @@ mod tests {
         };
         assert_eq!(config.normalized_base_url(), "https://dav.example.com/dav/");
         assert_eq!(config.normalized_dir(), "SafePassword");
-        // 关键歧义 A：remotePath 忽略 vaultKey
-        assert_eq!(config.remote_path("whatever"), "SafePassword/SafePassword.spv");
-        assert_eq!(config.attachments_dir("k1"), "SafePassword/attachments/k1");
+        // 多库布局：按库名哈希 key 分文件；旧路径仅作回退
+        assert_eq!(config.remote_path("vwhatever"), "SafePassword/SafePassword-vwhatever.spv");
+        assert_eq!(config.legacy_remote_path(), "SafePassword/SafePassword.spv");
         // isConfigured 与 Kotlin 一致：对原始 baseUrl 判断、不 trim——
         // 带前导空格的 " https://…" 在 Kotlin 里同样是 false，这里如实复现该怪癖
         assert!(!config.is_configured());

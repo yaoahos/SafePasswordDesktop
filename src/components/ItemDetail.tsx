@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import type { FieldType, Label, VaultItem } from "../types";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Dialog } from "./Dialog";
+import { Icon } from "./icons";
 import { LabelGlyph } from "./LabelGlyph";
 import { GeneratorDialog } from "../dialogs/GeneratorDialog";
 import {
   MASK,
   copyText,
   formatTime,
+  iconBg,
   isMaskedField,
   itemIcon,
   itemSubtitle,
@@ -78,6 +80,8 @@ export function ItemDetail({
   const [genFieldId, setGenFieldId] = useState<string | null>(null);
   /** 预览态 / 编辑态（对齐手机端 ItemViewScreen ↔ ItemEditScreen；新建条目直接进编辑态） */
   const [editing, setEditing] = useState(false);
+  /** 删除二次确认（v1 项 6：删除要确认提示） */
+  const [confirmDel, setConfirmDel] = useState(false);
 
   useEffect(() => {
     setDraft(item);
@@ -234,14 +238,16 @@ export function ItemDetail({
     return (
       <div className="detail">
         <div className="preview-hero">
-          <div className="preview-icon">
+          <div className="preview-icon" style={iconBg(icon)}>
             {icon.kind === "img" ? <img src={icon.src} alt="" /> : icon.kind === "char" ? icon.char : icon.emoji}
           </div>
           <div className="preview-title">{draft.title || "未命名"}</div>
           {resolvedUrl && (
             <button className="preview-url" onClick={openExternal} title={resolvedUrl}>
               <span className="preview-url-text">{resolvedUrl}</span>
-              <span className="preview-open">↗</span>
+              <span className="preview-open">
+                <Icon name="external" size={15} />
+              </span>
             </button>
           )}
           {user && <div className="preview-user">{user}</div>}
@@ -255,7 +261,7 @@ export function ItemDetail({
                 title={shown["hero"] ? "隐藏" : "显示"}
                 onClick={() => setShown((s) => ({ ...s, hero: !s.hero }))}
               >
-                {shown["hero"] ? "🙈" : "👁"}
+                <Icon name={shown["hero"] ? "eye-off" : "eye"} size={16} />
               </button>
             </div>
           )}
@@ -287,7 +293,9 @@ export function ItemDetail({
               return (
                 <div className="preview-field" key={f.id}>
                   <div className="preview-field-label">{f.label}</div>
-                  <div className="preview-field-value">{masked ? MASK : f.value || "—"}</div>
+                  <div className="preview-field-value">
+                    {masked ? MASK : f.value.trim() ? f.value : <span className="muted">未填写</span>}
+                  </div>
                   <div className="preview-field-actions">
                     {f.type === "URL" && f.value.trim() && (
                       <button
@@ -299,7 +307,7 @@ export function ItemDetail({
                           void openUrl(target).catch(() => notify("无法打开网址", "error"));
                         }}
                       >
-                        ↗
+                        <Icon name="external" size={15} />
                       </button>
                     )}
                     {isMaskedField(f.type, f.sensitive) && (
@@ -308,7 +316,7 @@ export function ItemDetail({
                         title={shown[f.id] ? "隐藏" : "显示"}
                         onClick={() => setShown((s) => ({ ...s, [f.id]: !s[f.id] }))}
                       >
-                        {shown[f.id] ? "🙈" : "👁"}
+                        <Icon name={shown[f.id] ? "eye-off" : "eye"} size={15} />
                       </button>
                     )}
                     <button
@@ -321,7 +329,7 @@ export function ItemDetail({
                         );
                       }}
                     >
-                      ⧉
+                      <Icon name="copy" size={15} />
                     </button>
                   </div>
                 </div>
@@ -349,10 +357,21 @@ export function ItemDetail({
           >
             编辑
           </button>
-          <button className="btn" onClick={() => void onDuplicate()}>
-            复制副本
-          </button>
-          <button className="btn" onClick={() => onDelete().catch((e) => notify(String(e), "error"))}>
+          {!isNew && (
+            <button className="btn" onClick={() => void onDuplicate()}>
+              复制副本
+            </button>
+          )}
+          <button
+            className="btn danger"
+            onClick={() => {
+              if (isNew) {
+                void onDelete();
+                return;
+              }
+              setConfirmDel(true);
+            }}
+          >
             删除
           </button>
         </div>
@@ -367,7 +386,9 @@ export function ItemDetail({
         <span
           className={`detail-icon${icon.kind === "emoji" ? " emoji" : ""}`}
           title={trashed ? undefined : "更换图标"}
-          style={trashed ? undefined : { cursor: "pointer" }}
+          style={
+            trashed ? iconBg(icon) : { cursor: "pointer", ...(iconBg(icon) ?? {}) }
+          }
           onClick={() => {
             if (!trashed) iconRef.current?.click();
           }}
@@ -388,7 +409,7 @@ export function ItemDetail({
         <div className="grow">
           <input
             className="input"
-            style={{ fontWeight: 700, fontSize: 20, height: 34, border: "none", background: "transparent", padding: 0 }}
+            style={{ fontWeight: 700, fontSize: 19 }}
             value={draft.title}
             placeholder="未命名"
             disabled={trashed}
@@ -402,7 +423,7 @@ export function ItemDetail({
         </div>
         <button className="icon-btn" title={draft.favorite ? "取消收藏" : "收藏"} onClick={() => void onToggleFavorite()}>
           <span className="star" style={{ fontSize: 17 }}>
-            {draft.favorite ? "★" : "☆"}
+            {draft.favorite ? <Icon name="star-filled" size={17} /> : <Icon name="star" size={17} />}
           </span>
         </button>
       </div>
@@ -450,7 +471,7 @@ export function ItemDetail({
                       disabled={notesIndex <= 0}
                       onClick={() => patch({ notesPosition: notesIndex - 1 })}
                     >
-                      ↑
+                      <Icon name="arrow-up" size={15} />
                     </button>
                     <button
                       className="icon-btn"
@@ -458,10 +479,10 @@ export function ItemDetail({
                       disabled={notesIndex >= draft.fields.length}
                       onClick={() => patch({ notesPosition: notesIndex + 1 })}
                     >
-                      ↓
+                      <Icon name="arrow-down" size={15} />
                     </button>
                     <button className="icon-btn" title="编辑字段" onClick={openNotesMeta}>
-                      ✎
+                      <Icon name="edit" size={15} />
                     </button>
                     <button
                       className="icon-btn"
@@ -470,7 +491,7 @@ export function ItemDetail({
                         patch({ notes: "", notesLabel: "备注", notesType: "MULTILINE", notesPosition: -1 })
                       }
                     >
-                      🗑
+                      <Icon name="trash" size={15} />
                     </button>
                   </>
                 )}
@@ -485,30 +506,31 @@ export function ItemDetail({
                 {f.label}
               </div>
               {trashed ? (
-                <div className="field-value">{masked ? MASK : f.value || "—"}</div>
+                <div className="field-value">{masked ? MASK : f.value || "未填写"}</div>
               ) : f.type === "PASSWORD" || f.type === "SECRET" ? (
-                <input
-                  className="input field-value"
-                  type={masked ? "password" : "text"}
-                  value={f.value}
-                  onChange={(e) => patchField(f.id, { value: e.target.value })}
-                />
+                <div className="input-wrap grow">
+                  <input
+                    className="input with-eye"
+                    type={masked ? "password" : "text"}
+                    value={f.value}
+                    placeholder="未填写"
+                    onChange={(e) => patchField(f.id, { value: e.target.value })}
+                  />
+                  <button
+                    className="icon-btn in-frame"
+                    title={shown[f.id] ? "隐藏" : "显示"}
+                    onClick={() => setShown((s) => ({ ...s, [f.id]: !s[f.id] }))}
+                  >
+                    <Icon name={shown[f.id] ? "eye-off" : "eye"} size={16} />
+                  </button>
+                </div>
               ) : (
                 <input
                   className="input field-value"
                   value={f.value}
-                  placeholder="—"
+                  placeholder="未填写"
                   onChange={(e) => patchField(f.id, { value: e.target.value })}
                 />
-              )}
-              {isMaskedField(f.type, f.sensitive) && (
-                <button
-                  className="icon-btn"
-                  title={shown[f.id] ? "隐藏" : "显示"}
-                  onClick={() => setShown((s) => ({ ...s, [f.id]: !s[f.id] }))}
-                >
-                  {shown[f.id] ? "🙈" : "👁"}
-                </button>
               )}
               <button
                 className="icon-btn"
@@ -520,7 +542,7 @@ export function ItemDetail({
                   );
                 }}
               >
-                ⧉
+                <Icon name="copy" size={15} />
               </button>
               {!trashed && (
                 <>
@@ -541,7 +563,7 @@ export function ItemDetail({
                     ↓
                   </button>
                   <button className="icon-btn" title="生成密码" onClick={() => setGenFieldId(f.id)}>
-                    🎲
+                    <Icon name="dice" size={15} />
                   </button>
                   <button
                     className="icon-btn"
@@ -552,7 +574,7 @@ export function ItemDetail({
                       setFieldDlg({ mode: "edit", id: f.id });
                     }}
                   >
-                    ✎
+                    <Icon name="edit" size={15} />
                   </button>
                   <button
                     className="icon-btn"
@@ -565,38 +587,13 @@ export function ItemDetail({
                       })
                     }
                   >
-                    🗑
+                    <Icon name="trash" size={15} />
                   </button>
                 </>
               )}
             </div>
           );
         })}
-        {resolvedUrl && (
-          <div className="field-row">
-            <div className="field-label">网址</div>
-            <div className="field-value" title={resolvedUrl}>
-              {resolvedUrl}
-            </div>
-            {!trashed && (
-              <button className="icon-btn" title="打开链接" onClick={openExternal}>
-                ↗
-              </button>
-            )}
-            <button
-              className="icon-btn"
-              title="复制"
-              onClick={() => {
-                void copyText(resolvedUrl).then(
-                  () => notify("已复制“网址”", "success"),
-                  () => notify("复制失败", "error"),
-                );
-              }}
-            >
-              ⧉
-            </button>
-          </div>
-        )}
       </div>
 
       {!hasNotes && (
@@ -611,7 +608,7 @@ export function ItemDetail({
               title="编辑字段"
               onClick={openNotesMeta}
             >
-              ✎
+              <Icon name="edit" size={15} />
             </button>
           )}
         </div>
@@ -677,10 +674,21 @@ export function ItemDetail({
             >
               返回预览
             </button>
-            <button className="btn" onClick={() => void onDuplicate()}>
-              复制副本
-            </button>
-            <button className="btn" onClick={() => onDelete().catch((e) => notify(String(e), "error"))}>
+            {!isNew && (
+              <button className="btn" onClick={() => void onDuplicate()}>
+                复制副本
+              </button>
+            )}
+            <button
+              className="btn"
+              onClick={() => {
+                if (isNew) {
+                  void onDelete();
+                  return;
+                }
+                setConfirmDel(true);
+              }}
+            >
               删除
             </button>
             {isNew && (
@@ -757,6 +765,27 @@ export function ItemDetail({
           onClose={() => setGenFieldId(null)}
           onUse={(pw) => patchField(genFieldId, { value: pw })}
         />
+      )}
+      {confirmDel && (
+        <Dialog title="移入回收站" onClose={() => setConfirmDel(false)} width={380}>
+          <div style={{ lineHeight: 1.8 }}>
+            将“{draft.title || "未命名"}”移入回收站，可稍后在回收站恢复。
+          </div>
+          <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+            <button className="btn" onClick={() => setConfirmDel(false)}>
+              取消
+            </button>
+            <button
+              className="btn danger"
+              onClick={() => {
+                setConfirmDel(false);
+                void onDelete().catch((e) => notify(String(e), "error"));
+              }}
+            >
+              移入回收站
+            </button>
+          </div>
+        </Dialog>
       )}
       <div className="spacer-16" />
     </div>

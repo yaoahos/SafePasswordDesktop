@@ -1,16 +1,18 @@
-//! 对齐 Android SyncEngine.kt（241 行）。
+//! 对齐 Android SyncEngine.kt（224 行，多密码库云端布局）。
 //!
-//! 四分支同步：无远端→上传；仅远端新→下载；仅本地新→上传；双新→按冲突策略
-//! （DETECT/KEEP_LOCAL/KEEP_REMOTE/MERGE）。contentKey 不同源直接停止。
-//! 附件双向按 id 对账：本地缺→下载，远端缺→上传。
+//! 每个密码库一个云端文件：`<remoteDir>/SafePassword-<key>.spv`，key 由库名算出
+//! （CloudManifest.keyFor）。读取时依次回退旧布局（SafePassword.spv / 1.4.1 按库名键），
+//! 但只有内容密钥一致（同一密码库）才认领，避免读到别的库。
+//! 上传顺带维护 `<remoteDir>/SafePassword-index.json`（失败不影响同步）。
+//! 四个分支：无远端→上传；仅远端新→下载；仅本地新→上传；双新→冲突策略。
 #![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 
-use crate::sp::attachment::AttachmentStore;
+use crate::sp::cloud::{key_for, CloudManifest};
 use crate::sp::container::VaultContainer;
 use crate::sp::merger::merge;
-use crate::sp::model::{now_ms, Vault};
+use crate::sp::model::now_ms;
 use crate::sp::webdav::{WebDavClient, WebDavConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,8 +44,6 @@ pub struct SyncResult {
     pub container: VaultContainer,
     pub direction: SyncDirection,
     pub conflicts: i32,
-    pub attachments_uploaded: i32,
-    pub attachments_downloaded: i32,
     pub message: String,
 }
 
@@ -59,21 +59,14 @@ fn dav_err(err: crate::sp::webdav::WebDavError) -> SyncError {
 pub struct SyncEngine {
     webdav: WebDavClient,
     config: WebDavConfig,
-    attachment_store: AttachmentStore,
+    /// 云端文件名里的 ASCII 键；只由库名决定，跨设备稳定，且不含中文。
     remote_key: String,
 }
 
 impl SyncEngine {
-    pub fn new(
-        webdav: WebDavClient,
-        config: WebDavConfig,
-        attachment_store: AttachmentStore,
-        vault_id: &str,
-        vault_name: &str,
-    ) -> Self {
-        let name = if vault_name.trim().is_empty() { vault_id } else { vault_name };
-        let remote_key = config.vault_key(name);
-        SyncEngine { webdav, config, attachment_store, remote_key }
+    pub fn new(webdav: WebDavClient, config: WebDavConfig, vault_name: &str) -> Self {
+        let remote_key = key_for(vault_name);
+        SyncEngine { webdav, config, remote_key }
     }
 
     pub fn remote_key(&self) -> &str {
@@ -87,12 +80,17 @@ impl SyncEngine {
         password: &str,
     ) -> Result<SyncResult, SyncError> {
         let remote_path = self.config.remote_path(&self.remote_key);
-        let remote_bytes = self
-            .webdav
-            .get(&remote_path)
-            .await
-            .map_err(dav_err)?
-            .ok_or_else(|| SyncError("云端没有找到密码库文件，无法拉取".to_string()))?;
+        let mut remote_bytes = self.webdav.get(&remote_path).await.map_err(dav_err)?;
+        if remote_bytes.is_none() {
+            remote_bytes = self
+                .webdav
+                .get(&self.config.legacy_remote_path())
+                .await
+                .map_err(dav_err)?;
+        }
+        let remote_bytes = remote_bytes.ok_or_else(|| {
+            SyncError("云端没有找到这个密码库的文件，请确认已同步过或检查远程目录".to_string())
+        })?;
         let remote = VaultContainer::open(&remote_bytes, password).map_err(|_| {
             SyncError("无法用当前主密码解密远端数据库，请确认两端使用同一主密码".to_string())
         })?;
@@ -107,13 +105,10 @@ impl SyncEngine {
         let mut downloaded = remote.vault.clone();
         downloaded.last_synced_at = now_ms();
         downloaded.device_id = local.vault.device_id.clone();
-        let (uploaded, downloaded_count) = self.sync_attachments(&downloaded).await?;
         Ok(SyncResult {
             container: local.with_vault(downloaded),
             direction: SyncDirection::Downloaded,
             conflicts: 0,
-            attachments_uploaded: uploaded,
-            attachments_downloaded: downloaded_count,
             message: "已用云端数据覆盖本地".to_string(),
         })
     }
@@ -125,28 +120,51 @@ impl SyncEngine {
         conflict_strategy: ConflictStrategy,
     ) -> Result<SyncResult, SyncError> {
         let remote_path = self.config.remote_path(&self.remote_key);
-        let remote_bytes = self.webdav.get(&remote_path).await.map_err(dav_err)?;
+        let mut remote_bytes = self.webdav.get(&remote_path).await.map_err(dav_err)?;
+        let mut adopted_legacy: Option<VaultContainer> = None;
+        if remote_bytes.is_none() {
+            // 升级迁移：旧版文件只有内容密钥一致（同一密码库）才认领，
+            // 否则视为云端还没有本库文件，直接上传本地，避免读到别的密码库的数据。
+            // 依次尝试：旧版单文件 SafePassword.spv → 1.4.1 的按库名键。
+            let candidates = [
+                self.config.legacy_remote_path(),
+                self.config.legacy_name_path(&local.vault.name),
+            ];
+            for candidate in candidates.iter().filter(|p| **p != remote_path) {
+                let Some(bytes) = self.webdav.get(candidate).await.map_err(dav_err)? else {
+                    continue;
+                };
+                if let Ok(container) = VaultContainer::open(&bytes, password) {
+                    if !container.vault.content_key.is_empty()
+                        && container.vault.content_key == local.vault.content_key
+                    {
+                        remote_bytes = Some(bytes);
+                        adopted_legacy = Some(container);
+                        break;
+                    }
+                }
+            }
+        }
 
         let Some(remote_bytes) = remote_bytes else {
             local.ensure_content_key();
             local.vault.last_synced_at = now_ms();
             local.vault.touch();
-            let bytes = local.to_bytes();
-            self.webdav.put(&remote_path, &bytes).await.map_err(dav_err)?;
-            let (uploaded, downloaded) = self.sync_attachments(&local.vault).await?;
+            self.upload(&remote_path, &mut local).await?;
             return Ok(SyncResult {
                 container: local,
                 direction: SyncDirection::Uploaded,
                 conflicts: 0,
-                attachments_uploaded: uploaded,
-                attachments_downloaded: downloaded,
                 message: "已上传到 WebDAV".to_string(),
             });
         };
 
-        let remote = VaultContainer::open(&remote_bytes, password).map_err(|_| {
-            SyncError("无法用当前主密码解密远端数据库，请确认两端使用同一主密码".to_string())
-        })?;
+        let remote = match adopted_legacy {
+            Some(container) => container,
+            None => VaultContainer::open(&remote_bytes, password).map_err(|_| {
+                SyncError("无法用当前主密码解密远端数据库，请确认两端使用同一主密码".to_string())
+            })?,
+        };
 
         if !local.vault.content_key.is_empty()
             && !remote.vault.content_key.is_empty()
@@ -162,42 +180,30 @@ impl SyncEngine {
         let remote_changed = remote.vault.updated_at > last;
 
         match (local_changed, remote_changed) {
-            (false, false) => {
-                let (uploaded, downloaded) = self.sync_attachments(&local.vault).await?;
-                Ok(SyncResult {
-                    container: local,
-                    direction: SyncDirection::None,
-                    conflicts: 0,
-                    attachments_uploaded: uploaded,
-                    attachments_downloaded: downloaded,
-                    message: "已是最新状态".to_string(),
-                })
-            }
+            (false, false) => Ok(SyncResult {
+                container: local,
+                direction: SyncDirection::None,
+                conflicts: 0,
+                message: "已是最新状态".to_string(),
+            }),
             (false, true) => {
-                let mut downloaded_vault = remote.vault.clone();
-                downloaded_vault.last_synced_at = now_ms();
-                downloaded_vault.device_id = local.vault.device_id.clone();
-                let (uploaded, downloaded) = self.sync_attachments(&downloaded_vault).await?;
+                let mut downloaded = remote.vault.clone();
+                downloaded.last_synced_at = now_ms();
+                downloaded.device_id = local.vault.device_id.clone();
                 Ok(SyncResult {
-                    container: local.with_vault(downloaded_vault),
+                    container: local.with_vault(downloaded),
                     direction: SyncDirection::Downloaded,
                     conflicts: 0,
-                    attachments_uploaded: uploaded,
-                    attachments_downloaded: downloaded,
                     message: "已下载远端更新".to_string(),
                 })
             }
             (true, false) => {
                 local.vault.last_synced_at = now_ms();
-                let bytes = local.to_bytes();
-                self.webdav.put(&remote_path, &bytes).await.map_err(dav_err)?;
-                let (uploaded, downloaded) = self.sync_attachments(&local.vault).await?;
+                self.upload(&remote_path, &mut local).await?;
                 Ok(SyncResult {
                     container: local,
                     direction: SyncDirection::Uploaded,
                     conflicts: 0,
-                    attachments_uploaded: uploaded,
-                    attachments_downloaded: downloaded,
                     message: "已上传本地更新".to_string(),
                 })
             }
@@ -206,44 +212,33 @@ impl SyncEngine {
                     container: local,
                     direction: SyncDirection::Conflict,
                     conflicts: 1,
-                    attachments_uploaded: 0,
-                    attachments_downloaded: 0,
                     message: "检测到本地与云端都有新修改，请选择处理方式".to_string(),
                 }),
                 ConflictStrategy::KeepLocal => {
                     local.vault.last_synced_at = now_ms();
-                    let bytes = local.to_bytes();
-                    self.webdav.put(&remote_path, &bytes).await.map_err(dav_err)?;
-                    let (uploaded, downloaded) = self.sync_attachments(&local.vault).await?;
+                    self.upload(&remote_path, &mut local).await?;
                     Ok(SyncResult {
                         container: local,
                         direction: SyncDirection::Uploaded,
                         conflicts: 0,
-                        attachments_uploaded: uploaded,
-                        attachments_downloaded: downloaded,
                         message: "已保留本地版本并覆盖云端".to_string(),
                     })
                 }
                 ConflictStrategy::KeepRemote => {
-                    let mut downloaded_vault = remote.vault.clone();
-                    downloaded_vault.last_synced_at = now_ms();
-                    downloaded_vault.device_id = local.vault.device_id.clone();
-                    let (uploaded, downloaded) = self.sync_attachments(&downloaded_vault).await?;
+                    let mut downloaded = remote.vault.clone();
+                    downloaded.last_synced_at = now_ms();
+                    downloaded.device_id = local.vault.device_id.clone();
                     Ok(SyncResult {
-                        container: local.with_vault(downloaded_vault),
+                        container: local.with_vault(downloaded),
                         direction: SyncDirection::Downloaded,
                         conflicts: 0,
-                        attachments_uploaded: uploaded,
-                        attachments_downloaded: downloaded,
                         message: "已使用云端版本覆盖本地".to_string(),
                     })
                 }
                 ConflictStrategy::Merge => {
                     let merged = merge(&local.vault, &remote.vault, last);
                     let mut updated = local.with_vault(merged.vault.clone());
-                    let bytes = updated.to_bytes();
-                    self.webdav.put(&remote_path, &bytes).await.map_err(dav_err)?;
-                    let (uploaded, downloaded) = self.sync_attachments(&merged.vault).await?;
+                    self.upload(&remote_path, &mut updated).await?;
                     let message = if merged.conflicts > 0 {
                         format!("已合并，产生 {} 个冲突副本", merged.conflicts)
                     } else {
@@ -253,8 +248,6 @@ impl SyncEngine {
                         container: updated,
                         direction: SyncDirection::Merged,
                         conflicts: merged.conflicts as i32,
-                        attachments_uploaded: uploaded,
-                        attachments_downloaded: downloaded,
                         message,
                     })
                 }
@@ -262,42 +255,29 @@ impl SyncEngine {
         }
     }
 
-    /// 附件按 id 对账：本地缺→下载；远端缺→上传。返回 (uploaded, downloaded)。
-    async fn sync_attachments(&self, vault: &Vault) -> Result<(i32, i32), SyncError> {
-        let mut seen = std::collections::HashSet::new();
-        let refs: Vec<&crate::sp::model::AttachmentRef> = vault
-            .items
-            .iter()
-            .flat_map(|item| item.attachments.iter())
-            .filter(|r| seen.insert(r.id.clone()))
-            .collect();
-        if refs.is_empty() {
-            return Ok((0, 0));
-        }
-        let dir = self.config.attachments_dir(&self.remote_key);
-        let mut uploaded = 0;
-        let mut downloaded = 0;
-        for r in refs {
-            let remote_path = format!("{dir}/{}.sica", r.id);
-            if !self.attachment_store.exists(&r.id) {
-                let Some(remote_bytes) = self.webdav.get(&remote_path).await.map_err(dav_err)?
-                else {
-                    continue;
-                };
-                self.attachment_store
-                    .write_raw(&r.id, &remote_bytes)
-                    .map_err(SyncError)?;
-                downloaded += 1;
-            } else if !self.webdav.exists(&remote_path).await.map_err(dav_err)? {
-                let Some(bytes) = self.attachment_store.read_raw(&r.id).map_err(SyncError)?
-                else {
-                    continue;
-                };
-                self.webdav.put(&remote_path, &bytes).await.map_err(dav_err)?;
-                uploaded += 1;
-            }
-        }
-        Ok((uploaded, downloaded))
+    /// 上传密码库本体，并顺带维护云端清单（清单失败不影响整次同步）。
+    async fn upload(&self, remote_path: &str, container: &mut VaultContainer) -> Result<(), SyncError> {
+        let bytes = container.to_bytes();
+        self.webdav.put(remote_path, &bytes).await.map_err(dav_err)?;
+        let manifest_text = self
+            .webdav
+            .get(&self.config.manifest_path())
+            .await
+            .ok()
+            .flatten()
+            .and_then(|b| String::from_utf8(b).ok());
+        let mut manifest = CloudManifest::parse(manifest_text.as_deref());
+        manifest.upsert(
+            &self.remote_key,
+            &container.vault.name,
+            container.vault.updated_at,
+            bytes.len() as i64,
+        );
+        let _ = self
+            .webdav
+            .put(&self.config.manifest_path(), manifest.to_json().as_bytes())
+            .await;
+        Ok(())
     }
 }
 
@@ -338,5 +318,23 @@ mod tests {
         assert_eq!(json, "\"KEEP_REMOTE\"");
         let dir = serde_json::to_string(&SyncDirection::Merged).unwrap();
         assert_eq!(dir, "\"MERGED\"");
+    }
+
+    #[test]
+    fn remote_keys_match_mobile_layout() {
+        let config = WebDavConfig::default();
+        assert_eq!(key_for("我的密码库").len(), 17);
+        assert_eq!(
+            config.remote_path(&key_for("我的密码库")),
+            format!("SafePassword/SafePassword-{}.spv", key_for("我的密码库"))
+        );
+        assert_eq!(config.legacy_remote_path(), "SafePassword/SafePassword.spv");
+        assert_eq!(
+            config.manifest_path(),
+            "SafePassword/SafePassword-index.json"
+        );
+        // 1.4.1 旧键：小写、非 ASCII 字母数字转 '-'，落在 <dir>/<key>.sicv
+        assert_eq!(config.legacy_name_path("My Vault"), "SafePassword/my-vault.sicv");
+        assert_eq!(config.legacy_name_path("!!!"), "SafePassword/vault.sicv");
     }
 }

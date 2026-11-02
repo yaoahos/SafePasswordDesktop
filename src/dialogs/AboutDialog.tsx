@@ -127,7 +127,7 @@ export function AboutDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void
       </div>
 
       <div className="about-foot muted small">
-        SafePassword 是独立实现，参考 SafeInCloud 界面，但与官方无关联。
+        SafePassword 是独立实现，与任何第三方产品无关联。
       </div>
     </Dialog>
   );

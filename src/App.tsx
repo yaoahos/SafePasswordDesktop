@@ -64,8 +64,8 @@ export default function App() {
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [selectItemId, setSelectItemId] = useState<string | null>(null);
-  /** 当前选中条目是否"刚从模板新建未保存"（对齐手机端 existing==null，驱动「保存并新建」） */
-  const [newItemId, setNewItemId] = useState<string | null>(null);
+  /** 新建条目草稿：不落库，手动保存才写入（v1 项 6） */
+  const [draftNew, setDraftNew] = useState<VaultItem | null>(null);
   const [toast, setToast] = useState<{ id: number; msg: string; kind: ToastKind } | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("CREATED");
   const [sortAsc, setSortAsc] = useState(false);
@@ -353,8 +353,9 @@ export default function App() {
     async (next: VaultItem) => {
       const v = await putItem(next);
       setVault(v);
-      // 首次保存后不再是"新建"状态（对齐手机端保存后 existing!=null）
-      setNewItemId((n) => (n === next.id ? null : n));
+      // 首次保存后草稿转为正式条目（对齐手机端保存后 existing!=null）
+      setDraftNew((d) => (d && d.id === next.id ? null : d));
+      setSelectItemId(next.id);
     },
     [],
   );
@@ -407,20 +408,24 @@ export default function App() {
   }, [vault, selectItemId, notify]);
 
   const createFromTemplate = useCallback(
-    async (templateId: string) => {
+    (templateId: string) => {
       if (!vault) return;
+      // 只建草稿：不落库、不预填标题、不带备注（v1 项 6，对齐手机端"未保存的新建"）
       const item = newItemFromTemplate(templateId);
-      item.title = "新条目";
-      const v = await putItem(item);
-      setVault(v);
-      setSelectItemId(item.id);
-      setNewItemId(item.id);
+      item.title = "";
+      item.notes = "";
+      setDraftNew(item);
+      setSelectItemId(null);
       setSection("ALL");
       setLabelFilter(null);
+      setQuery("");
       setDialog(null);
     },
     [vault],
   );
+
+  /** 新建草稿直接丢弃（未落库） */
+  const discardDraft = useCallback(() => setDraftNew(null), []);
 
   // ------------------------------------------------------------ 过滤 / 选中
 
@@ -448,18 +453,19 @@ export default function App() {
     return arr;
   }, [items, section, labelFilter, query, settings.searchPasswords, sortMode, sortAsc]);
 
-  // 选中项不在可见列表时，自动落到第一个
+  // 选中项不在可见列表时，自动落到第一个（新建草稿不受影响）
   useEffect(() => {
+    if (draftNew) return;
     if (filtered.length === 0) {
       if (selectItemId !== null) setSelectItemId(null);
       return;
     }
     if (!filtered.some((i) => i.id === selectItemId)) setSelectItemId(filtered[0].id);
-  }, [filtered, selectItemId]);
+  }, [filtered, selectItemId, draftNew]);
 
   const selected = useMemo(
-    () => filtered.find((i) => i.id === selectItemId) ?? null,
-    [filtered, selectItemId],
+    () => draftNew ?? filtered.find((i) => i.id === selectItemId) ?? null,
+    [draftNew, filtered, selectItemId],
   );
 
   const sectionTitle = labelFilter
@@ -542,8 +548,11 @@ export default function App() {
             sortAsc={sortAsc}
             onChangeSort={changeSort}
             selectedId={selectItemId}
-            onSelect={setSelectItemId}
-            onNew={() => void createFromTemplate("login")}
+            onSelect={(id) => {
+              setDraftNew(null);
+              setSelectItemId(id);
+            }}
+            onNew={() => createFromTemplate("login")}
           />
           <div className="col-divider" />
           {selected ? (
@@ -553,12 +562,14 @@ export default function App() {
               onSave={saveItem}
               onToggleFavorite={toggleFavorite}
               onDuplicate={duplicateSelected}
-              onDelete={trashSelected}
+              onDelete={draftNew ? async () => discardDraft() : trashSelected}
               onRestore={restoreSelected}
               onPurge={purgeSelected}
               notify={notify}
-              isNew={selectItemId !== null && selectItemId === newItemId}
-              onSaveAndCreate={() => void createFromTemplate("login")}
+              isNew={!!draftNew}
+              onSaveAndCreate={() => {
+                void createFromTemplate("login");
+              }}
             />
           ) : (
             <div className="detail">

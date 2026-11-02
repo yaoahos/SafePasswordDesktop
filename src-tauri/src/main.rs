@@ -10,9 +10,8 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // 数据根目录：<appData>/com.yaoahos.safepassword.desktop
-            //   vaults/<id>.sicv   保险库
-            //   attachments/<id>/  附件
-            //   backups/           备份
+            //   vaults/<id>.spv   保险库（兼容历史 .sicv）
+            //   backups/          备份
             //   settings.json      主题/HIBP key/WebDAV 配置
             let dir = app
                 .path()
@@ -46,10 +45,7 @@ fn main() {
             commands::export_csv,
             commands::export_safeincloud_xml,
             commands::export_vault_json,
-            commands::export_vault_sicv,
-            commands::attachment_add,
-            commands::attachment_read,
-            commands::attachment_remove,
+            commands::export_vault_spv,
             commands::import_csv,
             commands::import_safeincloud_xml,
             commands::backup_create,

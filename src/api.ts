@@ -105,20 +105,8 @@ export const webdavPull = (config: WebDavConfig) => invoke<SyncSummary>("webdav_
 export const webdavPullIfChanged = (config: WebDavConfig) =>
   invoke<SyncSummary | null>("webdav_pull_if_changed", { config });
 
-// ---- 附件（data 为 Base64 明文，后端用内容密钥加密落盘） ----
-
-export const attachmentAdd = (itemId: string, name: string, mime: string, data: string) =>
-  invoke<Vault>("attachment_add", { itemId, name, mime, data });
-
-export const attachmentRead = (attachmentId: string) =>
-  invoke<string>("attachment_read", { attachmentId });
-
-export const attachmentRemove = (itemId: string, attachmentId: string) =>
-  invoke<Vault>("attachment_remove", { itemId, attachmentId });
-
-// ---- 导出加密 .sicv（Base64，前端转 Blob 下载，可拷回手机） ----
-
-export const exportVaultSicv = () => invoke<string>("export_vault_sicv");
+/** 导出加密备份（.spv，Base64；前端转 Blob 下载，可拷回手机） */
+export const exportVaultSpv = () => invoke<string>("export_vault_spv");
 
 // ---- 检查更新 / 软件内自更新（对齐手机端 AboutScreen）----
 
