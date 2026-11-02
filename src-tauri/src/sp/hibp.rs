@@ -216,4 +216,17 @@ mod tests {
         let err = client.email_breaches("a@b.c", "").await.unwrap_err();
         assert!(matches!(err, HibpError::MissingApiKey));
     }
+
+    /// 实网测试：验证真实 range API 可达（Add-Padding 大写 SHA-1 前缀语义）。
+    /// 默认不跑（会出网）：`cargo test -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "network: 需要外网访问 api.pwnedpasswords.com"]
+    async fn password_count_against_live_hibp() {
+        let client = HibpClient::new();
+        let n = client
+            .password_count("password")
+            .await
+            .expect("live HIBP 应可达");
+        assert!(n > 1_000_000, "'password' 应是高频泄露口令，实际 {n}");
+    }
 }
