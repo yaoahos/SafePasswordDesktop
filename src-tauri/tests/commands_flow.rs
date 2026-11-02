@@ -216,6 +216,12 @@ fn export_and_util_commands() {
     let report = c::security_report(app.state::<AppState>()).unwrap();
     assert_eq!(report.total, 1, "应统计到 1 个有密码的活跃条目");
 
+    // 导入回读（命令级）：导出的 XML/CSV 再导回来应各新增条目（导入生成新 id）
+    let n_xml = c::import_safeincloud_xml(app.state::<AppState>(), xml).unwrap();
+    assert!(n_xml >= 1, "SafeInCloud XML 导入应至少 1 条，得到 {n_xml}");
+    let n_csv = c::import_csv(app.state::<AppState>(), csv).unwrap();
+    assert!(n_csv >= 1, "CSV 导入应至少 1 条，得到 {n_csv}");
+
     let _ = fs::remove_dir_all(&root);
 }
 
