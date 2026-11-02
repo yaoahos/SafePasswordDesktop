@@ -37,6 +37,11 @@ impl CloudManifest {
         }
     }
 
+    /// 移除指定条目（用于云端密码库删除 / 改名后清理旧键）。
+    pub fn remove(&mut self, key: &str) {
+        self.vaults.retain(|e| e.key != key);
+    }
+
     /// 空/坏 JSON 一律回落到空清单（清单只服务「从云端恢复」的选择列表）。
     pub fn parse(text: Option<&str>) -> Self {
         match text {

@@ -86,6 +86,10 @@ export function ItemDetail({
     setShown({});
     setDirty(false);
     setEditing(isNew);
+    // 切换条目 / 新建时清掉上一次的弹窗状态，避免"点新建却弹出回收站确认"
+    setConfirmDel(false);
+    setFieldDlg(null);
+    setGenFieldId(null);
   }, [item, isNew]);
 
   const patch = (p: Partial<VaultItem>) => {
@@ -224,6 +228,29 @@ export function ItemDetail({
   };
 
   /** 预览态（对齐手机端 ItemViewScreen：首卡 + 字段行 + 备注 + 时间） */
+  /** 删除确认弹窗（预览态与编辑态共用，避免只在编辑态渲染导致点删除无反应） */
+  const deleteConfirm = confirmDel ? (
+    <Dialog title="移入回收站" onClose={() => setConfirmDel(false)} width={380}>
+      <div style={{ lineHeight: 1.8 }}>
+        将“{draft.title || "未命名"}”移入回收站，可稍后在回收站恢复。
+      </div>
+      <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+        <button className="btn" onClick={() => setConfirmDel(false)}>
+          取消
+        </button>
+        <button
+          className="btn danger"
+          onClick={() => {
+            setConfirmDel(false);
+            void onDelete().catch((e) => notify(String(e), "error"));
+          }}
+        >
+          移入回收站
+        </button>
+      </div>
+    </Dialog>
+  ) : null;
+
   if (!editing && !trashed) {
     const user =
       draft.fields
@@ -378,6 +405,7 @@ export function ItemDetail({
             删除
           </button>
         </div>
+        {deleteConfirm}
         <div className="spacer-16" />
       </div>
     );
@@ -564,7 +592,7 @@ export function ItemDetail({
                     ↓
                   </button>
                   <button className="icon-btn" title="生成密码" onClick={() => setGenFieldId(f.id)}>
-                    <Icon name="wand" size={15} />
+                    <Icon name="dice" size={15} />
                   </button>
                   <button
                     className="icon-btn"
@@ -767,27 +795,7 @@ export function ItemDetail({
           onUse={(pw) => patchField(genFieldId, { value: pw })}
         />
       )}
-      {confirmDel && (
-        <Dialog title="移入回收站" onClose={() => setConfirmDel(false)} width={380}>
-          <div style={{ lineHeight: 1.8 }}>
-            将“{draft.title || "未命名"}”移入回收站，可稍后在回收站恢复。
-          </div>
-          <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-            <button className="btn" onClick={() => setConfirmDel(false)}>
-              取消
-            </button>
-            <button
-              className="btn danger"
-              onClick={() => {
-                setConfirmDel(false);
-                void onDelete().catch((e) => notify(String(e), "error"));
-              }}
-            >
-              移入回收站
-            </button>
-          </div>
-        </Dialog>
-      )}
+      {deleteConfirm}
       <div className="spacer-16" />
     </div>
   );

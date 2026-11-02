@@ -7,6 +7,7 @@ import {
   backupList,
   backupRestore,
   changeMasterPassword,
+  cloudKey,
   createVault,
   deleteVault,
   exportCsv,
@@ -19,6 +20,7 @@ import {
   importVaultBytes,
   renameVault,
   saveExport,
+  webdavDeleteCloud,
   webdavGetVault,
   webdavListCloud,
   webdavPull,
@@ -52,7 +54,7 @@ export function SettingsDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => v
       <div className="spacer-10" />
       {tab === "security" && <SecurityTab ctx={ctx} />}
       {tab === "sync" && <SyncTab ctx={ctx} />}
-      {tab === "vault" && <VaultTab ctx={ctx} />}
+      {tab === "vault" && <VaultTab ctx={ctx} onClose={onClose} />}
       {tab === "display" && <DisplayTab ctx={ctx} />}
       {tab === "transfer" && <TransferTab ctx={ctx} />}
     </Dialog>
@@ -150,6 +152,8 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
   const [cfg, setCfg] = useState<WebDavConfig>({ ...ctx.settings.webdav });
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  /** 提示显示在触发操作的分区底部（sync=云端同步 / backup=本地备份） */
+  const [scope, setScope] = useState<"sync" | "backup">("sync");
   const [backups, setBackups] = useState<BackupInfo[] | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<BackupInfo | null>(null);
   const [restorePw, setRestorePw] = useState("");
@@ -163,6 +167,7 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
   };
 
   const doSaveAndSync = async () => {
+    setScope("sync");
     setBusy("sync");
     setMsg(null);
     try {
@@ -178,6 +183,7 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
   };
 
   const doPull = async () => {
+    setScope("sync");
     setBusy("pull");
     setMsg(null);
     try {
@@ -202,6 +208,7 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
   };
 
   const createBackup = async () => {
+    setScope("backup");
     setBusy("create");
     try {
       const b = await backupCreate();
@@ -216,6 +223,7 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
 
   const doRestore = async () => {
     if (!restoreTarget) return;
+    setScope("backup");
     setBusy("restore");
     try {
       await backupRestore(restoreTarget.path, restorePw);
@@ -231,6 +239,7 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
   };
 
   const doDeleteBackup = async (b: BackupInfo) => {
+    setScope("backup");
     setBusy(`del-${b.path}`);
     try {
       await backupDelete(b.path);
@@ -339,7 +348,7 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
       <div className="setting-sub" style={{ marginTop: 6 }}>
         坚果云用户请使用应用密码；远端建议使用 HTTPS。
       </div>
-      {msg && (
+      {msg && scope === "sync" && (
         <div
           className="setting-sub"
           style={{ marginTop: 6, color: msg.ok ? "var(--primary)" : "var(--danger)", fontWeight: 600 }}
@@ -459,6 +468,14 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
           )}
         </div>
       ))}
+        {msg && scope === "backup" && (
+          <div
+            className="setting-sub"
+            style={{ marginTop: 6, color: msg.ok ? "var(--primary)" : "var(--danger)", fontWeight: 600 }}
+          >
+            {msg.text}
+          </div>
+        )}
       </div>
     </>
   );
@@ -466,17 +483,20 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
 
 // ---------------------------------------------------------------- 密码库（当前库用主题色标识，列表改下拉）
 
-function VaultTab({ ctx }: { ctx: AppCtx }) {
+function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
   const vault = ctx.vault;
   const cfg = ctx.settings.webdav;
   const [newName, setNewName] = useState("");
   const [newPw, setNewPw] = useState("");
   const [renameTo, setRenameTo] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  /** 提示显示在触发操作的分区底部（local/cloud/new） */
+  const [scope, setScope] = useState<"local" | "cloud" | "new">("local");
   const [busy, setBusy] = useState<string | null>(null);
   const [delId, setDelId] = useState<string | null>(null);
   const [cloud, setCloud] = useState<CloudVaultEntry[] | null>(null);
   const [cloudErr, setCloudErr] = useState<string | null>(null);
+  const [cloudDel, setCloudDel] = useState<string | null>(null);
   const [dlKey, setDlKey] = useState<string | null>(null);
   const [dlPw, setDlPw] = useState("");
 
@@ -485,21 +505,39 @@ function VaultTab({ ctx }: { ctx: AppCtx }) {
   const rename = async () => {
     if (!vault) return;
     const trimmed = renameTo.trim();
+    setScope("local");
     if (!trimmed) {
       setMsg({ ok: false, text: "请输入新名称" });
       return;
     }
+    setBusy("rename");
     try {
+      const oldKey = await cloudKey(vault.name);
       await renameVault(vault.id, trimmed);
+      // 云端同步库名：按新库名上传（清单自动加新条目）并清理旧键文件
+      let cloudSynced = false;
+      if (cfg.baseUrl.trim() && cfg.enabled) {
+        try {
+          await webdavSync(cfg, "KEEP_LOCAL");
+          const newKey = await cloudKey(trimmed);
+          if (newKey !== oldKey) await webdavDeleteCloud(cfg, oldKey);
+          cloudSynced = true;
+        } catch {
+          /* 云端清理失败不影响本地改名 */
+        }
+      }
       await ctx.refreshFromBackend();
       setRenameTo("");
-      setMsg({ ok: true, text: "密码库已改名" });
+      setMsg({ ok: true, text: cloudSynced ? "密码库已改名，云端库名已同步" : "密码库已改名" });
     } catch (e) {
       setMsg({ ok: false, text: String(e) });
+    } finally {
+      setBusy(null);
     }
   };
 
   const create = async () => {
+    setScope("new");
     if (!newName.trim() || newPw.length < 8) {
       setMsg({ ok: false, text: "请填写名称和至少 8 位的主密码" });
       return;
@@ -511,6 +549,7 @@ function VaultTab({ ctx }: { ctx: AppCtx }) {
       setNewName("");
       setNewPw("");
       setMsg({ ok: true, text: "已创建并切换到新密码库" });
+      onClose();
     } catch (e) {
       setMsg({ ok: false, text: String(e) });
     } finally {
@@ -519,6 +558,7 @@ function VaultTab({ ctx }: { ctx: AppCtx }) {
   };
 
   const removeLocal = async (m: VaultMeta) => {
+    setScope("local");
     setBusy(`del-${m.id}`);
     try {
       await deleteVault(m.id);
@@ -526,6 +566,7 @@ function VaultTab({ ctx }: { ctx: AppCtx }) {
       setDelId(null);
       setMsg({ ok: true, text: `已删除「${m.name}」` });
       if (wasCurrent) {
+        onClose();
         ctx.gotoSelect();
       } else {
         await ctx.refreshFromBackend();
@@ -537,7 +578,24 @@ function VaultTab({ ctx }: { ctx: AppCtx }) {
     }
   };
 
+  /** 删除云端密码库（密文 + 清单条目） */
+  const removeCloud = async (c: CloudVaultEntry) => {
+    setScope("cloud");
+    setBusy(`cdel-${c.key}`);
+    try {
+      await webdavDeleteCloud(cfg, c.key);
+      setCloudDel(null);
+      setMsg({ ok: true, text: `已删除云端密码库「${c.name}」` });
+      await refreshCloud();
+    } catch (e) {
+      setMsg({ ok: false, text: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const refreshCloud = async () => {
+    setScope("cloud");
     if (!cfg.baseUrl.trim()) {
       setCloudErr("请先在「同步与备份」里填写 WebDAV 服务器地址");
       return;
@@ -554,6 +612,7 @@ function VaultTab({ ctx }: { ctx: AppCtx }) {
   };
 
   const downloadCloud = async (c: CloudVaultEntry) => {
+    setScope("cloud");
     if (dlPw.length < 8) {
       setMsg({ ok: false, text: "请输入该密码库的主密码（至少 8 位）" });
       return;
@@ -567,6 +626,7 @@ function VaultTab({ ctx }: { ctx: AppCtx }) {
       setDlKey(null);
       setDlPw("");
       setMsg({ ok: true, text: `已下载并切换到「${meta.name}」` });
+      onClose();
     } catch (e) {
       setMsg({ ok: false, text: String(e) });
     } finally {
@@ -602,6 +662,7 @@ function VaultTab({ ctx }: { ctx: AppCtx }) {
                   className="btn sm"
                   onClick={() => {
                     ctx.gotoSelect();
+                    onClose();
                   }}
                 >
                   切换
@@ -628,6 +689,7 @@ function VaultTab({ ctx }: { ctx: AppCtx }) {
             </div>
           );
         })}
+        {msg && scope === "local" && <div className={msg.ok ? "ok-text" : "err-text"}>{msg.text}</div>}
       </div>
 
       <div className="spacer-10" />
@@ -687,9 +749,28 @@ function VaultTab({ ctx }: { ctx: AppCtx }) {
                   </button>
                 </span>
               )}
+              {cloudDel === c.key ? (
+                <span className="row" style={{ gap: 6 }}>
+                  <button
+                    className="btn sm danger"
+                    disabled={busy !== null}
+                    onClick={() => void removeCloud(c)}
+                  >
+                    确认删除
+                  </button>
+                  <button className="btn sm" onClick={() => setCloudDel(null)}>
+                    取消
+                  </button>
+                </span>
+              ) : (
+                <button className="icon-btn" title="删除云端密码库" onClick={() => setCloudDel(c.key)}>
+                  <Icon name="trash" size={16} />
+                </button>
+              )}
             </div>
           );
         })}
+        {msg && scope === "cloud" && <div className={msg.ok ? "ok-text" : "err-text"}>{msg.text}</div>}
       </div>
 
       <div className="spacer-10" />
@@ -708,6 +789,7 @@ function VaultTab({ ctx }: { ctx: AppCtx }) {
         <button className="btn primary tall block" disabled={busy !== null} onClick={() => void create()}>
           新建并切换
         </button>
+        {msg && scope === "new" && <div className={msg.ok ? "ok-text" : "err-text"}>{msg.text}</div>}
       </div>
 
       {vault && (
@@ -732,7 +814,6 @@ function VaultTab({ ctx }: { ctx: AppCtx }) {
         </>
       )}
 
-      {msg && <div className={msg.ok ? "ok-text" : "err-text"}>{msg.text}</div>}
     </>
   );
 }
