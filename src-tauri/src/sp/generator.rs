@@ -215,7 +215,6 @@ mod tests {
         let mut sorted: Vec<&str> = WORDS.to_vec();
         sorted.sort_unstable();
         sorted.dedup_by(|a, b| a == b);
-        ();
         assert_eq!(sorted.len(), 136);
         assert!(WORDS.iter().all(|w| *w == w.to_lowercase()));
     }

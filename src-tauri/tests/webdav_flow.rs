@@ -187,9 +187,11 @@ async fn two_devices_sync_through_mock_webdav() {
     let root_a = tmp_root("a");
     let app_a = mock_app(&root_a);
     c::create_vault(app_a.state::<AppState>(), "同步库".into(), "pw-sync🚀".into()).unwrap();
-    let mut item = VaultItem::default();
-    item.id = "item-a1".to_string();
-    item.title = "GitHub".to_string();
+    let item = VaultItem {
+        id: "item-a1".to_string(),
+        title: "GitHub".to_string(),
+        ..VaultItem::default()
+    };
     c::put_item(app_a.state::<AppState>(), item).unwrap();
 
     // 1. 连通测试（PROPFIND Depth:0）
@@ -242,9 +244,11 @@ async fn two_devices_sync_through_mock_webdav() {
 
     // 4. A 加第二条 → 用 KeepLocal 覆盖上传（此刻两端 updatedAt 都新，DETECT 会报冲突；
     //    真实场景自动同步也走 KEEP_LOCAL）→ B 下载到 2 条
-    let mut item2 = VaultItem::default();
-    item2.id = "item-a2".to_string();
-    item2.title = "Second".to_string();
+    let item2 = VaultItem {
+        id: "item-a2".to_string(),
+        title: "Second".to_string(),
+        ..VaultItem::default()
+    };
     c::put_item(app_a.state::<AppState>(), item2).unwrap();
     let s = c::webdav_sync(app_a.state::<AppState>(), cfg(), Some(ConflictStrategy::KeepLocal))
         .await

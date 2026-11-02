@@ -96,7 +96,7 @@ impl VaultStore {
             self.write_index(&index)?;
         }
         let mut metas = index.vaults;
-        metas.sort_by(|a, b| b.last_opened_at.cmp(&a.last_opened_at));
+        metas.sort_by_key(|m| std::cmp::Reverse(m.last_opened_at));
         Ok(metas)
     }
 

@@ -517,6 +517,18 @@ pub struct VaultIndex {
     pub vaults: Vec<VaultMeta>,
 }
 
+/// 对齐 TemplateCatalog.kt 的模板 id 常量。
+pub struct TemplateIds;
+impl TemplateIds {
+    pub const LOGIN: &'static str = "login";
+    pub const BANK_CARD: &'static str = "bank_card";
+    pub const EMAIL: &'static str = "email";
+    pub const WIFI: &'static str = "wifi";
+    pub const IDENTITY: &'static str = "identity";
+    pub const NOTE: &'static str = "note";
+    pub const CUSTOM: &'static str = "custom";
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -579,8 +591,10 @@ mod tests {
     #[test]
     fn vault_json_wire_names_are_camel_case() {
         let mut vault = Vault::default();
-        let mut item = VaultItem::default();
-        item.title = "招商银行".into();
+        let mut item = VaultItem {
+            title: "招商银行".into(),
+            ..VaultItem::default()
+        };
         item.deleted_at = None;
         item.label_ids = vec!["lbl1".into()];
         vault.items.push(item);
@@ -625,41 +639,49 @@ mod tests {
 
     #[test]
     fn subtitle_and_primary_username_logic() {
-        let mut item = VaultItem::default();
-        item.fields = vec![
-            Field {
-                label: "账号".into(),
-                value: "user@example.com".into(),
-                ..Field::default()
-            },
-            Field {
-                label: "密码".into(),
-                value: "p@ss".into(),
-                r#type: FieldType::Password,
-                sensitive: true,
-                ..Field::default()
-            },
-        ];
+        let item = VaultItem {
+            fields: vec![
+                Field {
+                    label: "账号".into(),
+                    value: "user@example.com".into(),
+                    ..Field::default()
+                },
+                Field {
+                    label: "密码".into(),
+                    value: "p@ss".into(),
+                    r#type: FieldType::Password,
+                    sensitive: true,
+                    ..Field::default()
+                },
+            ],
+            ..VaultItem::default()
+        };
         assert_eq!(item.primary_username().as_deref(), Some("user@example.com"));
         assert_eq!(item.primary_password().as_deref(), Some("p@ss"));
         assert_eq!(item.subtitle(), "user@example.com");
 
         // 无账号时回落到 url，再到备注首行
-        let mut item2 = VaultItem::default();
-        item2.url = "https://example.com".into();
+        let item2 = VaultItem {
+            url: "https://example.com".into(),
+            ..VaultItem::default()
+        };
         assert_eq!(item2.subtitle(), "https://example.com");
-        let mut item3 = VaultItem::default();
-        item3.notes = "第一行\n第二行".into();
+        let item3 = VaultItem {
+            notes: "第一行\n第二行".into(),
+            ..VaultItem::default()
+        };
         assert_eq!(item3.subtitle(), "第一行");
 
         // 忽略大小写的 Email 匹配
-        let mut item4 = VaultItem::default();
-        item4.fields = vec![Field {
-            label: "EMAIL".into(),
-            value: "a@b.c".into(),
-            r#type: FieldType::Email,
-            ..Field::default()
-        }];
+        let item4 = VaultItem {
+            fields: vec![Field {
+                label: "EMAIL".into(),
+                value: "a@b.c".into(),
+                r#type: FieldType::Email,
+                ..Field::default()
+            }],
+            ..VaultItem::default()
+        };
         assert_eq!(item4.primary_username().as_deref(), Some("a@b.c"));
     }
 
@@ -691,16 +713,4 @@ mod tests {
         v.touch();
         assert_eq!(v.revision, before + 1);
     }
-}
-
-/// 对齐 TemplateCatalog.kt 的模板 id 常量。
-pub struct TemplateIds;
-impl TemplateIds {
-    pub const LOGIN: &'static str = "login";
-    pub const BANK_CARD: &'static str = "bank_card";
-    pub const EMAIL: &'static str = "email";
-    pub const WIFI: &'static str = "wifi";
-    pub const IDENTITY: &'static str = "identity";
-    pub const NOTE: &'static str = "note";
-    pub const CUSTOM: &'static str = "custom";
 }

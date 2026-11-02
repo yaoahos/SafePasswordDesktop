@@ -230,10 +230,14 @@ mod tests {
     use crate::sp::model::{FieldType, Field, VaultItem};
 
     fn sample_vault() -> Vault {
-        let mut vault = Vault::default();
-        vault.name = "测试密码库".to_string();
-        let mut item = VaultItem::default();
-        item.title = "招商银行".to_string();
+        let mut vault = Vault {
+            name: "测试密码库".to_string(),
+            ..Vault::default()
+        };
+        let mut item = VaultItem {
+            title: "招商银行".to_string(),
+            ..VaultItem::default()
+        };
         item.fields = vec![
             Field {
                 label: "账号".to_string(),

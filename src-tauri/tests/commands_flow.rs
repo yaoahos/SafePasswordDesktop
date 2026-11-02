@@ -60,9 +60,11 @@ fn ui_full_flow_roundtrip() {
     assert!(c::current_vault(app.state::<AppState>()).unwrap().is_some());
 
     // 2. 加条目
-    let mut item = VaultItem::default();
-    item.id = "item-e2e-1".to_string();
-    item.title = "GitHub".to_string();
+    let mut item = VaultItem {
+        id: "item-e2e-1".to_string(),
+        title: "GitHub".to_string(),
+        ..VaultItem::default()
+    };
     item.fields.push(Field {
         id: "f1".to_string(),
         label: "账号".to_string(),
@@ -186,9 +188,11 @@ fn export_and_util_commands() {
     let app = mock_app(&root);
     c::create_vault(app.state::<AppState>(), "导出库".into(), "pw123456".into()).unwrap();
 
-    let mut item = VaultItem::default();
-    item.id = "item-x-1".to_string();
-    item.title = "招商银行".to_string();
+    let mut item = VaultItem {
+        id: "item-x-1".to_string(),
+        title: "招商银行".to_string(),
+        ..VaultItem::default()
+    };
     item.fields.push(Field {
         id: "f1".to_string(),
         label: "卡号".to_string(),
