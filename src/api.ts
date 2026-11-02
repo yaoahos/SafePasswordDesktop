@@ -124,6 +124,13 @@ export const webdavListCloud = (config: WebDavConfig) =>
 export const webdavGetVault = (config: WebDavConfig, key: string) =>
   invoke<string | null>("webdav_get_vault", { config, key });
 
+/** 删除云端密码库（密文 + 清单条目） */
+export const webdavDeleteCloud = (config: WebDavConfig, key: string) =>
+  invoke<void>("webdav_delete_cloud", { config, key });
+
+/** 库名 → 云端稳定键（改名时比对旧/新键） */
+export const cloudKey = (name: string) => invoke<string>("cloud_key", { name });
+
 // ---- 检查更新 / 软件内自更新（对齐手机端 AboutScreen）----
 
 export const checkUpdate = (appVersion: string) =>

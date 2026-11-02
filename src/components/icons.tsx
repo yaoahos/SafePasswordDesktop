@@ -136,10 +136,12 @@ const PATHS: Record<IconName, React.ReactNode> = {
   ),
   dice: (
     <>
-      <rect x="4.5" y="4.5" width="15" height="15" rx="3" />
-      <circle cx="9" cy="9" r="1.15" fill="currentColor" stroke="none" />
-      <circle cx="15" cy="15" r="1.15" fill="currentColor" stroke="none" />
+      <rect x="4.2" y="4.2" width="15.6" height="15.6" rx="3.4" />
+      <circle cx="8.6" cy="8.6" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="15.4" cy="8.6" r="1.15" fill="currentColor" stroke="none" />
       <circle cx="12" cy="12" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="8.6" cy="15.4" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="15.4" cy="15.4" r="1.15" fill="currentColor" stroke="none" />
     </>
   ),
   star: <path d="M12 3.6l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8L3.5 9.8l5.9-.9 Z" />,

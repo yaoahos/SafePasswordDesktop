@@ -61,6 +61,8 @@ fn main() {
             commands::webdav_pull_if_changed,
             commands::webdav_list_cloud,
             commands::webdav_get_vault,
+            commands::webdav_delete_cloud,
+            commands::cloud_key,
             commands::import_json_items,
             commands::check_update,
             commands::update_download_and_install,

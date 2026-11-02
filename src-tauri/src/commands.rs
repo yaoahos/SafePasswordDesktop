@@ -834,6 +834,28 @@ pub async fn webdav_get_vault(config: WebDavConfig, key: String) -> CmdResult<Op
     }))
 }
 
+/// 删除云端密码库：删除密文文件并从清单中移除该条目（用于改名后清理旧键）。
+#[tauri::command]
+pub async fn webdav_delete_cloud(config: WebDavConfig, key: String) -> CmdResult<()> {
+    let client = WebDavClient::new(config.clone()).map_err(err)?;
+    let _ = client.delete(&config.remote_path(&key)).await;
+    let mut manifest = match client.get(&config.manifest_path()).await.map_err(err)? {
+        Some(bytes) => CloudManifest::parse(Some(&String::from_utf8_lossy(&bytes))),
+        None => CloudManifest::default(),
+    };
+    manifest.remove(&key);
+    client
+        .put(&config.manifest_path(), manifest.to_json().as_bytes())
+        .await
+        .map_err(err)
+}
+
+/// 密码库名 → 云端稳定键（前端改名时比对旧/新键）。
+#[tauri::command]
+pub fn cloud_key(name: String) -> CmdResult<String> {
+    Ok(crate::sp::cloud::key_for(&name))
+}
+
 fn build_engine(inner: &AppStateInner, config: &WebDavConfig) -> CmdResult<SyncEngine> {
     let cur = inner.current.as_ref().ok_or(NO_OPEN_VAULT)?;
     let client = WebDavClient::new(config.clone()).map_err(err)?;
