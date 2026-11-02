@@ -16,6 +16,7 @@ import {
   importCsv,
   importSafeincloudXml,
   importVaultBytes,
+  importVaultJson,
   renameVault,
   webdavPull,
   webdavSync,
@@ -559,6 +560,9 @@ function DisplayTab({ ctx }: { ctx: AppCtx }) {
 function TransferTab({ ctx }: { ctx: AppCtx }) {
   const [csvIn, setCsvIn] = useState("");
   const [xmlIn, setXmlIn] = useState("");
+  const [jsonIn, setJsonIn] = useState("");
+  const [jsonPw, setJsonPw] = useState("");
+  const [jsonName, setJsonName] = useState("");
   const [sicvPw, setSicvPw] = useState("");
   const [sicvName, setSicvName] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -662,6 +666,48 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
         }
       >
         {busy === "imp-xml" ? "导入中…" : "导入 XML"}
+      </button>
+
+      <div className="hr" />
+      <div className="section-cap">导入明文 JSON（来自"导出明文 JSON"）</div>
+      <div className="row" style={{ marginBottom: 8 }}>
+        <input
+          className="input grow"
+          type="password"
+          placeholder="新库主密码（用于加密导入的库）"
+          value={jsonPw}
+          onChange={(e) => setJsonPw(e.target.value)}
+        />
+        <input
+          className="input grow"
+          placeholder="库名称（默认：导入的密码库）"
+          value={jsonName}
+          onChange={(e) => setJsonName(e.target.value)}
+        />
+      </div>
+      <textarea
+        className="input"
+        rows={4}
+        placeholder='{"schema":1,"items":[…]}'
+        value={jsonIn}
+        onChange={(e) => setJsonIn(e.target.value)}
+      />
+      <div className="spacer-10" />
+      <button
+        className="btn sm primary"
+        disabled={busy !== null || !jsonIn.trim() || !jsonPw}
+        onClick={() =>
+          void run("imp-json", async () => {
+            const meta = await importVaultJson(jsonIn, jsonPw, jsonName.trim() || "导入的密码库");
+            await ctx.refreshFromBackend();
+            setJsonIn("");
+            setJsonPw("");
+            setJsonName("");
+            setMsg({ ok: true, text: `已导入密码库「${meta.name}」并切换过去` });
+          })
+        }
+      >
+        {busy === "imp-json" ? "导入中…" : "导入 JSON"}
       </button>
 
       <div className="hr" />
