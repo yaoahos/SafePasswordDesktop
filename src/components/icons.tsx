@@ -27,7 +27,9 @@ export type IconName =
   | "cloud"
   | "file-import"
   | "file-export"
-  | "back";
+  | "back"
+  | "menu"
+  | "tag";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   key: (
@@ -167,6 +169,20 @@ const PATHS: Record<IconName, React.ReactNode> = {
     </>
   ),
   back: <path d="M15 5l-7 7 7 7" />,
+  menu: (
+    <>
+      <path d="M8.5 6.6h11M8.5 12h11M8.5 17.4h11" />
+      <circle cx="4.7" cy="6.6" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="4.7" cy="12" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="4.7" cy="17.4" r="1.15" fill="currentColor" stroke="none" />
+    </>
+  ),
+  tag: (
+    <>
+      <path d="M4 4.8h8.6l7 7a2 2 0 0 1 0 2.8l-4.9 4.9a2 2 0 0 1-2.8 0l-7-7V4.8Z" />
+      <circle cx="8.6" cy="8.6" r="1.5" />
+    </>
+  ),
 };
 
 export function Icon({

@@ -23,16 +23,11 @@ export const TOP_ACTIONS: { key: TopAction; label: string; icon: IconName; color
   { key: "LOCK", label: "锁定", icon: "lock", color: "#C2185B" },
 ];
 
-/** 顶栏 = 自绘标题栏：左侧软件名 + 版本号（大字号），中间动作，右侧窗口按钮 */
+/** 顶栏 = 自绘标题栏：动作按钮靠左（品牌块已移除），右侧窗口按钮 */
 export function TopBar({ onAction }: { onAction: (a: TopAction) => void }) {
   return (
     <div className="topbar" data-tauri-drag-region="true">
-      <div className="topbar-brand" data-tauri-drag-region="true">
-        <img className="topbar-logo" src="/icon.png" alt="" draggable={false} />
-        <span className="topbar-title">SafePassword</span>
-        <span className="topbar-version">v{APP_VERSION}</span>
-      </div>
-      <div className="topbar-actions">
+      <div className="topbar-actions" data-tauri-drag-region="false">
         {TOP_ACTIONS.map((a) => (
           <button key={a.key} className="topbar-btn" onClick={() => onAction(a.key)} title={a.label}>
             <span className="topbar-icon" style={{ color: a.color }}>
