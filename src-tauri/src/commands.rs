@@ -21,7 +21,7 @@ use crate::sp::fsutil::write_atomic;
 use crate::sp::generator::{self, GeneratorOptions};
 use crate::sp::hibp::HibpClient;
 use crate::sp::model::{new_id, now_ms, Label, Vault, VaultItem, VaultMeta};
-use crate::sp::safeincloud_xml;
+use crate::sp::xml;
 use crate::sp::security::{self, SecurityReport};
 use crate::sp::store::VaultStore;
 use crate::sp::strength::{self, StrengthResult};
@@ -144,6 +144,13 @@ impl AppStateInner {
     }
 
     fn backups_dir(&self) -> PathBuf {
+        // 安装目录下 backup（对齐手机端"默认备份目录"约定）；调试构建固定用数据目录，
+        // 避免测试互相污染 target 目录。
+        if !cfg!(debug_assertions) {
+            if let Some(dir) = default_backup_dir() {
+                return dir;
+            }
+        }
         self.data_root.join("backups")
     }
 
@@ -537,10 +544,10 @@ pub fn export_csv(state: State<AppState>) -> CmdResult<String> {
 }
 
 #[tauri::command]
-pub fn export_safeincloud_xml(state: State<AppState>) -> CmdResult<String> {
+pub fn export_xml(state: State<AppState>) -> CmdResult<String> {
     let inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
     let cur = inner.current.as_ref().ok_or(NO_OPEN_VAULT)?;
-    Ok(safeincloud_xml::export(&cur.container.vault))
+    Ok(xml::export(&cur.container.vault))
 }
 
 #[tauri::command]
@@ -562,8 +569,8 @@ pub fn import_csv(state: State<AppState>, text: String) -> CmdResult<u32> {
 }
 
 #[tauri::command]
-pub fn import_safeincloud_xml(state: State<AppState>, text: String) -> CmdResult<u32> {
-    let cards = safeincloud_xml::parse(&text)?;
+pub fn import_xml(state: State<AppState>, text: String) -> CmdResult<u32> {
+    let cards = xml::parse(&text)?;
     if cards.is_empty() {
         return Err("XML 里没有可导入的条目".to_string());
     }
@@ -589,6 +596,56 @@ pub fn export_vault_spv(state: State<AppState>) -> CmdResult<String> {
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
+// ---------------------------------------------------------------- 保存对话框
+
+/// 安装目录下 backup（默认导出/备份目录）；目录不可写则返回 None。
+fn default_backup_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?.join("backup");
+    std::fs::create_dir_all(&dir).ok()?;
+    let probe = dir.join(".write-probe");
+    std::fs::write(&probe, b"ok").ok()?;
+    let _ = std::fs::remove_file(&probe);
+    Some(dir)
+}
+
+/// 弹出系统保存对话框并写入内容（base64 传入，文本与二进制导出通用）。
+#[tauri::command]
+pub async fn save_export(
+    app: tauri::AppHandle,
+    default_name: String,
+    base64_data: String,
+) -> CmdResult<Option<String>> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64_data.as_bytes())
+        .map_err(|e| format!("内容解码失败：{e}"))?;
+    let dir = default_backup_dir();
+    let name = default_name.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let mut dlg = app.dialog().file();
+        if let Some(dir) = dir {
+            dlg = dlg.set_directory(dir);
+        }
+        dlg.set_file_name(name).blocking_save_file()
+    })
+    .await
+    .map_err(|e| format!("保存对话框失败：{e}"))?;
+
+    let Some(fp) = picked else {
+        return Ok(None); // 用户取消
+    };
+    let Some(path) = fp.as_path().map(|p| p.to_path_buf()) else {
+        return Err("保存位置无效".to_string());
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&path, bytes).map_err(|e| format!("写入失败：{e}"))?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
 // ---------------------------------------------------------------- 备份
 
 #[tauri::command]
@@ -610,8 +667,24 @@ pub fn backup_create(state: State<AppState>) -> CmdResult<BackupInfo> {
 #[tauri::command]
 pub fn backup_list(state: State<AppState>) -> CmdResult<Vec<BackupInfo>> {
     let inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
-    let mgr = BackupManager::new(&inner.backups_dir()).map_err(err)?;
-    mgr.list().map_err(err)
+    // 合并"安装目录 backup"与旧数据目录备份：升级后旧备份仍可见
+    let mut all: Vec<BackupInfo> = Vec::new();
+    for dir in [inner.backups_dir(), inner.data_root.join("backups")] {
+        if !dir.exists() {
+            continue;
+        }
+        if let Ok(mgr) = BackupManager::new(&dir) {
+            if let Ok(list) = mgr.list() {
+                for b in list {
+                    if !all.iter().any(|x| x.path == b.path) {
+                        all.push(b);
+                    }
+                }
+            }
+        }
+    }
+    all.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(all)
 }
 
 /// 用备份覆盖（同 id 库）或按新库导入（id 已不存在）。

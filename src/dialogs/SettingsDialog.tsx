@@ -9,19 +9,20 @@ import {
   createVault,
   deleteVault,
   exportCsv,
-  exportSafeincloudXml,
+  exportXml,
   exportVaultJson,
   exportVaultSpv,
   importCsv,
-  importSafeincloudXml,
+  importXml,
   importVaultBytes,
   importVaultJson,
   renameVault,
+  saveExport,
   webdavPull,
   webdavSync,
 } from "../api";
 import type { BackupInfo, WebDavConfig } from "../types";
-import { arrayBufferToBase64, downloadBase64, downloadText, formatSize, formatTime } from "../utils";
+import { arrayBufferToBase64, exportStamp, formatSize, formatTime } from "../utils";
 import type { AppCtx } from "../app-context";
 
 type Tab = "security" | "sync" | "vault" | "display" | "transfer";
@@ -658,22 +659,26 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
     }
   };
 
+  const exportName = (ext: string) => {
+    const name = (ctx.vault?.name ?? "vault").replace(/[\\/:*?"<>|]/g, "_");
+    return `${name}-${exportStamp()}.${ext}`;
+  };
+
   const doExport = (kind: "csv" | "xml" | "json") =>
     void run(`exp-${kind}`, async () => {
       const text =
-        kind === "csv" ? await exportCsv() : kind === "xml" ? await exportSafeincloudXml() : await exportVaultJson();
+        kind === "csv" ? await exportCsv() : kind === "xml" ? await exportXml() : await exportVaultJson();
       const ext = kind === "csv" ? "csv" : kind === "xml" ? "xml" : "json";
-      const name = (ctx.vault?.name ?? "vault").replace(/[\\/:*?"<>|]/g, "_");
-      downloadText(`${name}.${ext}`, text, kind === "csv" ? "text/csv;charset=utf-8" : "application/json");
-      setMsg({ ok: true, text: `已导出 ${name}.${ext}` });
+      const b64 = arrayBufferToBase64(new TextEncoder().encode(text).buffer as ArrayBuffer);
+      const saved = await saveExport(exportName(ext), b64);
+      setMsg(saved ? { ok: true, text: `已保存到 ${saved}` } : { ok: true, text: "已取消保存" });
     });
 
   const doExportSicv = () =>
     void run("exp-spv", async () => {
       const b64 = await exportVaultSpv();
-      const name = (ctx.vault?.name ?? "vault").replace(/[\\/:*?"<>|]/g, "_");
-      downloadBase64(`${name}.spv`, b64);
-      setMsg({ ok: true, text: `已导出 ${name}.spv（加密，可拷回手机）` });
+      const saved = await saveExport(exportName("spv"), b64);
+      setMsg(saved ? { ok: true, text: `已保存加密备份到 ${saved}` } : { ok: true, text: "已取消保存" });
     });
 
   const importTextFile = (f: File) =>
@@ -685,7 +690,7 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
         await ctx.refreshFromBackend();
         setMsg({ ok: true, text: `成功导入 ${n} 条（CSV）` });
       } else if (ext === "xml") {
-        const n = await importSafeincloudXml(text);
+        const n = await importXml(text);
         await ctx.refreshFromBackend();
         setMsg({ ok: true, text: `成功导入 ${n} 条（XML）` });
       } else if (ext === "json") {

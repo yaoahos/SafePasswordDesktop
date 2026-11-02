@@ -186,8 +186,8 @@ fn export_and_util_commands() {
     let csv = c::export_csv(app.state::<AppState>()).unwrap();
     assert!(csv.starts_with("标题,"), "CSV 表头不对: {csv}");
     assert!(csv.contains("招商银行"));
-    let xml = c::export_safeincloud_xml(app.state::<AppState>()).unwrap();
-    assert!(xml.contains("<database"), "SafeInCloud XML 根节点缺失");
+    let xml = c::export_xml(app.state::<AppState>()).unwrap();
+    assert!(xml.contains("<database"), "XML 根节点缺失");
     assert!(xml.contains("招商银行"));
     let json = c::export_vault_json(app.state::<AppState>()).unwrap();
     assert!(json.contains("\"items\""));
@@ -203,8 +203,8 @@ fn export_and_util_commands() {
     assert_eq!(report.total, 1, "应统计到 1 个有密码的活跃条目");
 
     // 导入回读（命令级）：导出的 XML/CSV 再导回来应各新增条目（导入生成新 id）
-    let n_xml = c::import_safeincloud_xml(app.state::<AppState>(), xml).unwrap();
-    assert!(n_xml >= 1, "SafeInCloud XML 导入应至少 1 条，得到 {n_xml}");
+    let n_xml = c::import_xml(app.state::<AppState>(), xml).unwrap();
+    assert!(n_xml >= 1, "XML 导入应至少 1 条，得到 {n_xml}");
     let n_csv = c::import_csv(app.state::<AppState>(), csv).unwrap();
     assert!(n_csv >= 1, "CSV 导入应至少 1 条，得到 {n_csv}");
 

@@ -1,4 +1,4 @@
-//! 对齐 Android SafeInCloudXml.kt：原版 SafeInCloud XML 导出解析/导入。
+//! XML 导入解析/导出（兼容手机端导出的 database/card 结构）。
 //!
 //! 解析用 quick-xml（不解析外部实体，天然防 XXE）；导出手工序列化以完全
 //! 控制属性顺序与转义（Transformer 的输出只要求 XML 合法，不做字节兼容）。
@@ -10,7 +10,7 @@ use crate::sp::model::{Field, FieldType, ItemStatus, Vault, VaultItem, now_ms};
 use crate::sp::model::TemplateIds;
 
 #[derive(Debug)]
-pub struct SafeInCloudCard {
+pub struct XmlCard {
     pub item: VaultItem,
     pub label_names: Vec<String>,
 }
@@ -65,10 +65,10 @@ pub fn looks_like_xml(text: &str) -> bool {
         .starts_with('<')
 }
 
-pub fn parse(text: &str) -> Result<Vec<SafeInCloudCard>, String> {
+pub fn parse(text: &str) -> Result<Vec<XmlCard>, String> {
     let root = parse_document(text)?;
     if !root.name.eq_ignore_ascii_case("database") {
-        return Err("不是 SafeInCloud 导出的 XML（根节点应为 database）".to_string());
+        return Err("不是有效的 XML 导出文件（根节点应为 database）".to_string());
     }
     let mut labels: HashMap<String, String> = HashMap::new();
     for label in root.child_els("label") {
@@ -216,7 +216,7 @@ fn unescape_xml(raw: &str) -> String {
     out
 }
 
-fn parse_card(card: &XmlEl, labels: &HashMap<String, String>) -> Option<SafeInCloudCard> {
+fn parse_card(card: &XmlEl, labels: &HashMap<String, String>) -> Option<XmlCard> {
     if is_true(&card.attr("template")) || is_true(&card.attr("deleted")) {
         return None;
     }
@@ -341,7 +341,7 @@ fn parse_card(card: &XmlEl, labels: &HashMap<String, String>) -> Option<SafeInCl
         icon_data: image,
         ..Default::default()
     };
-    Some(SafeInCloudCard { item, label_names })
+    Some(XmlCard { item, label_names })
 }
 
 /// Kotlin: substringAfter("base64,", rawImage).filterNot { it.isWhitespace() }
@@ -501,7 +501,7 @@ fn escape_attr(text: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-/// 导出活动条目为 SafeInCloud XML（声明 + 缩进 2 空格）。
+/// 导出活动条目为 XML（声明 + 缩进 2 空格）。
 pub fn export(vault: &Vault) -> String {
     let mut out = String::new();
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");
@@ -652,7 +652,7 @@ mod tests {
         assert_eq!(cards.len(), 3); // 5 张卡，template/deleted 两张被跳过
 
         let gh = &cards[0];
-        // Kotlin 不读 XML 的 card id（SafeInCloudXml.kt:240 未传 id）→ VaultItem 默认 newId() 生成 UUID
+        // 手机端不读 XML 的 card id（构造条目时未传 id）→ VaultItem 默认 newId() 生成 UUID
         assert!(gh.item.id.contains('-'));
         assert_ne!(gh.item.id, "c1");
         assert_eq!(gh.item.title, "GitHub");

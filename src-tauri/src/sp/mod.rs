@@ -13,7 +13,7 @@ pub mod generator;
 pub mod hibp;
 pub mod merger;
 pub mod model;
-pub mod safeincloud_xml;
+pub mod xml;
 pub mod security;
 pub mod store;
 pub mod sync;

@@ -8,6 +8,7 @@ use tauri::Manager;
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // 数据根目录：<appData>/com.yaoahos.safepassword.desktop
             //   vaults/<id>.spv   保险库（兼容历史 .sicv）
@@ -43,11 +44,11 @@ fn main() {
             commands::check_password_breach,
             commands::check_email_breaches,
             commands::export_csv,
-            commands::export_safeincloud_xml,
+            commands::export_xml,
             commands::export_vault_json,
             commands::export_vault_spv,
             commands::import_csv,
-            commands::import_safeincloud_xml,
+            commands::import_xml,
             commands::backup_create,
             commands::backup_list,
             commands::backup_restore,
@@ -60,6 +61,7 @@ fn main() {
             commands::webdav_pull_if_changed,
             commands::check_update,
             commands::update_download_and_install,
+            commands::save_export,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SafePassword");
