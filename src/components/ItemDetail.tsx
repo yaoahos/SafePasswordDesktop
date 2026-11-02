@@ -474,7 +474,13 @@ export function ItemDetail({
                   <button
                     className="icon-btn"
                     title="删除字段"
-                    onClick={() => patch({ fields: draft.fields.filter((x) => x.id !== f.id) })}
+                    onClick={() =>
+                      patch({
+                        fields: draft.fields.filter((x) => x.id !== f.id),
+                        // 对齐手机端 onFieldDelete（ItemEditScreen.kt:350-351）：备注位在被删字段之后则前移
+                        notesPosition: draft.notesPosition > row ? draft.notesPosition - 1 : draft.notesPosition,
+                      })
+                    }
                   >
                     🗑
                   </button>
