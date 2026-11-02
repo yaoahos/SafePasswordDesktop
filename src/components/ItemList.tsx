@@ -1,4 +1,4 @@
-import type { Label, VaultItem } from "../types";
+import type { Label, SortMode, VaultItem } from "../types";
 import { itemIcon, itemMatches, itemSubtitle, labelColorCss } from "../utils";
 
 export function ItemList({
@@ -11,6 +11,9 @@ export function ItemList({
   selectedId,
   onSelect,
   onNew,
+  sortMode,
+  sortAsc,
+  onChangeSort,
 }: {
   items: VaultItem[];
   allLabels: Label[];
@@ -21,6 +24,9 @@ export function ItemList({
   selectedId: string | null;
   onSelect: (id: string) => void;
   onNew: () => void;
+  sortMode: SortMode;
+  sortAsc: boolean;
+  onChangeSort: (m: SortMode) => void;
 }) {
   const visible = items.filter((i) => itemMatches(i, query, searchPasswords));
 
@@ -31,6 +37,20 @@ export function ItemList({
           <div className="grow" style={{ fontWeight: 600 }}>
             {sectionTitle}
           </div>
+          <select
+            className="input"
+            style={{ width: "auto", padding: "4px 6px", fontSize: 12 }}
+            value={sortMode}
+            title="排序方式"
+            onChange={(e) => onChangeSort(e.target.value as SortMode)}
+          >
+            <option value="CREATED">最近创建</option>
+            <option value="UPDATED">最近更新</option>
+            <option value="TITLE">标题</option>
+          </select>
+          <button className="btn sm" title="切换升 / 降序" onClick={() => onChangeSort(sortMode)}>
+            {sortAsc ? "↑" : "↓"}
+          </button>
           <button className="btn primary sm" onClick={onNew}>
             ＋ 新建
           </button>

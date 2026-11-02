@@ -520,6 +520,24 @@ function DisplayTab({ ctx }: { ctx: AppCtx }) {
       </div>
 
       <div className="hr" />
+      <div className="section-cap">默认展示</div>
+      <select
+        className="input"
+        value={ctx.settings.defaultLabelId ?? ""}
+        onChange={(e) => void ctx.applySettings({ ...ctx.settings, defaultLabelId: e.target.value || null })}
+      >
+        <option value="">全部条目</option>
+        {(ctx.vault?.labels ?? []).map((l) => (
+          <option key={l.id} value={l.id}>
+            {l.name}
+          </option>
+        ))}
+      </select>
+      <div className="setting-sub" style={{ marginTop: 4 }}>
+        打开密码库时自动按此标签筛选；选择“全部条目”则不筛选。
+      </div>
+
+      <div className="hr" />
       <div className="section-cap">搜索框行为</div>
       <label className="check-row">
         <input

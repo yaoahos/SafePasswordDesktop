@@ -100,6 +100,10 @@ export const webdavSync = (config: WebDavConfig, strategy?: SyncStrategy) =>
 
 export const webdavPull = (config: WebDavConfig) => invoke<SyncSummary>("webdav_pull", { config });
 
+/** 自动拉取：先 HEAD 比对，云端没变化时返回 null（对齐手机端 pullIfRemoteChanged） */
+export const webdavPullIfChanged = (config: WebDavConfig) =>
+  invoke<SyncSummary | null>("webdav_pull_if_changed", { config });
+
 // ---- 附件（data 为 Base64 明文，后端用内容密钥加密落盘） ----
 
 export const attachmentAdd = (itemId: string, name: string, mime: string, data: string) =>

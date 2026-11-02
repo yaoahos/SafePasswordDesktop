@@ -6,16 +6,21 @@ type Mode = "select" | "create";
 
 export function AuthScreens({
   vaults,
+  defaultVaultId,
   onUnlock,
   onCreate,
 }: {
   vaults: VaultMeta[];
+  /** 最近打开的密码库（对齐手机端 lastVaultId 预选） */
+  defaultVaultId?: string | null;
   /** 成功返回 null，失败返回后端错误文案 */
   onUnlock: (id: string, password: string) => Promise<string | null>;
   onCreate: (name: string, password: string) => Promise<string | null>;
 }) {
   const [mode, setMode] = useState<Mode>(vaults.length === 0 ? "create" : "select");
-  const [selected, setSelected] = useState<string>(vaults[0]?.id ?? "");
+  const [selected, setSelected] = useState<string>(
+    (defaultVaultId && vaults.some((v) => v.id === defaultVaultId) ? defaultVaultId : vaults[0]?.id) ?? "",
+  );
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [confirm, setConfirm] = useState("");
