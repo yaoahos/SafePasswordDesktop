@@ -57,22 +57,24 @@ impl VaultStore {
     pub fn list(&self) -> Result<Vec<VaultMeta>, StoreError> {
         let mut index = self.read_index();
         let mut changed = false;
-        let missing: Vec<VaultMeta> = index
-            .vaults
-            .iter()
-            .filter(|m| !self.vaults_dir.join(&m.file_name).exists())
-            .cloned()
-            .collect();
-        if !missing.is_empty() {
-            index.vaults.retain(|m| !missing.iter().any(|x| x.id == m.id));
-            changed = true;
-        }
-        let known: HashSet<String> = index.vaults.iter().map(|m| m.file_name.clone()).collect();
-        let entries = fs::read_dir(&self.vaults_dir).map_err(io)?;
-        for entry in entries {
+        // 目录只扫一次：既剔除索引里已不存在的条目，也认领没有索引条目的孤儿库
+        let mut files: Vec<String> = Vec::new();
+        for entry in fs::read_dir(&self.vaults_dir).map_err(io)? {
             let entry = entry.map_err(io)?;
             let file_name = entry.file_name().to_string_lossy().into_owned();
             // 兼容新旧扩展：当前写 .spv，历史库仍是 .sicv
+            if file_name.ends_with(".spv") || file_name.ends_with(".sicv") {
+                files.push(file_name);
+            }
+        }
+        let on_disk: HashSet<&str> = files.iter().map(|s| s.as_str()).collect();
+        let before = index.vaults.len();
+        index.vaults.retain(|m| on_disk.contains(m.file_name.as_str()));
+        if index.vaults.len() != before {
+            changed = true;
+        }
+        let known: HashSet<String> = index.vaults.iter().map(|m| m.file_name.clone()).collect();
+        for file_name in files {
             let stem = file_name
                 .strip_suffix(".spv")
                 .or_else(|| file_name.strip_suffix(".sicv"));
@@ -80,8 +82,7 @@ impl VaultStore {
             if known.contains(&file_name) {
                 continue;
             }
-            let created_at = entry
-                .metadata()
+            let created_at = fs::metadata(self.vaults_dir.join(&file_name))
                 .and_then(|m| m.modified())
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { FieldType, Label, VaultItem } from "../types";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Dialog } from "./Dialog";
@@ -39,7 +39,7 @@ function typeLabel(t: FieldType): string {
   }
 }
 
-export function ItemDetail({
+function ItemDetailInner({
   item,
   labels,
   onSave,
@@ -774,3 +774,6 @@ export function ItemDetail({
     </div>
   );
 }
+
+/** 详情只依赖选中条目与回调；Toast、同步提示等无关状态变化时不必重渲染 */
+export const ItemDetail = memo(ItemDetailInner);

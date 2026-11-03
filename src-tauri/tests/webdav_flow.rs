@@ -299,8 +299,8 @@ async fn two_devices_sync_through_mock_webdav() {
         .lock()
         .unwrap()
         .keys()
-        .cloned()
         .filter(|k| k.ends_with(".spv"))
+        .cloned()
         .collect();
     assert_eq!(spv_before, keys_after, "改名不应换云端文件名：{keys_after:?}");
 

@@ -5,11 +5,14 @@
 //! 探测区分坚果云怪癖；超时 60-20-60s；仅 GET 设置 UA "SafePassword-Android/1.4"。
 #![allow(dead_code)]
 
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
@@ -128,10 +131,35 @@ pub struct WebDavClient {
     client: reqwest::Client,
 }
 
+/// 复用连接池：自动拉取/同步每次都会新建 WebDavClient，若每次都新建 reqwest::Client
+/// 就要重做 TCP+TLS 握手。按"服务器 + 账号 + 口令"缓存，凭据变化自然换新客户端。
+fn client_cache() -> &'static Mutex<HashMap<String, reqwest::Client>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, reqwest::Client>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn client_cache_key(config: &WebDavConfig) -> String {
+    let mut h = Sha256::new();
+    h.update(config.normalized_base_url().as_bytes());
+    h.update([0u8]);
+    h.update(config.username.as_bytes());
+    h.update([0u8]);
+    h.update(config.password.as_bytes());
+    crate::sp::crypto::to_hex(&h.finalize())
+}
+
 const PROPFIND_BODY: &str = "<?xml version=\"1.0\" encoding=\"utf-8\"?><D:propfind xmlns:D=\"DAV:\"><D:prop><D:resourcetype/></D:prop></D:propfind>";
 
 impl WebDavClient {
     pub fn new(config: WebDavConfig) -> Result<Self, WebDavError> {
+        let cache_key = client_cache_key(&config);
+        if let Some(client) = client_cache()
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&cache_key).cloned())
+        {
+            return Ok(WebDavClient { config, client });
+        }
         // Basic 认证：全部请求默认带 Authorization（桌面端所有 URL 都由 base_url 派生，等价 Kotlin 的 authHost 守卫）
         let mut headers = reqwest::header::HeaderMap::new();
         if !config.username.is_empty() {
@@ -146,6 +174,13 @@ impl WebDavClient {
             .timeout(Duration::from_secs(60))
             .default_headers(headers)
             .build()?;
+        if let Ok(mut cache) = client_cache().lock() {
+            // 只保留最近几种凭据，防止长时间运行后缓存无限增长
+            if cache.len() >= 8 {
+                cache.clear();
+            }
+            cache.insert(cache_key, client.clone());
+        }
         Ok(WebDavClient { config, client })
     }
 
