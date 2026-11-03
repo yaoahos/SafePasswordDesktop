@@ -94,14 +94,24 @@
 | 偏移 | 内容 | 大小 | 说明 |
 |---|---|---|---|
 | 0 | magic | 4 | ASCII `SICV`（0x53 0x49 0x43 0x56，VaultContainer.kt:87） |
-| 4 | version | 4 | 大端 int32，恒为 `1`（VaultContainer.kt:88,150） |
+| 4 | version | 4 | 大端 int32：`2` = payload 先 gzip 再加密（**当前写入版本**）；`1` = payload 直接是 JSON（旧格式，仅读） |
 | 8 | iterations | 4 | 大端 int32，读取时校验 `10_000 <= n <= 10_000_000`（VaultContainer.kt:152） |
 | 12 | salt_len | 4 | 大端 int32，校验 8 ≤ n ≤ 64（VaultContainer.kt:155） |
 | 16 | salt | salt_len | 随机 salt（新建时 16 字节） |
 | … | wrapped_dek_len | 4 | 大端 int32，校验 40 ≤ n ≤ 256（VaultContainer.kt:156） |
 | … | wrapped_dek | wrapped_dek_len | `IV(12)||GCM(DEK)||tag`，AAD=`SICV-WRAP`，通常 60 字节 |
 | … | payload_len | 4 | 大端 int32，校验 1 ≤ n ≤ 64 MiB（`MAX_PAYLOAD_BYTES = 64*1024*1024`，VaultContainer.kt:92,157） |
-| … | payload | payload_len | `IV(12)||GCM(JSON)||tag`，AAD=`SICV-PAYLOAD` |
+| … | payload | payload_len | `IV(12)||GCM(明文)||tag`，AAD=`SICV-PAYLOAD`；明文见下方版本说明 |
+
+**版本 1 / 2 的差别只在 payload 的明文部分**（头部布局完全一致）：
+
+- `version = 1`：payload 明文 = `Vault` 的 JSON（UTF-8）。
+- `version = 2`：payload 明文 = **gzip(JSON)**，即 `Vault` 的 JSON 先做一遍 gzip（RFC 1952），再交给 AES-GCM。
+  gzip 是自描述格式，压缩级别不影响解码，但**两端都必须实现"先解压再解析 JSON"**。
+  实测 10k 条目的库从 8.87 MB 降到约 0.55 MB（≈16×）。
+- 读取端必须同时接受 1 和 2；写入端当前一律写 2（打开旧库后再次保存即自动升级）。
+  桌面端与 Android 端**必须同时升级**：只升级一端会导致另一端读云端文件时报
+  `不支持的数据库版本：2`。
 
 - 打开流程（VaultContainer.kt:109-135）：读头 → 用 header 的 salt/iterations 派生 KEK →
   `unwrapDek` 失败 ⇒ `WrongPasswordException("主密码错误，或数据库文件已损坏")`（VaultContainer.kt:17）；
@@ -110,7 +120,7 @@
   `VaultFormatException("数据库内容无法解析：…")`（VaultContainer.kt:110-130）。
 - 每个 `len` 字段读取时先校验范围，再校验 `size <= available()`（剩余可读字节数），最后才分配数组
   （`readChunk`，VaultContainer.kt:166-171）——防伪造长度撑爆内存。Rust 必须复刻同样的防御。
-- payload 明文 = `Vault` 对象的 JSON（UTF-8，无 BOM），序列化配置见第 3 节。
+- payload 明文 = `Vault` 对象的 JSON（UTF-8，无 BOM），序列化配置见第 3 节；`version = 2` 时是这份 JSON 再 gzip 一遍。
 - **每次 `toBytes()`/`saveTo()` 都用 DEK 重新加密 JSON，且 IV 全新随机**（VaultContainer.kt:44-64）：
   同一内容两次保存的文件字节不同（只有 magic/version/iterations/salt/wrapped_dek 相同）。
   互操作测试必须解密后比较，不能直接比文件字节。
