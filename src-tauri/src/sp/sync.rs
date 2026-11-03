@@ -175,6 +175,16 @@ impl SyncEngine {
                         }
                     }
                     if remote_bytes.is_none() {
+                        // 本地还有未同步的修改（例如刚在本地改名）时不能当作云端删除，
+                        // 否则会误删用户数据：改为保留本地并提示。
+                        if local.vault.updated_at > local.vault.last_synced_at {
+                            return Ok(SyncResult {
+                                container: local,
+                                direction: SyncDirection::None,
+                                conflicts: 0,
+                                message: "云端没有找到该密码库（本地有未同步的修改，已保留本地）".to_string(),
+                            });
+                        }
                         return Ok(SyncResult {
                             container: local,
                             direction: SyncDirection::RemoteDeleted,
