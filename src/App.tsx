@@ -811,19 +811,35 @@ export default function App() {
               className="btn danger"
               onClick={() => {
                 const id = remoteGone.id;
+                const name = remoteGone.name;
                 forgetRemoteGone(id);
                 setRemoteGone(null);
                 void (async () => {
                   try {
                     await deleteVault(id);
-                  } catch {
-                    /* 本地删除失败也不阻塞 */
+                  } catch (e) {
+                    flashSync("err", `删除失败：${String(e)}`);
+                    return;
                   }
-                  await refreshFromBackend();
+                  // 复核：确认本地真的没有这个库了，再回到解锁界面
+                  const left = await listVaults().catch(() => vaults);
+                  if (left.some((v) => v.id === id)) {
+                    flashSync("err", `删除失败：「${name || "该密码库"}」仍在本地`);
+                    return;
+                  }
+                  try {
+                    await refreshFromBackend();
+                  } catch {
+                    /* 刷新失败也继续收起界面 */
+                  }
+                  setVaults(left);
                   setVault(null);
                   setSelectItemId(null);
                   setDialog(null);
-                  flashSync("ok", "已删除本地密码库");
+                  if (settings.lastVaultId === id) {
+                    await applySettings({ ...settings, lastVaultId: null }).catch(() => undefined);
+                  }
+                  flashSync("ok", `已删除本地密码库「${name || "该密码库"}」`);
                 })();
               }}
             >
