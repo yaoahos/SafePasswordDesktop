@@ -1836,3 +1836,20 @@ input[type="password"]::-ms-clear {
   border-radius: 999px;
   padding: 1px 8px;
 }
+/* ---------- 列表行内收藏按钮（点击即生效，对齐手机端） ---------- */
+.item-card .item-fav {
+  margin-left: auto;
+  flex: none;
+  color: var(--text-3);
+}
+.item-card .item-fav:hover {
+  color: var(--primary);
+  background: transparent;
+}
+.item-fav .star-on {
+  color: var(--primary);
+}
+.item-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}

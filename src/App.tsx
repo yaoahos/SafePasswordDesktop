@@ -65,6 +65,8 @@ export default function App() {
   const [selectItemId, setSelectItemId] = useState<string | null>(null);
   /** 新建条目草稿：不落库，手动保存才写入（v1 项 6） */
   const [draftNew, setDraftNew] = useState<VaultItem | null>(null);
+  /** 从设置页「切换」进入解锁页时要预选密码库 */
+  const [preselectVaultId, setPreselectVaultId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ id: number; msg: string; kind: ToastKind } | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("CREATED");
   const [sortAsc, setSortAsc] = useState(false);
@@ -208,10 +210,12 @@ export default function App() {
     setVault(null);
     setSelectItemId(null);
     setDialog(null);
+    setPreselectVaultId(null);
     void closeVault().catch(() => undefined);
   }, []);
 
-  const gotoSelect = useCallback(() => {
+  const gotoSelect = useCallback((vaultId?: string) => {
+    setPreselectVaultId(vaultId ?? null);
     setVault(null);
     setSelectItemId(null);
     setDialog(null);
@@ -226,6 +230,7 @@ export default function App() {
       try {
         const v = await openVault(id, password);
         setVault(v);
+        setPreselectVaultId(null);
         setSelectItemId(v.items.find((i) => i.status !== "TRASHED")?.id ?? null);
         setSection("ALL");
         setLabelFilter(null);
@@ -400,6 +405,19 @@ export default function App() {
     [],
   );
 
+  /** 列表行内收藏：点击即生效（对齐手机端，不走草稿保存） */
+  const toggleFavorite = useCallback(
+    async (item: VaultItem) => {
+      try {
+        const v = await putItem({ ...item, favorite: !item.favorite, updatedAt: Date.now() });
+        setVault(v);
+      } catch (e) {
+        notify(String(e), "error");
+      }
+    },
+    [notify],
+  );
+
   const duplicateSelected = useCallback(async () => {
     if (!vault || !selectItemId) return;
     const item = vault.items.find((i) => i.id === selectItemId);
@@ -540,7 +558,7 @@ export default function App() {
     return (
       <AuthScreens
         vaults={vaults}
-        defaultVaultId={settings.lastVaultId}
+        defaultVaultId={preselectVaultId ?? settings.lastVaultId}
         onUnlock={handleUnlock}
         onCreate={handleCreate}
         onRestoreLocal={handleRestoreLocal}
@@ -595,6 +613,7 @@ export default function App() {
               setSelectItemId(id);
             }}
             onNew={() => createFromTemplate("login")}
+            onToggleFavorite={(it) => void toggleFavorite(it)}
             syncText={syncState?.text ?? null}
           />
           <div className="col-divider" />

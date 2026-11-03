@@ -20,7 +20,7 @@ export interface AppCtx {
   /** close_vault() 并回到解锁页 */
   lockNow: () => void;
   /** 回到密码库选择页（close_vault + 重新解锁） */
-  gotoSelect: () => void;
+  gotoSelect: (vaultId?: string) => void;
   selectItemId: string | null;
   setSelectItemId: (id: string | null) => void;
   searchPasswords: boolean;
