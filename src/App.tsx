@@ -62,7 +62,11 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [dialog, setDialog] = useState<DialogKind>(null);
   /** 同步时发现云端已删除：等用户在弹窗里选「删除本地」或「恢复到云端」 */
-  const [remoteGone, setRemoteGone] = useState<{ id: string; name: string } | null>(null);
+  const [remoteGone, setRemoteGone] = useState<{
+    id: string;
+    name: string;
+    pending: boolean;
+  } | null>(null);
   const [section, setSection] = useState<SectionFilter>("ALL");
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -236,14 +240,16 @@ export default function App() {
     async (r: SyncSummary, vaultId: string | null) => {
       if (r.direction === "REMOTE_DELETED") {
         // 不自动删除：弹窗让用户选择（删除本地 / 恢复到云端）
-        if (vaultId) setRemoteGone({ id: vaultId, name: vault?.name ?? "" });
-        flashSync("err", "云端已删除该密码库，请选择处理方式");
+        const id = vaultId ?? vault?.id ?? null;
+        const name = (id && vaults.find((v) => v.id === id)?.name) || vault?.name || "";
+        if (id) setRemoteGone({ id, name, pending: r.message.includes("未同步") });
+        flashSync("err", r.message || "云端已删除该密码库，请选择处理方式");
         return;
       }
       await refreshFromBackend();
       flashSync("ok", r.message || "已同步");
     },
-    [refreshFromBackend, flashSync, vault?.name],
+    [refreshFromBackend, flashSync, vault?.name, vault?.id, vaults],
   );
 
   const gotoSelect = useCallback((vaultId?: string) => {
@@ -704,6 +710,11 @@ export default function App() {
             「{remoteGone.name || "当前密码库"}」在云端已被删除（可能是在其它设备删除的）。
             你可以删除本机的这份，或把它重新上传到云端。
           </div>
+          {remoteGone.pending && (
+            <div className="err-text" style={{ marginTop: 8 }}>
+              注意：本地还有未同步的修改，选「删除本地密码库」会一并丢失。
+            </div>
+          )}
           <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
             <button className="btn" onClick={() => setRemoteGone(null)}>
               稍后处理
