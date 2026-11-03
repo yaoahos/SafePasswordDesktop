@@ -614,6 +614,8 @@ export default function App() {
         onUnlock={handleUnlock}
         onCreate={handleCreate}
         onRestoreLocal={handleRestoreLocal}
+        webdav={settings.webdav}
+        onCloudRestored={refreshFromBackend}
       />
     );
   }
