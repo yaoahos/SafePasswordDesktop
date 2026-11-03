@@ -30,7 +30,8 @@ export type IconName =
   | "back"
   | "menu"
   | "tag"
-  | "wand";
+  | "wand"
+  | "history";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   key: (
@@ -193,6 +194,13 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M13.2 8.4 L15.6 10.8" />
       <path d="M18 3.2 l0.9 2.3 2.3 0.9 -2.3 0.9 -0.9 2.3 -0.9-2.3 -2.3-0.9 2.3-0.9Z" fill="currentColor" stroke="none" />
       <path d="M20.6 12.4 v2.2 M19.5 13.5 h2.2" />
+    </>
+  ),
+  /** 历史记录：时钟 */
+  history: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 7.6 V12 l3.2 2" />
     </>
   ),
 };

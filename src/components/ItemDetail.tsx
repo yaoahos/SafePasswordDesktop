@@ -5,6 +5,8 @@ import { Dialog } from "./Dialog";
 import { Icon } from "./icons";
 import { LabelGlyph } from "./LabelGlyph";
 import { GeneratorDialog } from "../dialogs/GeneratorDialog";
+import { PasswordHistoryDialog } from "../dialogs/PasswordHistoryDialog";
+import { deleteFieldHistory } from "../api";
 import {
   MASK,
   copyText,
@@ -76,6 +78,8 @@ function ItemDetailInner({
   const [fType, setFType] = useState<FieldType>("TEXT");
   /** 字段行内生成密码的目标字段（对齐手机端 generatorTarget） */
   const [genFieldId, setGenFieldId] = useState<string | null>(null);
+  /** 密码/秘密字段的历史记录弹窗 */
+  const [histFieldId, setHistFieldId] = useState<string | null>(null);
   /** 预览态 / 编辑态（对齐手机端 ItemViewScreen ↔ ItemEditScreen；新建条目直接进编辑态） */
   const [editing, setEditing] = useState(false);
   /** 删除二次确认（v1 项 6：删除要确认提示） */
@@ -90,6 +94,7 @@ function ItemDetailInner({
     setConfirmDel(false);
     setFieldDlg(null);
     setGenFieldId(null);
+    setHistFieldId(null);
   }, [item, isNew]);
 
   const patch = (p: Partial<VaultItem>) => {
@@ -556,9 +561,20 @@ function ItemDetailInner({
                     </button>
                   </div>
                   {!trashed && (
-                    <button className="icon-btn" title="生成密码" onClick={() => setGenFieldId(f.id)}>
-                      <Icon name="dice" size={15} />
-                    </button>
+                    <>
+                      <button className="icon-btn" title="生成密码" onClick={() => setGenFieldId(f.id)}>
+                        <Icon name="dice" size={15} />
+                      </button>
+                      {(f.history?.length ?? 0) > 0 && (
+                        <button
+                          className="icon-btn"
+                          title={`密码历史（${f.history?.length}）`}
+                          onClick={() => setHistFieldId(f.id)}
+                        >
+                          <Icon name="history" size={15} />
+                        </button>
+                      )}
+                    </>
                   )}
                 </>
               ) : (
@@ -769,6 +785,34 @@ function ItemDetailInner({
           onUse={(pw) => patchField(genFieldId, { value: pw })}
         />
       )}
+      {histFieldId &&
+        (() => {
+          const field = draft.fields.find((f) => f.id === histFieldId);
+          if (!field) return null;
+          return (
+            <PasswordHistoryDialog
+              field={field}
+              notify={notify}
+              onClose={() => setHistFieldId(null)}
+              onDelete={async (index) => {
+                try {
+                  await deleteFieldHistory(draft.id, field.id, index);
+                  setDraft((d) => ({
+                    ...d,
+                    fields: d.fields.map((x) =>
+                      x.id === field.id
+                        ? { ...x, history: (x.history ?? []).filter((_, i) => i !== index) }
+                        : x,
+                    ),
+                  }));
+                  notify("已删除这条历史记录", "success");
+                } catch (e) {
+                  notify(String(e), "error");
+                }
+              }}
+            />
+          );
+        })()}
       {deleteConfirm}
       <div className="spacer-16" />
     </div>

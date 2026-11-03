@@ -21,7 +21,9 @@ use crate::sp::dpapi;
 use crate::sp::fsutil::write_atomic;
 use crate::sp::generator::{self, GeneratorOptions};
 use crate::sp::hibp::HibpClient;
-use crate::sp::model::{new_id, now_ms, Label, Vault, VaultItem, VaultMeta};
+use crate::sp::model::{
+    new_id, now_ms, FieldHistoryEntry, FieldType, Label, Vault, VaultItem, VaultMeta,
+};
 use crate::sp::xml;
 use crate::sp::security::{self, SecurityReport};
 use crate::sp::store::VaultStore;
@@ -419,14 +421,85 @@ pub fn update_vault(state: State<AppState>, vault: Vault) -> CmdResult<()> {
 }
 
 #[tauri::command]
-pub fn put_item(state: State<AppState>, item: VaultItem) -> CmdResult<Vault> {
+pub fn put_item(state: State<AppState>, mut item: VaultItem) -> CmdResult<Vault> {
     let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
     let cur = inner.current.as_mut().ok_or(NO_OPEN_VAULT)?;
-    if let Some(existing) = cur.container.vault.items.iter_mut().find(|i| i.id == item.id) {
-        *existing = item;
+    let previous = cur
+        .container
+        .vault
+        .items
+        .iter()
+        .find(|i| i.id == item.id)
+        .cloned();
+    if let Some(old_item) = previous {
+        record_field_history(&old_item, &mut item);
+        if let Some(existing) = cur.container.vault.items.iter_mut().find(|i| i.id == item.id) {
+            *existing = item;
+        }
     } else {
         cur.container.vault.items.push(item);
     }
+    cur.container.vault.touch();
+    inner.save_current()?;
+    Ok(inner.current.as_ref().unwrap().container.vault.clone())
+}
+
+/// 密码/秘密字段的值变了，就把旧值记进历史（新的在前，最多 20 条）。
+fn record_field_history(old: &VaultItem, new: &mut VaultItem) {
+    for field in new.fields.iter_mut() {
+        if !matches!(field.r#type, FieldType::Password | FieldType::Secret) {
+            continue;
+        }
+        let Some(prev) = old.fields.iter().find(|f| f.id == field.id) else {
+            continue;
+        };
+        if prev.value.is_empty() || prev.value == field.value {
+            continue;
+        }
+        // 只跳过"相邻重复"，A→B→A 这种回退仍会留下记录
+        if field.history.first().is_some_and(|h| h.value == prev.value) {
+            continue;
+        }
+        field.history.insert(
+            0,
+            FieldHistoryEntry {
+                value: prev.value.clone(),
+                changed_at: now_ms(),
+            },
+        );
+        field.history.truncate(HISTORY_LIMIT);
+    }
+}
+
+/// 每个字段最多保留的历史条数。
+const HISTORY_LIMIT: usize = 20;
+
+/// 删除某条密码历史（立即落盘）。
+#[tauri::command]
+pub fn delete_field_history(
+    state: State<AppState>,
+    item_id: String,
+    field_id: String,
+    index: usize,
+) -> CmdResult<Vault> {
+    let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+    let cur = inner.current.as_mut().ok_or(NO_OPEN_VAULT)?;
+    let item = cur
+        .container
+        .vault
+        .items
+        .iter_mut()
+        .find(|i| i.id == item_id)
+        .ok_or_else(|| "找不到该条目".to_string())?;
+    let field = item
+        .fields
+        .iter_mut()
+        .find(|f| f.id == field_id)
+        .ok_or_else(|| "找不到该字段".to_string())?;
+    if index >= field.history.len() {
+        return Err("找不到该历史记录".to_string());
+    }
+    field.history.remove(index);
     cur.container.vault.touch();
     inner.save_current()?;
     Ok(inner.current.as_ref().unwrap().container.vault.clone())
@@ -1362,4 +1435,70 @@ pub async fn update_download_and_install(asset_url: String) -> CmdResult<String>
         .spawn()
         .map_err(|e| format!("启动安装程序失败：{e}"))?;
     Ok(path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sp::model::Field;
+
+    fn item_with_password(value: &str) -> VaultItem {
+        VaultItem {
+            id: "item-1".to_string(),
+            title: "测试".to_string(),
+            fields: vec![Field {
+                id: "field-1".to_string(),
+                label: "密码".to_string(),
+                value: value.to_string(),
+                r#type: FieldType::Password,
+                sensitive: true,
+                history: Vec::new(),
+            }],
+            ..VaultItem::default()
+        }
+    }
+
+    #[test]
+    fn password_change_appends_previous_value() {
+        let old = item_with_password("old-pass");
+        let mut new = item_with_password("new-pass");
+        record_field_history(&old, &mut new);
+        assert_eq!(new.fields[0].history.len(), 1);
+        assert_eq!(new.fields[0].history[0].value, "old-pass");
+        assert!(new.fields[0].history[0].changed_at > 0);
+    }
+
+    #[test]
+    fn unchanged_or_empty_value_records_nothing() {
+        let old = item_with_password("same");
+        let mut new = item_with_password("same");
+        record_field_history(&old, &mut new);
+        assert!(new.fields[0].history.is_empty());
+
+        let empty_old = item_with_password("");
+        let mut filled = item_with_password("filled");
+        record_field_history(&empty_old, &mut filled);
+        assert!(filled.fields[0].history.is_empty());
+    }
+
+    #[test]
+    fn history_is_capped_and_skips_adjacent_duplicates() {
+        let mut new = item_with_password("v0");
+        new.fields[0].history = (0..HISTORY_LIMIT)
+            .map(|i| FieldHistoryEntry {
+                value: format!("h{i}"),
+                changed_at: i as i64,
+            })
+            .collect();
+        let old = item_with_password("previous");
+        record_field_history(&old, &mut new);
+        assert_eq!(new.fields[0].history.len(), HISTORY_LIMIT);
+        assert_eq!(new.fields[0].history[0].value, "previous");
+
+        // 相邻重复不再记录
+        let old2 = item_with_password("previous");
+        let mut new2 = new.clone();
+        record_field_history(&old2, &mut new2);
+        assert_eq!(new2.fields[0].history.len(), HISTORY_LIMIT);
+    }
 }
