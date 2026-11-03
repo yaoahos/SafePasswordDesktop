@@ -1569,9 +1569,8 @@ select.input {
 .preview-url-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .preview-open { font-size: 15px; }
 .preview-user { margin-top: 8px; font-size: 14.5px; font-weight: 600; color: var(--text-2); }
-.preview-pass { margin-top: 6px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 6px; }
+.preview-pass { margin-top: 6px; display: flex; align-items: center; justify-content: center; gap: 6px; }
 .preview-pass-mask { letter-spacing: 2px; font-size: 15px; color: var(--text-2); }
-.preview-pass .icon-btn { justify-self: start; }
 .preview-labels { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 10px; }
 .preview-label {
   display: inline-flex;
@@ -1847,16 +1846,18 @@ input[type="password"]::-ms-clear {
   display: none;
 }
 
-/* 第二栏分类标题右侧的同步状态（对齐手机端 3 秒瞬时文本） */
+/* 同步状态：列表头下方整行显示（空间足够放完整文案） */
 .list-sync {
+  margin-top: 2px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: var(--primary-soft);
+  color: var(--primary);
   font-size: 12.5px;
-  color: var(--text-3);
   font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 240px;
-  margin-left: 4px;
+  line-height: 1.6;
+  white-space: normal;
+  word-break: break-word;
 }
 /* 云端恢复页：云端密码库卡片列表 */
 .cloud-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 4px; }

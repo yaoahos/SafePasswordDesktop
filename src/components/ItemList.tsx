@@ -44,7 +44,6 @@ export function ItemList({
           <div className="list-title" title={sectionTitle}>
             {sectionTitle}
           </div>
-          {syncText && <div className="list-sync">{syncText}</div>}
           <div className="list-ctls">
             <select
               className="input list-ctl list-ctl-sel"
@@ -76,6 +75,7 @@ export function ItemList({
             onChange={(e) => onQuery(e.target.value)}
           />
         </div>
+        {syncText && <div className="list-sync">{syncText}</div>}
       </div>
 
       <div className="item-scroll">
