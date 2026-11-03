@@ -429,17 +429,31 @@ impl SyncEngine {
         }
 
         let last = local.vault.last_synced_at;
-        let local_changed = local.vault.updated_at > last;
-        let remote_changed = remote.vault.updated_at > last;
+        // 两端时钟不可比：按 updated_at 猜「谁更新」，时钟偏差时会把「对端有改动」
+        // 误判成「没改动」，甚至拿本地旧数据覆盖云端。因此默认一律合并，
+        // 用内容哈希决定要不要回传；只有显式策略才按条件走。
+        const SKEW_MS: i64 = 3_000;
+        let local_changed = local.vault.updated_at > last + SKEW_MS;
+        let remote_changed = remote.vault.updated_at > last + SKEW_MS;
 
-        let result = match (local_changed, remote_changed) {
-            (false, false) => Ok(SyncResult {
+        let result = match conflict_strategy {
+            ConflictStrategy::Detect if local_changed && remote_changed => Ok(SyncResult {
                 container: local,
-                direction: SyncDirection::None,
-                conflicts: 0,
-                message: "已是最新状态".to_string(),
+                direction: SyncDirection::Conflict,
+                conflicts: 1,
+                message: "检测到本地与云端都有新修改，请选择处理方式".to_string(),
             }),
-            (false, true) => {
+            ConflictStrategy::KeepLocal if local_changed => {
+                local.vault.last_synced_at = local.vault.updated_at.max(now_ms());
+                self.upload(&remote_path, &mut local, &remote_key).await?;
+                Ok(SyncResult {
+                    container: local,
+                    direction: SyncDirection::Uploaded,
+                    conflicts: 0,
+                    message: "已保留本地版本并覆盖云端".to_string(),
+                })
+            }
+            ConflictStrategy::KeepRemote if remote_changed => {
                 let mut downloaded = remote.vault.clone();
                 downloaded.last_synced_at = now_ms();
                 downloaded.device_id = local.vault.device_id.clone();
@@ -449,91 +463,50 @@ impl SyncEngine {
                     container: local.with_vault(downloaded),
                     direction: SyncDirection::Downloaded,
                     conflicts: 0,
-                    message: "已下载远端更新".to_string(),
+                    message: "已使用云端版本覆盖本地".to_string(),
                 })
             }
-            (true, false) => {
-                local.vault.last_synced_at = local.vault.updated_at.max(now_ms());
-                if !self.cache.content_hash.is_empty()
-                    && content_hash(&local.vault) == self.cache.content_hash
-                {
+            _ => {
+                let merged = merge(&local.vault, &remote.vault, last);
+                let mut updated = local.with_vault(merged.vault.clone());
+                updated.vault.last_synced_at = updated.vault.updated_at.max(now_ms());
+                // 合并结果与云端完全一致（通常只有对端改过）：不必回传整包。
+                if content_hash(&updated.vault) == content_hash(&remote.vault) {
+                    self.cache.rev = head.as_ref().map(RemoteRev::from_stat);
+                    self.cache.content_hash = content_hash(&updated.vault);
                     return Ok(SyncResult {
-                        container: local,
-                        direction: SyncDirection::None,
-                        conflicts: 0,
-                        message: "内容未变化，已跳过上传".to_string(),
+                        container: updated,
+                        direction: if remote_changed {
+                            SyncDirection::Downloaded
+                        } else {
+                            SyncDirection::None
+                        },
+                        conflicts: merged.conflicts as i32,
+                        message: if merged.conflicts > 0 {
+                            format!("已合并，产生 {} 个冲突副本", merged.conflicts)
+                        } else if remote_changed {
+                            "已下载远端更新".to_string()
+                        } else {
+                            "已是最新状态".to_string()
+                        },
                     });
                 }
-                self.upload(&remote_path, &mut local, &remote_key).await?;
+                self.upload(&remote_path, &mut updated, &remote_key).await?;
+                let message = if merged.conflicts > 0 {
+                    format!("已合并，产生 {} 个冲突副本", merged.conflicts)
+                } else if remote_changed {
+                    "已合并本地与远端更新".to_string()
+                } else {
+                    "已上传本地更新".to_string()
+                };
                 Ok(SyncResult {
-                    container: local,
-                    direction: SyncDirection::Uploaded,
-                    conflicts: 0,
-                    message: "已上传本地更新".to_string(),
+                    container: updated,
+                    direction: SyncDirection::Merged,
+                    conflicts: merged.conflicts as i32,
+                    message,
                 })
             }
-            (true, true) => match conflict_strategy {
-                ConflictStrategy::Detect => Ok(SyncResult {
-                    container: local,
-                    direction: SyncDirection::Conflict,
-                    conflicts: 1,
-                    message: "检测到本地与云端都有新修改，请选择处理方式".to_string(),
-                }),
-                ConflictStrategy::KeepLocal => {
-                    local.vault.last_synced_at = local.vault.updated_at.max(now_ms());
-                    self.upload(&remote_path, &mut local, &remote_key).await?;
-                    Ok(SyncResult {
-                        container: local,
-                        direction: SyncDirection::Uploaded,
-                        conflicts: 0,
-                        message: "已保留本地版本并覆盖云端".to_string(),
-                    })
-                }
-                ConflictStrategy::KeepRemote => {
-                    let mut downloaded = remote.vault.clone();
-                    downloaded.last_synced_at = now_ms();
-                    downloaded.device_id = local.vault.device_id.clone();
-                    self.cache.rev = head.as_ref().map(RemoteRev::from_stat);
-                    self.cache.content_hash = content_hash(&downloaded);
-                    Ok(SyncResult {
-                        container: local.with_vault(downloaded),
-                        direction: SyncDirection::Downloaded,
-                        conflicts: 0,
-                        message: "已使用云端版本覆盖本地".to_string(),
-                    })
-                }
-                ConflictStrategy::Merge => {
-                    let merged = merge(&local.vault, &remote.vault, last);
-                    let mut updated = local.with_vault(merged.vault.clone());
-                    updated.vault.last_synced_at = updated.vault.updated_at.max(now_ms());
-                    // 合并结果与上次同步时完全一致（例如本地改动早已被远端覆盖）：
-                    // 不必再把整包重传一遍。
-                    let unchanged = !self.cache.content_hash.is_empty()
-                        && content_hash(&updated.vault) == self.cache.content_hash;
-                    if unchanged {
-                        return Ok(SyncResult {
-                            container: updated,
-                            direction: SyncDirection::None,
-                            conflicts: merged.conflicts as i32,
-                            message: "已合并，内容未变化".to_string(),
-                        });
-                    }
-                    self.upload(&remote_path, &mut updated, &remote_key).await?;
-                    let message = if merged.conflicts > 0 {
-                        format!("已合并，产生 {} 个冲突副本", merged.conflicts)
-                    } else {
-                        "已合并本地与远端更新".to_string()
-                    };
-                    Ok(SyncResult {
-                        container: updated,
-                        direction: SyncDirection::Merged,
-                        conflicts: merged.conflicts as i32,
-                        message,
-                    })
-                }
-            },
         }?;
-
         // 迁移清理：从"按库名派的旧键"迁到"按内容密钥派生的稳定键"后，
         // 删掉旧的云端文件并从清单移除旧条目，避免云端出现同名两份。
         if let Some(old_key) = migrate_from {
@@ -623,20 +596,34 @@ impl SyncEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sp::model::VaultItem;
 
-    /// 纯逻辑分支分类（与 sync() 的时间戳判断一致）：
-    /// localChanged = local.updatedAt > lastSyncedAt；remoteChanged 同理。
-    fn classify(local_updated: i64, remote_updated: i64, last: i64) -> (&'static str, &'static str) {
-        let local_changed = local_updated > last;
-        let remote_changed = remote_updated > last;
-        match (local_changed, remote_changed) {
-            (false, false) => ("NONE", "已是最新状态"),
-            (false, true) => ("DOWNLOADED", "已下载远端更新"),
-            (true, false) => ("UPLOADED", "已上传本地更新"),
-            (true, true) => ("BOTH", "需要冲突策略"),
-        }
+    /// 合并策略不看时间戳：只要远端有内容，两边的条目都必须留下。
+    /// （sync() 不再用 updated_at 判「谁更新」，两台设备时钟不一致不会再漏同步。）
+    #[test]
+    fn merge_keeps_both_sides_regardless_of_timestamps() {
+        let mut local = Vault::default();
+        local.updated_at = 5_000;
+        local.items.push(VaultItem {
+            id: "local-only".to_string(),
+            title: "本机新增".to_string(),
+            ..Default::default()
+        });
+
+        let mut remote = Vault::default();
+        // 远端这条的时间戳比本地 lastSyncedAt 还早——旧逻辑会当成「远端没变」
+        remote.updated_at = 1_000;
+        remote.items.push(VaultItem {
+            id: "remote-only".to_string(),
+            title: "对端新增".to_string(),
+            ..Default::default()
+        });
+
+        let merged = merge(&local, &remote, 3_000);
+        let ids: Vec<&str> = merged.vault.items.iter().map(|i| i.id.as_str()).collect();
+        assert!(ids.contains(&"local-only"), "本机条目不能丢：{ids:?}");
+        assert!(ids.contains(&"remote-only"), "对端条目必须合并进来：{ids:?}");
     }
-
     /// 云端版本指纹：有 ETag 就只比 ETag，没有才退回 (Last-Modified, Content-Length)。
     #[test]
     fn remote_rev_prefers_etag() {
@@ -687,20 +674,6 @@ mod tests {
         let empty: SyncCacheEntry = serde_json::from_str("{}").unwrap();
         assert!(empty.rev.is_none());
         assert!(empty.content_hash.is_empty());
-    }
-
-    #[test]
-    fn four_branches() {
-        let last = 1_000;
-        assert_eq!(classify(1_000, 1_000, last), ("NONE", "已是最新状态"));
-        assert_eq!(classify(999, 999, last), ("NONE", "已是最新状态"));
-        assert_eq!(classify(1_000, 1_001, last), ("DOWNLOADED", "已下载远端更新"));
-        assert_eq!(classify(999, 1_001, last), ("DOWNLOADED", "已下载远端更新"));
-        assert_eq!(classify(1_001, 1_000, last), ("UPLOADED", "已上传本地更新"));
-        assert_eq!(classify(1_001, 999, last), ("UPLOADED", "已上传本地更新"));
-        assert_eq!(classify(1_001, 1_002, last), ("BOTH", "需要冲突策略"));
-        // 边界：等于 lastSyncedAt 算未变（严格大于）
-        assert_eq!(classify(1_000, 1_001, last), ("DOWNLOADED", "已下载远端更新"));
     }
 
     #[test]
