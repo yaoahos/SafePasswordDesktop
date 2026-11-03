@@ -172,7 +172,7 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
     setMsg(null);
     try {
       await saveCfg();
-      const s = await webdavSync(cfg, "KEEP_LOCAL");
+      const s = await webdavSync(cfg, "MERGE");
       await ctx.refreshFromBackend();
       setMsg({ ok: true, text: `${s.message || "同步完成"}（${s.direction}）` });
     } catch (e) {
@@ -529,7 +529,7 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
       let cloudSynced = false;
       if (cfg.baseUrl.trim() && cfg.enabled) {
         try {
-          await webdavSync(cfg, "KEEP_LOCAL");
+          await webdavSync(cfg, "MERGE");
           const newKey = await cloudKey(trimmed);
           if (newKey !== oldKey) await webdavDeleteCloud(cfg, oldKey);
           cloudSynced = true;
