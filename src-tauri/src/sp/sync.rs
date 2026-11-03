@@ -150,8 +150,8 @@ impl SyncEngine {
         }
 
         // 云端既没有本库文件，也没有可认领的旧文件：
-        // - 若曾同步过（lastSyncedAt > 0）且云端清单存在，视为别处删除或改过名；
-        //   改名 → 认领清单里的同名条目；删除 → 通知调用方删本地。
+        // - 若曾同步过（lastSyncedAt > 0），先尝试从云端清单认领改名后的新键；
+        // - 仍找不到 → 视为"云端已删除该库"，交给调用方弹窗询问（删除本地 / 恢复到云端）。
         if remote_bytes.is_none() && local.vault.last_synced_at > 0 {
             let manifest_text = self
                 .webdav
@@ -161,40 +161,32 @@ impl SyncEngine {
             if let Some(bytes) = manifest_text {
                 let text = String::from_utf8_lossy(&bytes).to_string();
                 let manifest = CloudManifest::parse(Some(text.as_str()));
-                if !manifest.vaults.is_empty() {
-                    let want = local.vault.name.trim().to_lowercase();
-                    if let Some(entry) = manifest
-                        .vaults
-                        .iter()
-                        .find(|e| e.name.trim().to_lowercase() == want)
-                    {
-                        if entry.key != remote_key {
-                            remote_key = entry.key.clone();
-                            remote_path = self.config.remote_path(&remote_key);
-                            remote_bytes = self.webdav.get(&remote_path).await.map_err(dav_err)?;
-                        }
-                    }
-                    if remote_bytes.is_none() {
-                        // 本地还有未同步的修改（例如刚在本地改名）时不能当作云端删除，
-                        // 否则会误删用户数据：改为保留本地并提示。
-                        // 容差 3 秒：上传时 touch() 会让 updatedAt 略大于 lastSyncedAt，
-                        // 不能把这种毫秒级抖动当成"有未同步修改"。
-                        if local.vault.updated_at > local.vault.last_synced_at + 3_000 {
-                            return Ok(SyncResult {
-                                container: local,
-                                direction: SyncDirection::None,
-                                conflicts: 0,
-                                message: "云端没有找到该密码库（本地有未同步的修改，已保留本地）".to_string(),
-                            });
-                        }
-                        return Ok(SyncResult {
-                            container: local,
-                            direction: SyncDirection::RemoteDeleted,
-                            conflicts: 0,
-                            message: "云端已删除该密码库".to_string(),
-                        });
+                let want = local.vault.name.trim().to_lowercase();
+                if let Some(entry) = manifest
+                    .vaults
+                    .iter()
+                    .find(|e| e.name.trim().to_lowercase() == want)
+                {
+                    if entry.key != remote_key {
+                        remote_key = entry.key.clone();
+                        remote_path = self.config.remote_path(&remote_key);
+                        remote_bytes = self.webdav.get(&remote_path).await.map_err(dav_err)?;
                     }
                 }
+            }
+            if remote_bytes.is_none() {
+                // 本地若还有未同步修改，提示一并带出（删本地会丢数据）。
+                let pending = local.vault.updated_at > local.vault.last_synced_at + 3_000;
+                return Ok(SyncResult {
+                    container: local,
+                    direction: SyncDirection::RemoteDeleted,
+                    conflicts: 0,
+                    message: if pending {
+                        "云端已删除该密码库（本地有未同步的修改）".to_string()
+                    } else {
+                        "云端已删除该密码库".to_string()
+                    },
+                });
             }
         }
 

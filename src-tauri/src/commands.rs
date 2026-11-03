@@ -1002,27 +1002,31 @@ pub async fn webdav_pull_if_changed(
     let client = WebDavClient::new(config.clone()).map_err(err)?;
     let key = key_for(&name);
     let path = config.remote_path(&key);
-    let stat = match client.stat(&path).await.map_err(err)? {
-        Some(s) => s,
-        None => return Ok(None),
-    };
-    let mtime = stat.last_modified as i64;
-    let changed = {
-        let inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
-        if mtime <= 0 {
-            // 服务器没给 Last-Modified，只能保守地认为有变化
-            true
-        } else if inner.last_remote_mtime <= 0 {
-            // 首次检查：比本机上次同步时间新才算有更新
-            mtime > last_synced
-        } else {
-            mtime != inner.last_remote_mtime
+    let stat = client.stat(&path).await.map_err(err)?;
+    let changed = match stat {
+        // 云端文件不存在：可能被别处删除，交给同步引擎判断（会给出 RemoteDeleted）
+        None => true,
+        Some(s) => {
+            let mtime = s.last_modified as i64;
+            let changed = {
+                let inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+                if mtime <= 0 {
+                    // 服务器没给 Last-Modified，只能保守地认为有变化
+                    true
+                } else if inner.last_remote_mtime <= 0 {
+                    // 首次检查：比本机上次同步时间新才算有更新
+                    mtime > last_synced
+                } else {
+                    mtime != inner.last_remote_mtime
+                }
+            };
+            {
+                let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+                inner.last_remote_mtime = mtime;
+            }
+            changed
         }
     };
-    {
-        let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
-        inner.last_remote_mtime = mtime;
-    }
     if !changed {
         return Ok(None);
     }
