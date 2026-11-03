@@ -1,8 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::path::PathBuf;
-
 use safepassword::commands::{self, AppState};
+use safepassword::runtime;
 use tauri::Manager;
 
 fn main() {
@@ -10,16 +9,16 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            // 数据根目录：<appData>/com.yaoahos.safepassword.desktop
+            // 数据根目录：<安装目录>/data（便携语义；不可写时回落旧的应用数据目录）
             //   vaults/<id>.spv   保险库（兼容历史 v1 容器）
             //   backups/          备份
             //   settings.json      主题/HIBP key/WebDAV 配置
-            let dir = app
-                .path()
-                .app_data_dir()
-                .unwrap_or_else(|_| PathBuf::from("."));
+            //   window.json        上次窗口位置与尺寸
+            let legacy = app.path().app_data_dir().ok();
+            let dir = runtime::data_root(legacy.as_deref());
             let state = AppState::new(&dir).expect("初始化数据目录失败");
             app.manage(state);
+            runtime::attach_window_state(app.handle(), dir.join("window.json"));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
