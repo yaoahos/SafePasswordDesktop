@@ -1853,3 +1853,18 @@ input[type="password"]::-ms-clear {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
+
+/* 次要彩色按钮（复制副本等） */
+.btn.soft {
+  background: var(--primary-soft);
+  border-color: transparent;
+  color: var(--primary);
+}
+
+.btn.soft:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+
+.btn.soft .ico {
+  margin-right: 6px;
+}

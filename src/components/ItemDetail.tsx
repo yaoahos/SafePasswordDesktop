@@ -388,8 +388,8 @@ export function ItemDetail({
             编辑
           </button>
           {!isNew && (
-            <button className="btn" onClick={() => void onDuplicate()}>
-              复制副本
+            <button className="btn soft" onClick={() => void onDuplicate()}>
+              <Icon name="copy" size={15} /> 复制副本
             </button>
           )}
           <button
@@ -704,8 +704,8 @@ export function ItemDetail({
               返回预览
             </button>
             {!isNew && (
-              <button className="btn" onClick={() => void onDuplicate()}>
-                复制副本
+              <button className="btn soft" onClick={() => void onDuplicate()}>
+                <Icon name="copy" size={15} /> 复制副本
               </button>
             )}
             <button

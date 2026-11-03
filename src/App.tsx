@@ -22,6 +22,7 @@ import { ItemDetail } from "./components/ItemDetail";
 import { ItemList } from "./components/ItemList";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar, type TopAction } from "./components/TopBar";
+import { Dialog } from "./components/Dialog";
 import { AboutDialog } from "./dialogs/AboutDialog";
 import { GeneratorDialog } from "./dialogs/GeneratorDialog";
 import { LabelManagerDialog } from "./dialogs/LabelManagerDialog";
@@ -60,6 +61,8 @@ export default function App() {
   const [vault, setVault] = useState<Vault | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [dialog, setDialog] = useState<DialogKind>(null);
+  /** 同步时发现云端已删除：等用户在弹窗里选「删除本地」或「恢复到云端」 */
+  const [remoteGone, setRemoteGone] = useState<{ id: string; name: string } | null>(null);
   const [section, setSection] = useState<SectionFilter>("ALL");
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -232,24 +235,15 @@ export default function App() {
   const applySync = useCallback(
     async (r: SyncSummary, vaultId: string | null) => {
       if (r.direction === "REMOTE_DELETED") {
-        if (vaultId) {
-          try {
-            await deleteVault(vaultId);
-          } catch {
-            /* 本地删除失败也不阻塞界面切换 */
-          }
-        }
-        await refreshFromBackend();
-        setVault(null);
-        setSelectItemId(null);
-        setDialog(null);
-        flashSync("ok", "云端已删除该密码库，本地已同步删除");
+        // 不自动删除：弹窗让用户选择（删除本地 / 恢复到云端）
+        if (vaultId) setRemoteGone({ id: vaultId, name: vault?.name ?? "" });
+        flashSync("err", "云端已删除该密码库，请选择处理方式");
         return;
       }
       await refreshFromBackend();
       flashSync("ok", r.message || "已同步");
     },
-    [refreshFromBackend, flashSync],
+    [refreshFromBackend, flashSync, vault?.name],
   );
 
   const gotoSelect = useCallback((vaultId?: string) => {
@@ -299,6 +293,15 @@ export default function App() {
       try {
         await createVault(name, password);
         await refreshFromBackend();
+        // 新建（含空库）后立即同步，避免一端有库、另一端没有
+        if (settings.webdav.enabled && settings.webdav.baseUrl.trim()) {
+          try {
+            const r = await webdavSync(settings.webdav, "KEEP_LOCAL");
+            await applySync(r, null);
+          } catch (e) {
+            flashSync("err", `同步失败：${String(e)}`);
+          }
+        }
         // create_vault 已切换 current，这里再把条目选中状态理顺
         setSelectItemId(null);
         setSection("ALL");
@@ -309,7 +312,7 @@ export default function App() {
         return String(e);
       }
     },
-    [refreshFromBackend],
+    [refreshFromBackend, settings.webdav, applySync, flashSync],
   );
 
   // ------------------------------------------------------------ 从本地恢复（对齐手机端 UnlockScreen）
@@ -690,6 +693,62 @@ export default function App() {
       {dialog === "ABOUT" && <AboutDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "LOCK" && <LockDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "LABELS" && <LabelManagerDialog ctx={ctx} onClose={closeDialog} />}
+
+      {remoteGone && (
+        <Dialog
+          title="云端已删除该密码库"
+          onClose={() => setRemoteGone(null)}
+          width={440}
+        >
+          <div className="muted small" style={{ lineHeight: 1.8 }}>
+            「{remoteGone.name || "当前密码库"}」在云端已被删除（可能是在其它设备删除的）。
+            你可以删除本机的这份，或把它重新上传到云端。
+          </div>
+          <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+            <button className="btn" onClick={() => setRemoteGone(null)}>
+              稍后处理
+            </button>
+            <button
+              className="btn danger"
+              onClick={() => {
+                const id = remoteGone.id;
+                setRemoteGone(null);
+                void (async () => {
+                  try {
+                    await deleteVault(id);
+                  } catch {
+                    /* 本地删除失败也不阻塞 */
+                  }
+                  await refreshFromBackend();
+                  setVault(null);
+                  setSelectItemId(null);
+                  setDialog(null);
+                  flashSync("ok", "已删除本地密码库");
+                })();
+              }}
+            >
+              删除本地密码库
+            </button>
+            <button
+              className="btn primary"
+              onClick={() => {
+                const id = remoteGone.id;
+                setRemoteGone(null);
+                void (async () => {
+                  try {
+                    const r = await webdavSync(settings.webdav, "KEEP_LOCAL");
+                    await applySync(r, id);
+                  } catch (e) {
+                    flashSync("err", `恢复到云端失败：${String(e)}`);
+                  }
+                })();
+              }}
+            >
+              恢复到云端
+            </button>
+          </div>
+        </Dialog>
+      )}
 
       {toast && <div className={`toast ${toast.kind}`}>{toast.msg}</div>}
     </div>
