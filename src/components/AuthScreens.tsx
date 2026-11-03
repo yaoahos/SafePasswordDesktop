@@ -109,7 +109,7 @@ export function AuthScreens({
 
   const doRestore = async () => {
     if (!restoreFile || !restoreData) {
-      setError("请先选择保险库文件（.sicv / .spv）");
+      setError("请先选择保险库文件（.spv）");
       return;
     }
     if (!onRestoreLocal) {
@@ -281,7 +281,7 @@ export function AuthScreens({
           <>
             <div className="field-caption">从本地恢复</div>
             <div className="muted small" style={{ marginBottom: 10 }}>
-              选择手机端导出的备份文件（.spv，兼容旧版 .sicv），输入该库的主密码。
+              选择手机端导出的备份文件（.spv），输入该库的主密码。
             </div>
             <button className="btn block" onClick={() => fileRef.current?.click()}>
               {restoreFile ? `已选择：${restoreFile.name}` : "选择保险库文件…"}

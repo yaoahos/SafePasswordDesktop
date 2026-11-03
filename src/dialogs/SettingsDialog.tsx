@@ -416,7 +416,7 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
         >
           刷新
         </button>
-        <button className="btn primary" disabled={busy !== null} onClick={() => void createBackup()}>
+        <button className="btn" disabled={busy !== null} onClick={() => void createBackup()}>
           {busy === "create" ? "创建中…" : "立即创建备份"}
         </button>
       </div>
@@ -1032,15 +1032,21 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
         accept=".spv,.sicv"
         disabled={busy !== null}
         blocked={!spvReady}
-        onBlocked={() => setErr("请先填写库名称与主密码，再选择备份文件")}
+        onBlocked={() => {
+          setTScope("spv");
+          setErr("请先填写库名称与主密码，再选择备份文件");
+        }}
         onFile={importSpv}
       />
-      <div className="setting-sub" style={{ marginTop: 6 }}>
-        {spvReady ? "选择备份文件后将导入并切换到该密码库。" : "请先填写库名称与主密码，再选择备份文件。"}
+      <div className={err && tScope === "spv" ? "err-text" : "setting-sub"} style={{ marginTop: 6 }}>
+        {err && tScope === "spv"
+          ? err
+          : spvReady
+            ? "选择备份文件后将导入并切换到该密码库。"
+            : "请先填写库名称与主密码，再选择备份文件。"}
       </div>
 
       {msg && tScope === "spv" && <div className="ok-text">{msg.text}</div>}
-      {err && tScope === "spv" && <div className="err-text">{err}</div>}
     </>
   );
 }
