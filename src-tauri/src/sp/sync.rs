@@ -106,6 +106,18 @@ impl SyncEngine {
                 .await
                 .map_err(dav_err)?;
         }
+        if remote_bytes.is_none() {
+            // 上一版用完整内容密钥生成的键（k + 64 hex）
+            if let Some(legacy) =
+                crate::sp::cloud::legacy_key_for_content(&local.vault.content_key)
+            {
+                remote_bytes = self
+                    .webdav
+                    .get(&self.config.remote_path(&legacy))
+                    .await
+                    .map_err(dav_err)?;
+            }
+        }
         let remote_bytes = remote_bytes.ok_or_else(|| {
             SyncError("云端没有找到这个密码库的文件，请确认已同步过或检查远程目录".to_string())
         })?;
@@ -144,12 +156,18 @@ impl SyncEngine {
         if remote_bytes.is_none() {
             // 升级迁移：旧版文件只有内容密钥一致（同一密码库）才认领，
             // 否则视为云端还没有本库文件，直接上传本地，避免读到别的密码库的数据。
-            // 依次尝试：旧版单文件 SafePassword.spv → 1.4.1 的按库名键 → 现在的按库名键（v 前缀）。
-            let candidates = [
+            // 依次尝试：旧版单文件 SafePassword.spv → 1.4.1 的按库名键 → 现在的按库名键（v 前缀）
+            // → 上一版用完整内容密钥生成的 65 位键（k + 64 hex，旧桌面构建上传过这种文件）。
+            let mut candidates = vec![
                 self.config.legacy_remote_path(),
                 self.config.legacy_name_path(&local.vault.name),
                 self.config.remote_path(&key_for(&local.vault.name)),
             ];
+            if let Some(legacy) =
+                crate::sp::cloud::legacy_key_for_content(&local.vault.content_key)
+            {
+                candidates.push(self.config.remote_path(&legacy));
+            }
             for candidate in candidates.iter().filter(|p| **p != remote_path) {
                 let Some(bytes) = self.webdav.get(candidate).await.map_err(dav_err)? else {
                     continue;
@@ -516,7 +534,12 @@ mod tests {
         let content_key = base64::engine::general_purpose::STANDARD.encode([0x42u8; 32]);
         let key = crate::sp::cloud::key_for_content(&content_key).expect("content key");
         assert!(key.starts_with('k'));
-        assert_eq!(key.len(), 65);
+        // k + 前 8 字节 hex（与手机端一致）
+        assert_eq!(key.len(), 1 + 16);
+        assert_eq!(
+            crate::sp::cloud::legacy_key_for_content(&content_key).map(|k| k.len()),
+            Some(1 + 64)
+        );
         assert_eq!(
             config.remote_path(&key),
             format!("SafePassword/SafePassword-{key}.spv")

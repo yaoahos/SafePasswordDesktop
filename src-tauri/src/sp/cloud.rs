@@ -85,9 +85,10 @@ pub fn key_for_content(content_key: &str) -> Option<String> {
         .or_else(|| base64::engine::general_purpose::STANDARD_NO_PAD.decode(trimmed).ok());
     match bytes {
         Some(bytes) if !bytes.is_empty() => {
-            let mut key = String::with_capacity(1 + bytes.len() * 2);
+            // 只取前 8 字节：键短、文件名短，64 位随机实际不会撞。与安卓端保持一致。
+            let mut key = String::with_capacity(17);
             key.push('k');
-            for byte in bytes.iter() {
+            for byte in bytes.iter().take(8) {
                 key.push_str(&format!("{byte:02x}"));
             }
             Some(key)
@@ -104,6 +105,29 @@ pub fn key_for_content(content_key: &str) -> Option<String> {
             Some(key)
         }
     }
+}
+
+/// 上一版用**完整** contentKey 生成的键（`k` + 64 位 hex）。
+/// 只用于升级时认领旧文件，认领后按新键重新上传（与手机端 `legacyKeyForContent` 对齐）。
+pub fn legacy_key_for_content(content_key: &str) -> Option<String> {
+    use base64::Engine as _;
+    let trimmed = content_key.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(trimmed)
+        .ok()
+        .or_else(|| base64::engine::general_purpose::STANDARD_NO_PAD.decode(trimmed).ok())?;
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut key = String::with_capacity(1 + 2 * bytes.len());
+    key.push('k');
+    for byte in bytes.iter() {
+        key.push_str(&format!("{byte:02x}"));
+    }
+    Some(key)
 }
 
 #[cfg(test)]
@@ -127,9 +151,16 @@ mod tests {
         let ck = base64::engine::general_purpose::STANDARD.encode([7u8; 32]);
         let key = key_for_content(&ck).expect("有内容密钥就有稳定键");
         assert!(key.starts_with('k'));
-        assert_eq!(key.len(), 1 + 64);
+        // `k` + 前 8 字节 hex（与手机端 keyForContent 一致，17 字符，文件名短）
+        assert_eq!(key.len(), 1 + 16);
+        assert_eq!(key, "k0707070707070707");
         // 同一个内容密钥 → 永远同一个键（与库名无关，改名不影响）
         assert_eq!(key_for_content(&ck), Some(key.clone()));
+        // 旧版完整键：仅用于迁移认领
+        assert_eq!(
+            legacy_key_for_content(&ck).map(|k| k.len()),
+            Some(1 + 64)
+        );
         // 空/坏值
         assert!(key_for_content("").is_none());
         assert!(key_for_content("   ").is_none());

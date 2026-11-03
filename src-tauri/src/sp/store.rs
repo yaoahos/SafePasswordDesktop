@@ -163,21 +163,32 @@ impl VaultStore {
     ) -> Result<(), StoreError> {
         container.save_to(&self.vault_file(meta))?;
         let mut index = self.read_index();
-        if let Some(stored) = index.vaults.iter_mut().find(|m| m.id == meta.id) {
-            stored.name = container.vault.name.clone();
-            stored.last_opened_at = now_ms();
-            self.write_index(&index)?;
+        match index.vaults.iter_mut().find(|m| m.id == meta.id) {
+            Some(stored) => {
+                stored.name = container.vault.name.clone();
+                stored.last_opened_at = now_ms();
+            }
+            // 索引里丢了这条（别的实例覆盖索引 / 恢复后索引缺失）：补回来，
+            // 否则后续按 id 找库（解锁、改名、删除）都会报"找不到该密码库"
+            None => {
+                let mut back = meta.clone();
+                back.name = container.vault.name.clone();
+                back.last_opened_at = now_ms();
+                index.vaults.push(back);
+            }
         }
-        Ok(())
+        self.write_index(&index)
     }
 
     pub fn update_meta(&self, meta: &VaultMeta) -> Result<(), StoreError> {
         let mut index = self.read_index();
-        if let Some(stored) = index.vaults.iter_mut().find(|m| m.id == meta.id) {
-            *stored = meta.clone();
-            self.write_index(&index)?;
+        match index.vaults.iter_mut().find(|m| m.id == meta.id) {
+            Some(stored) => *stored = meta.clone(),
+            // 索引里没有这条（例如索引被别的实例覆盖、或从云端恢复后索引未落盘）：
+            // 直接补一条，避免"改了但没生效"的静默失败
+            None => index.vaults.push(meta.clone()),
         }
-        Ok(())
+        self.write_index(&index)
     }
 
     pub fn delete(&self, meta: &VaultMeta) -> Result<(), StoreError> {

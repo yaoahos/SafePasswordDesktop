@@ -239,6 +239,12 @@ export default function App() {
     [sortMode, sortAsc],
   );
 
+  // 换库（解锁 / 恢复 / 切换）时收回所有弹窗：恢复完应该就是首页，
+  // 不能把上一个库残留的设置弹窗带出来
+  useEffect(() => {
+    setDialog(null);
+  }, [vault?.id]);
+
   // 开库时应用“默认展示”标签（对齐手机端 filterLabelId = defaultLabelIdFor）
   useEffect(() => {
     if (!vault) return;
@@ -268,9 +274,14 @@ export default function App() {
 
   const refreshFromBackend = useCallback(async () => {
     try {
-      const [cv, lv] = await Promise.all([currentVault(), listVaults()]);
+      const [cv, lv, st] = await Promise.all([currentVault(), listVaults(), getSettings()]);
       setVault(cv);
       setVaults(lv);
+      // 设置也一起刷新：恢复/导入会改写 lastVaultId，前端设置不同步就会拿着
+      // 一个不存在的旧 id 去解锁（表现为"找不到该密码库"）
+      if (st) {
+        setSettings({ ...DEFAULT_SETTINGS, ...st, webdav: { ...DEFAULT_SETTINGS.webdav, ...st.webdav } });
+      }
     } catch (e) {
       notify(String(e), "error");
     }
