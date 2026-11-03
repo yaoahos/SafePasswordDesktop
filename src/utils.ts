@@ -282,11 +282,14 @@ export function itemIcon(item: VaultItem): ItemIcon {
     if (sym) return { kind: "emoji", emoji: sym };
     return { kind: "char", char: item.iconKey.charAt(0).toUpperCase() };
   }
-  // 无图标键：标题首字符 + 按 id+title 取色（手机端 ItemIcon 的 fallback，v1 项 6）
-  const seed = `${item.id}:${item.title}`;
+  // 无图标键：标题首字符 + 按标题取色（对齐手机端 Components.kt:694 的 fallbackPalette）
+  // 关键：**只用 title**、Java String.hashCode（int32 溢出）语义、Math.floorMod 取余，
+  // 这样同一个标题在任何设备上都得到同一个颜色（id 各端不同，不能参与计算）。
+  const title = item.title ?? "";
   let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
-  const color = FALLBACK_COLORS[Math.abs(h) % FALLBACK_COLORS.length];
+  for (let i = 0; i < title.length; i++) h = (h * 31 + title.charCodeAt(i)) | 0;
+  const len = FALLBACK_COLORS.length;
+  const color = FALLBACK_COLORS[((h % len) + len) % len];
   const ch = (item.title.trim().charAt(0) || "?").toUpperCase();
   return { kind: "char", char: ch, color };
 }

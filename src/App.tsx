@@ -348,6 +348,8 @@ export default function App() {
         const v = await openVault(id, password);
         setVault(v);
         setPreselectVaultId(null);
+        // 解锁后清掉可能残留的弹窗状态（例如恢复密码库后旧 dialog 又冒出来）
+        setDialog(null);
         setSelectItemId(v.items.find((i) => i.status !== "TRASHED")?.id ?? null);
         setSection("ALL");
         setLabelFilter(null);
