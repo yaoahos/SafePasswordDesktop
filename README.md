@@ -68,7 +68,7 @@ SafePassword Desktop 面向希望把密码数据掌握在自己手里的用户�
 - 复制敏感内容 30 秒后自动清空剪贴板（与手机端一致，仅当内容未变时清空）。
 
 **导入导出与外观**
-- 导入 CSV、SafeInCloud 兼容 XML、明文 JSON；导出 CSV / XML / JSON。
+- 导入 CSV、XML、明文 JSON；导出 CSV / XML / JSON。
 - 导出加密备份 `.spv`（可直接拷回手机），默认走系统保存对话框。
 - 20 种预置主题色与自定义颜色；浅色 / 深色 / 跟随系统。
 - 标签管理：五边形标签图标、20 种预置色与自定义色值、排序值、批量删除。
@@ -89,7 +89,7 @@ SafePassword Desktop 面向希望把密码数据掌握在自己手里的用户�
 | 加密 | `aes-gcm` 0.10 + `pbkdf2` 0.12 + `sha2` 0.10 | AES-256-GCM、PBKDF2-HMAC-SHA256 |
 | 网络 | `reqwest` 0.12 | WebDAV 与 HIBP 请求 |
 | 序列化 | `serde` / `serde_json` | 密码库 JSON 与配置 |
-| XML | `quick-xml` 0.37 | SafeInCloud 兼容导入导出 |
+| XML | `quick-xml` 0.37 | 通用 XML 导入导出 |
 | 本地配置加密 | Windows DPAPI | settings.json 中的敏感字段 |
 | 系统集成 | `tauri-plugin-opener` / `tauri-plugin-dialog` | 打开网址、系统保存对话框 |
 
@@ -236,7 +236,7 @@ SafePasswordDesktop/
 │   │   ├── container.rs        .spv/.sicv 容器读写
 │   │   ├── model.rs            密码库数据模型
 │   │   ├── store.rs            密码库文件与索引
-│   │   ├── xml.rs              SafeInCloud 兼容 XML
+│   │   ├── xml.rs              通用 XML 导入导出
 │   │   ├── codec.rs            CSV / JSON 导入导出
 │   │   ├── webdav.rs / sync.rs WebDAV 客户端与同步引擎
 │   │   ├── cloud.rs            云端多库清单
