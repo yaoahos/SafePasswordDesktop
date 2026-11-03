@@ -88,6 +88,19 @@ pub struct Field {
     #[serde(rename = "type", default)]
     pub r#type: FieldType,
     pub sensitive: bool,
+    /// 密码/秘密字段的历史值（新的在前）；空数组不写进 JSON，保持与旧格式逐字节一致。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<FieldHistoryEntry>,
+}
+
+/// 密码/秘密字段被改掉之前的值。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldHistoryEntry {
+    #[serde(default)]
+    pub value: String,
+    #[serde(default = "now_ms")]
+    pub changed_at: i64,
 }
 
 impl<'de> Deserialize<'de> for Field {
@@ -106,6 +119,8 @@ impl<'de> Deserialize<'de> for Field {
             #[serde(rename = "type", default)]
             r#type: FieldType,
             sensitive: Option<bool>,
+            #[serde(default)]
+            history: Vec<FieldHistoryEntry>,
         }
         let raw = Raw::deserialize(deserializer)?;
         // Kotlin: sensitive = type == PASSWORD || type == SECRET（缺省时按 type 推导）
@@ -118,6 +133,7 @@ impl<'de> Deserialize<'de> for Field {
             value: raw.value,
             r#type: raw.r#type,
             sensitive,
+            history: raw.history,
         })
     }
 }
@@ -130,6 +146,7 @@ impl Default for Field {
             value: String::new(),
             r#type: FieldType::Text,
             sensitive: false,
+            history: Vec::new(),
         }
     }
 }
@@ -553,6 +570,25 @@ mod tests {
         let f5: Field =
             serde_json::from_str(r#"{"label":"卡号","type":"TEXT","sensitive":true}"#).unwrap();
         assert!(f5.sensitive);
+    }
+
+    #[test]
+    fn field_history_roundtrip_and_omitted_when_empty() {
+        let f: Field = serde_json::from_str(r#"{"label":"密码","type":"PASSWORD"}"#).unwrap();
+        assert!(f.history.is_empty());
+        // 没有历史时不写 history 键，保持与旧格式一致
+        let json = serde_json::to_string(&f).unwrap();
+        assert!(!json.contains("history"), "{json}");
+
+        let with_history: Field = serde_json::from_str(
+            r#"{"label":"密码","type":"PASSWORD","history":[{"value":"old","changedAt":123}]}"#,
+        )
+        .unwrap();
+        assert_eq!(with_history.history.len(), 1);
+        assert_eq!(with_history.history[0].value, "old");
+        assert_eq!(with_history.history[0].changed_at, 123);
+        let back = serde_json::to_string(&with_history).unwrap();
+        assert!(back.contains(r#""history":[{"value":"old","changedAt":123}]"#), "{back}");
     }
 
     #[test]

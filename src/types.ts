@@ -36,12 +36,19 @@ export type ItemStatus = "ACTIVE" | "ARCHIVED" | "TRASHED";
 
 export type FieldType = "TEXT" | "PASSWORD" | "SECRET" | "URL" | "EMAIL" | "PHONE" | "MULTILINE";
 
+export interface FieldHistoryEntry {
+  value: string;
+  changedAt: number;
+}
+
 export interface Field {
   id: string;
   label: string;
   value: string;
   type: FieldType;
   sensitive: boolean;
+  /** 密码/秘密字段的历史值（新的在前）；无历史时后端不下发该字段 */
+  history?: FieldHistoryEntry[];
 }
 
 export interface VaultItem {

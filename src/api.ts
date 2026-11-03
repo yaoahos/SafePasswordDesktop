@@ -40,6 +40,9 @@ export const putItem = (item: VaultItem) => invoke<Vault>("put_item", { item });
 
 export const deleteItem = (id: string) => invoke<Vault>("delete_item", { id });
 
+export const deleteFieldHistory = (itemId: string, fieldId: string, index: number) =>
+  invoke<Vault>("delete_field_history", { itemId, fieldId, index });
+
 export const changeMasterPassword = (oldPassword: string, newPassword: string) =>
   invoke<void>("change_master_password", { oldPassword, newPassword });
 

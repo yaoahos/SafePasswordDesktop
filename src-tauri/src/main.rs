@@ -32,6 +32,7 @@ fn main() {
             commands::update_vault,
             commands::put_item,
             commands::delete_item,
+            commands::delete_field_history,
             commands::change_master_password,
             commands::import_vault_bytes,
             commands::import_vault_json,
