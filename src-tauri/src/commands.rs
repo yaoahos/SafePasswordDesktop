@@ -282,16 +282,25 @@ pub async fn delete_vault(state: State<'_, AppState>, id: String) -> CmdResult<(
         if inner.current.as_ref().is_some_and(|c| c.meta.id == id) {
             inner.current = None;
         }
-        let meta = inner
+        let cfg = inner.settings.webdav.clone();
+        let found = inner
             .store
             .list()
             .map_err(err)?
             .into_iter()
-            .find(|m| m.id == id)
-            .ok_or("找不到该密码库")?;
-        let cfg = inner.settings.webdav.clone();
-        inner.store.delete(&meta).map_err(err)?;
-        (meta, cfg)
+            .find(|m| m.id == id);
+        match found {
+            Some(meta) => {
+                inner.store.delete(&meta).map_err(err)?;
+                (Some(meta), cfg)
+            }
+            // 本地已经不存在这个库（例如文件已被删掉、只是界面上还残留一条）：
+            // 删除是幂等操作，这里按成功处理，让界面刷新后自然消失。
+            None => (None, cfg),
+        }
+    };
+    let Some(meta) = meta else {
+        return Ok(());
     };
     // 云端同步删除（尽力而为：失败不影响本地删除结果，保证一端操作另一端也能感知）
     if cfg.is_configured() && cfg.enabled {
