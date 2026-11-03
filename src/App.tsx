@@ -13,6 +13,7 @@ import {
   importVaultBytes,
   webdavSync,
   webdavPullIfChanged,
+  webdavRestoreToCloud,
   deleteVault,
 } from "./api";
 import type { AppSettings, SortMode, SyncSummary, Vault, VaultItem, VaultMeta } from "./types";
@@ -743,12 +744,12 @@ export default function App() {
             <button
               className="btn primary"
               onClick={() => {
-                const id = remoteGone.id;
                 setRemoteGone(null);
                 void (async () => {
                   try {
-                    const r = await webdavSync(settings.webdav, "KEEP_LOCAL");
-                    await applySync(r, id);
+                    const r = await webdavRestoreToCloud(settings.webdav);
+                    await refreshFromBackend();
+                    flashSync("ok", r.message);
                   } catch (e) {
                     flashSync("err", `恢复到云端失败：${String(e)}`);
                   }
