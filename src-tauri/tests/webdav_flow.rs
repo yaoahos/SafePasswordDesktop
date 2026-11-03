@@ -283,6 +283,36 @@ async fn two_devices_sync_through_mock_webdav() {
         .await
         .unwrap();
     assert_eq!(s.direction, "NONE", "已是最新状态：{s:?}");
+
+    // 7. 改名后云端文件名不变：A 改名并同步，B 再同步应正常拉到新名字，而不是"云端已删除"
+    let va = c::current_vault(app_a.state::<AppState>()).unwrap().unwrap();
+    let keys_before: Vec<String> = files.lock().unwrap().keys().cloned().collect();
+    let spv_before: Vec<String> = keys_before
+        .into_iter()
+        .filter(|k| k.ends_with(".spv"))
+        .collect();
+    c::rename_vault(app_a.state::<AppState>(), va.id, "改名后的库".into()).unwrap();
+    let s = c::webdav_sync(app_a.state::<AppState>(), cfg(), None)
+        .await
+        .unwrap();
+    assert_eq!(s.direction, "UPLOADED", "改名后应上传：{s:?}");
+    let keys_after: Vec<String> = files
+        .lock()
+        .unwrap()
+        .keys()
+        .cloned()
+        .filter(|k| k.ends_with(".spv"))
+        .collect();
+    assert_eq!(spv_before, keys_after, "改名不应换云端文件名：{keys_after:?}");
+
+    let s = c::webdav_sync(app_b.state::<AppState>(), cfg(), None)
+        .await
+        .unwrap();
+    assert_ne!(s.direction, "REMOTE_DELETED", "改名不应被当成云端删除：{s:?}");
+    assert_eq!(s.direction, "DOWNLOADED", "B 应拉到改名后的库：{s:?}");
+    let vb = c::current_vault(app_b.state::<AppState>()).unwrap().unwrap();
+    assert_eq!(vb.name, "改名后的库", "B 的库名应跟随云端");
+
     let _ = std::fs::remove_dir_all(&root_a);
     let _ = std::fs::remove_dir_all(&root_b);
 }
