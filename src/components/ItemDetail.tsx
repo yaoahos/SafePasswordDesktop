@@ -80,15 +80,12 @@ export function ItemDetail({
   const [editing, setEditing] = useState(false);
   /** 删除二次确认（v1 项 6：删除要确认提示） */
   const [confirmDel, setConfirmDel] = useState(false);
-  /** 用户点了「＋添加备注」：即使备注为空也要渲染备注编辑行（不默认给每个条目加备注栏） */
-  const [notesDrafting, setNotesDrafting] = useState(false);
 
   useEffect(() => {
     setDraft(item);
     setShown({});
     setDirty(false);
     setEditing(isNew);
-    setNotesDrafting(false);
     // 切换条目 / 新建时清掉上一次的弹窗状态，避免"点新建却弹出回收站确认"
     setConfirmDel(false);
     setFieldDlg(null);
@@ -207,7 +204,7 @@ export function ItemDetail({
     let cursor = 0;
     for (let p = 0; p <= draft.fields.length; p++) {
       if (p === notesIndex) {
-        if (hasNotes || notesDrafting) seq.push("notes");
+        if (hasNotes) seq.push("notes");
       } else {
         seq.push(cursor++);
       }
@@ -392,7 +389,7 @@ export function ItemDetail({
           </button>
           {!isNew && (
             <button className="btn copy" onClick={() => void onDuplicate()}>
-              <Icon name="copy" size={15} /> 复制
+              复制
             </button>
           )}
           <button
@@ -445,7 +442,7 @@ export function ItemDetail({
             className="input"
             style={{ fontWeight: 700, fontSize: 19 }}
             value={draft.title}
-            placeholder="未命名"
+            placeholder={isNew ? "" : "未命名"}
             disabled={trashed}
             onChange={(e) => patch({ title: e.target.value })}
           />
@@ -479,14 +476,9 @@ export function ItemDetail({
               ＋添加字段
             </button>
           )}
-          {!trashed && !hasNotes && !notesDrafting && (
-            <button className="btn sm" onClick={() => setNotesDrafting(true)}>
-              ＋添加备注
-            </button>
-          )}
         </div>
-        {draft.fields.length === 0 && !hasNotes && !notesDrafting && (
-          <div className="muted small">无字段，可用右上角「＋添加字段 / ＋添加备注」</div>
+        {draft.fields.length === 0 && !hasNotes && (
+          <div className="muted small">无字段，可用右上角「＋添加字段」</div>
         )}
         {rowSeq.map((row) => {
           if (row === "notes") {
@@ -501,9 +493,6 @@ export function ItemDetail({
                   value={draft.notes}
                   disabled={trashed}
                   onChange={(e) => patch({ notes: e.target.value })}
-                  onBlur={() => {
-                    if (!draft.notes.trim()) setNotesDrafting(false);
-                  }}
                 />
                 {!trashed && (
                   <>
@@ -529,10 +518,9 @@ export function ItemDetail({
                     <button
                       className="icon-btn"
                       title="删除备注"
-                      onClick={() => {
-                        setNotesDrafting(false);
-                        patch({ notes: "", notesLabel: "备注", notesType: "MULTILINE", notesPosition: -1 });
-                      }}
+                      onClick={() =>
+                        patch({ notes: "", notesLabel: "备注", notesType: "MULTILINE", notesPosition: -1 })
+                      }
                     >
                       <Icon name="trash" size={15} />
                     </button>
@@ -551,21 +539,28 @@ export function ItemDetail({
               {trashed ? (
                 <div className="field-value">{f.value ? (masked ? MASK : f.value) : ""}</div>
               ) : f.type === "PASSWORD" || f.type === "SECRET" ? (
-                <div className="input-wrap grow">
-                  <input
-                    className="input with-eye"
-                    type={masked ? "password" : "text"}
-                    value={f.value}
-                    onChange={(e) => patchField(f.id, { value: e.target.value })}
-                  />
-                  <button
-                    className="icon-btn in-frame"
-                    title={shown[f.id] ? "隐藏" : "显示"}
-                    onClick={() => setShown((s) => ({ ...s, [f.id]: !s[f.id] }))}
-                  >
-                    <Icon name={shown[f.id] ? "eye-off" : "eye"} size={16} />
-                  </button>
-                </div>
+                <>
+                  <div className="input-wrap grow">
+                    <input
+                      className="input with-eye"
+                      type={masked ? "password" : "text"}
+                      value={f.value}
+                      onChange={(e) => patchField(f.id, { value: e.target.value })}
+                    />
+                    <button
+                      className="icon-btn in-frame"
+                      title={shown[f.id] ? "隐藏" : "显示"}
+                      onClick={() => setShown((s) => ({ ...s, [f.id]: !s[f.id] }))}
+                    >
+                      <Icon name={shown[f.id] ? "eye-off" : "eye"} size={16} />
+                    </button>
+                  </div>
+                  {!trashed && (
+                    <button className="icon-btn" title="生成密码" onClick={() => setGenFieldId(f.id)}>
+                      <Icon name="dice" size={15} />
+                    </button>
+                  )}
+                </>
               ) : (
                 <input
                   className="input field-value"
@@ -602,9 +597,6 @@ export function ItemDetail({
                     onClick={() => swapField(row, 1)}
                   >
                     ↓
-                  </button>
-                  <button className="icon-btn" title="生成密码" onClick={() => setGenFieldId(f.id)}>
-                    <Icon name="dice" size={15} />
                   </button>
                   <button
                     className="icon-btn"
@@ -687,7 +679,7 @@ export function ItemDetail({
             </button>
             {!isNew && (
               <button className="btn" onClick={() => void onDuplicate()}>
-                <Icon name="copy" size={15} /> 复制
+                复制
               </button>
             )}
             <button
