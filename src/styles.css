@@ -757,6 +757,18 @@ select.input {
   filter: brightness(1.06);
 }
 
+/* 复制 / 制作副本：与「编辑」「删除」同形（实心），换成绿色系以示区别 */
+.btn.copy {
+  background: #0f9d58;
+  border-color: #0f9d58;
+  color: #fff;
+}
+
+.btn.copy:hover:not(:disabled) {
+  color: #fff;
+  filter: brightness(1.06);
+}
+
 .btn.block {
   width: 100%;
   height: 42px;

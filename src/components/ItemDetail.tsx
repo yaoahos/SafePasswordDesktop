@@ -80,12 +80,15 @@ export function ItemDetail({
   const [editing, setEditing] = useState(false);
   /** 删除二次确认（v1 项 6：删除要确认提示） */
   const [confirmDel, setConfirmDel] = useState(false);
+  /** 用户点了「＋添加备注」：即使备注为空也要渲染备注编辑行（不默认给每个条目加备注栏） */
+  const [notesDrafting, setNotesDrafting] = useState(false);
 
   useEffect(() => {
     setDraft(item);
     setShown({});
     setDirty(false);
     setEditing(isNew);
+    setNotesDrafting(false);
     // 切换条目 / 新建时清掉上一次的弹窗状态，避免"点新建却弹出回收站确认"
     setConfirmDel(false);
     setFieldDlg(null);
@@ -204,7 +207,7 @@ export function ItemDetail({
     let cursor = 0;
     for (let p = 0; p <= draft.fields.length; p++) {
       if (p === notesIndex) {
-        if (hasNotes) seq.push("notes");
+        if (hasNotes || notesDrafting) seq.push("notes");
       } else {
         seq.push(cursor++);
       }
@@ -388,8 +391,8 @@ export function ItemDetail({
             编辑
           </button>
           {!isNew && (
-            <button className="btn soft" onClick={() => void onDuplicate()}>
-              <Icon name="copy" size={15} /> 复制副本
+            <button className="btn copy" onClick={() => void onDuplicate()}>
+              <Icon name="copy" size={15} /> 复制
             </button>
           )}
           <button
@@ -476,9 +479,14 @@ export function ItemDetail({
               ＋添加字段
             </button>
           )}
+          {!trashed && !hasNotes && !notesDrafting && (
+            <button className="btn sm" onClick={() => setNotesDrafting(true)}>
+              ＋添加备注
+            </button>
+          )}
         </div>
-        {draft.fields.length === 0 && !hasNotes && (
-          <div className="muted small">无字段，可在下方备注中记录</div>
+        {draft.fields.length === 0 && !hasNotes && !notesDrafting && (
+          <div className="muted small">无字段，可用右上角「＋添加字段 / ＋添加备注」</div>
         )}
         {rowSeq.map((row) => {
           if (row === "notes") {
@@ -493,6 +501,9 @@ export function ItemDetail({
                   value={draft.notes}
                   disabled={trashed}
                   onChange={(e) => patch({ notes: e.target.value })}
+                  onBlur={() => {
+                    if (!draft.notes.trim()) setNotesDrafting(false);
+                  }}
                 />
                 {!trashed && (
                   <>
@@ -518,9 +529,10 @@ export function ItemDetail({
                     <button
                       className="icon-btn"
                       title="删除备注"
-                      onClick={() =>
-                        patch({ notes: "", notesLabel: "备注", notesType: "MULTILINE", notesPosition: -1 })
-                      }
+                      onClick={() => {
+                        setNotesDrafting(false);
+                        patch({ notes: "", notesLabel: "备注", notesType: "MULTILINE", notesPosition: -1 });
+                      }}
                     >
                       <Icon name="trash" size={15} />
                     </button>
@@ -625,36 +637,6 @@ export function ItemDetail({
         })}
       </div>
 
-      {!hasNotes && !isNew && (
-      <div className="card">
-        <div className="row" style={{ alignItems: "center", gap: 8 }}>
-          <div className="card-title grow" style={{ marginBottom: 0 }}>
-            {draft.notesLabel || "备注"}
-          </div>
-          {!trashed && (
-            <button
-              className="icon-btn"
-              title="编辑字段"
-              onClick={openNotesMeta}
-            >
-              <Icon name="edit" size={15} />
-            </button>
-          )}
-        </div>
-        {trashed ? (
-          <div className="notes-text">{draft.notes || "—"}</div>
-        ) : (
-          <textarea
-            className="input"
-            rows={4}
-            value={draft.notes}
-            placeholder="备注…"
-            onChange={(e) => patch({ notes: e.target.value })}
-          />
-        )}
-      </div>
-      )}
-
       <div className="card">
         <div className="card-title">标签</div>
         <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
@@ -701,11 +683,11 @@ export function ItemDetail({
                 setEditing(false);
               }}
             >
-              返回预览
+              返回
             </button>
             {!isNew && (
-              <button className="btn soft" onClick={() => void onDuplicate()}>
-                <Icon name="copy" size={15} /> 复制副本
+              <button className="btn" onClick={() => void onDuplicate()}>
+                <Icon name="copy" size={15} /> 复制
               </button>
             )}
             <button
