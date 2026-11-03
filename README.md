@@ -199,19 +199,22 @@ cargo test --manifest-path src-tauri/Cargo.toml
 - 条目：中间栏选中即预览；点「编辑」进入编辑态，字段可增删改与排序；「复制」生成副本；「删除」进回收站并需确认。
 - 标签：左栏「标签管理」，可创建、配色、排序、批量删除。
 - 同步：顶栏「同步」按本地优先直接同步；设置 → 同步与备份可配置 WebDAV、自动同步、自动拉取间隔与本地备份。
-- 备份：设置 → 同步与备份 → 立即创建备份；备份文件默认写到安装目录下的 `backup` 文件夹，恢复时选择文件并输入该备份主密码。
+- 备份：设置 → 同步与备份 → 立即创建备份；备份文件默认写到安装目录下的 `data\backups` 文件夹，恢复时选择文件并输入该备份主密码。
 - 导入导出：设置 → 导入与导出；导入支持多选 CSV / XML / JSON，导出可选 CSV / XML / JSON 或加密备份 `.spv`（系统保存对话框，默认按「库名-日期-时间」命名）。
 - 主题：顶栏「主题」，20 种预置色 + 自定义 `#RRGGBB`。
 - 更新：关于页「检查更新」。
 
-**数据位置**：`%APPDATA%\com.yaoahos.safepassword.desktop\`
+**数据位置**：`<安装目录>\data\`（便携语义，跟着安装目录走；装到 `Program Files` 这类不可写位置时自动回落到 `%APPDATA%\com.yaoahos.safepassword.desktop`）。首次从旧版本升级时会把旧目录整体搬过来，搬完删除旧目录。
 
 ```text
-com.yaoahos.safepassword.desktop/
+data/
 ├── vaults/              密码库文件（{id}.spv）与索引
-├── backups/             旧版本备份目录（仍会被列出）
+├── backups/             自动/手动备份
+├── window.json          上次窗口位置与尺寸
 └── settings.json        设置（敏感字段为 DPAPI 密文）
 ```
+
+> 卸载会连同 `data/` 一起删除，卸载前请先在「设置 → 导入与导出」里导出备份。
 
 ---
 

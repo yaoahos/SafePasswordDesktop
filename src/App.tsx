@@ -27,7 +27,6 @@ import { Dialog } from "./components/Dialog";
 import { AboutDialog } from "./dialogs/AboutDialog";
 import { GeneratorDialog } from "./dialogs/GeneratorDialog";
 import { LabelManagerDialog } from "./dialogs/LabelManagerDialog";
-import { LockDialog } from "./dialogs/LockDialog";
 import { SecurityDialog } from "./dialogs/SecurityDialog";
 import { SettingsDialog } from "./dialogs/SettingsDialog";
 import { ThemeDialog } from "./dialogs/ThemeDialog";
@@ -751,6 +750,11 @@ export default function App() {
             void runSync();
             return;
           }
+          if (a === "LOCK") {
+            // 锁定不需要二次确认：点一下立即锁库并回到解锁页
+            lockNow();
+            return;
+          }
           setDialog(a);
         }}
       />
@@ -816,7 +820,6 @@ export default function App() {
       {dialog === "THEME" && <ThemeDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "SETTINGS" && <SettingsDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "ABOUT" && <AboutDialog ctx={ctx} onClose={closeDialog} />}
-      {dialog === "LOCK" && <LockDialog ctx={ctx} onClose={closeDialog} />}
       {dialog === "LABELS" && <LabelManagerDialog ctx={ctx} onClose={closeDialog} />}
 
       {remoteGone && (
