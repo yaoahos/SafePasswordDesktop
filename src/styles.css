@@ -249,7 +249,7 @@ button {
 /* ---------------------------------------------------------------- 侧边栏 */
 
 .sidebar {
-  width: 230px;
+  width: clamp(216px, 17vw, 300px);
   flex: none;
   background: var(--surface);
   display: flex;
@@ -368,7 +368,7 @@ button {
 /* ---------------------------------------------------------------- 中栏列表 */
 
 .item-list {
-  width: clamp(300px, 34%, 440px);
+  width: clamp(300px, 30vw, 560px);
   flex: none;
   background: var(--bg);
   display: flex;
@@ -449,7 +449,9 @@ select.input option {
   color: var(--text);
 }
 
-select.input option:checked {
+select.input option:checked,
+select.input option:hover {
+  background: var(--primary-soft);
   color: var(--primary);
   font-weight: 600;
 }
