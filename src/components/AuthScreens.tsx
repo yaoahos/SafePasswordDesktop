@@ -18,6 +18,7 @@ export function AuthScreens({
   onRestoreLocal,
   webdav,
   onCloudRestored,
+  onSaveWebdav,
 }: {
   vaults: VaultMeta[];
   /** 最近打开的密码库（对齐手机端 lastVaultId 预选） */
@@ -31,6 +32,8 @@ export function AuthScreens({
   webdav?: WebDavConfig;
   /** 从云端恢复成功后刷新库列表 */
   onCloudRestored?: () => Promise<void>;
+  /** 在恢复页直接保存 WebDAV 配置（无需先有本地库） */
+  onSaveWebdav?: (cfg: WebDavConfig) => Promise<void>;
 }) {
   const [mode, setMode] = useState<Mode>(vaults.length === 0 ? "empty" : "select");
   const [selected, setSelected] = useState<string>(
@@ -48,6 +51,7 @@ export function AuthScreens({
   const [cloudList, setCloudList] = useState<CloudVaultEntry[] | null>(null);
   const [cloudKey, setCloudKey] = useState("");
   const [cloudPw, setCloudPw] = useState("");
+  const [cloudCfg, setCloudCfg] = useState<WebDavConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -140,19 +144,23 @@ export function AuthScreens({
     }
   };
 
-  const cloudConfigured =
-    !!webdav && /^https?:\/\//i.test((webdav.baseUrl || "").trim()) && !!webdav.username.trim();
+  const DEFAULT_DAV: WebDavConfig = {
+    baseUrl: "",
+    username: "",
+    password: "",
+    remoteDir: "SafePassword",
+    enabled: true,
+  };
 
-  const openCloud = async () => {
-    setMode("cloud");
+  const cfgReady = (c: WebDavConfig | null) =>
+    !!c && /^https?:\/\//i.test((c.baseUrl || "").trim()) && !!c.username.trim();
+
+  const loadCloud = async (cfg: WebDavConfig) => {
+    setBusy(true);
     setError(null);
     setCloudList(null);
-    setCloudKey("");
-    setCloudPw("");
-    if (!webdav || !cloudConfigured) return;
-    setBusy(true);
     try {
-      setCloudList(await webdavListCloud(webdav));
+      setCloudList(await webdavListCloud(cfg));
     } catch (e) {
       setCloudList([]);
       setError(String(e));
@@ -161,8 +169,49 @@ export function AuthScreens({
     }
   };
 
+  const openCloud = async () => {
+    setMode("cloud");
+    setError(null);
+    setCloudList(null);
+    setCloudKey("");
+    setCloudPw("");
+    const cfg = { ...DEFAULT_DAV, ...(webdav ?? {}) };
+    setCloudCfg(cfg);
+    if (cfgReady(cfg)) await loadCloud(cfg);
+  };
+
+  const saveCloudCfg = async () => {
+    if (!cloudCfg) return;
+    const baseUrl = cloudCfg.baseUrl.trim();
+    if (!/^https?:\/\//i.test(baseUrl)) {
+      setError("服务器地址需以 http:// 或 https:// 开头");
+      return;
+    }
+    if (!cloudCfg.username.trim()) {
+      setError("请填写用户名");
+      return;
+    }
+    const next: WebDavConfig = {
+      ...cloudCfg,
+      baseUrl,
+      remoteDir: (cloudCfg.remoteDir || "").trim() || "SafePassword",
+      enabled: true,
+    };
+    setBusy(true);
+    setError(null);
+    try {
+      await onSaveWebdav?.(next);
+      setCloudCfg(next);
+      await loadCloud(next);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const doCloudRestore = async () => {
-    if (!webdav) return;
+    if (!cloudCfg) return;
     if (!cloudKey) {
       setError("请选择要恢复的云端密码库");
       return;
@@ -175,7 +224,7 @@ export function AuthScreens({
     setBusy(true);
     setError(null);
     try {
-      const b64 = await webdavGetVault(webdav, cloudKey);
+      const b64 = await webdavGetVault(cloudCfg, cloudKey);
       if (!b64) throw new Error("云端没有找到该密码库文件");
       await importVaultBytes(b64, cloudPw, entry?.name ?? "");
       await onCloudRestored?.();
@@ -383,25 +432,71 @@ export function AuthScreens({
 
         {mode === "cloud" && (
           <>
-            <div className="field-caption">从云端恢复</div>
-            {!cloudConfigured && (
-              <div className="muted small" style={{ marginBottom: 10, lineHeight: 1.7 }}>
-                还没有配置 WebDAV。请先解锁任意一个密码库，在「设置 → 同步与备份」里填写服务器地址与账号，
-                再回到这里从云端恢复。
+            <div className="auth-section-title">
+              <Icon name="cloud" size={18} /> 从云端恢复
+            </div>
+            <div className="auth-section-sub">
+              只需要 WebDAV 地址与账号；服务器上只保存加密后的密码库，主密码不会上传。
+            </div>
+
+            {cloudCfg && (
+              <div className="settings-group">
+                <div className="settings-group-title">
+                  <span className="settings-group-dot" /> WebDAV 服务器
+                </div>
+                <div className="form-row">
+                  <label className="field-caption">服务器地址</label>
+                  <input
+                    className="input"
+                    placeholder="https://dav.jianguoyun.com/dav/"
+                    value={cloudCfg.baseUrl}
+                    onChange={(e) => setCloudCfg({ ...cloudCfg, baseUrl: e.target.value })}
+                  />
+                </div>
+                <div className="form-row">
+                  <label className="field-caption">用户名</label>
+                  <input
+                    className="input"
+                    placeholder="邮箱或账号"
+                    value={cloudCfg.username}
+                    onChange={(e) => setCloudCfg({ ...cloudCfg, username: e.target.value })}
+                  />
+                </div>
+                <div className="form-row">
+                  <label className="field-caption">密码 / 应用密码</label>
+                  <input
+                    className="input"
+                    type="password"
+                    placeholder="坚果云请用应用密码"
+                    value={cloudCfg.password}
+                    onChange={(e) => setCloudCfg({ ...cloudCfg, password: e.target.value })}
+                  />
+                </div>
+                <div className="form-row">
+                  <label className="field-caption">远程目录</label>
+                  <input
+                    className="input"
+                    placeholder="SafePassword"
+                    value={cloudCfg.remoteDir}
+                    onChange={(e) => setCloudCfg({ ...cloudCfg, remoteDir: e.target.value })}
+                  />
+                </div>
+                <button className="btn primary block tall" disabled={busy} onClick={() => void saveCloudCfg()}>
+                  {busy ? "连接中…" : cfgReady(cloudCfg) ? "保存并读取云端清单" : "保存并连接"}
+                </button>
               </div>
             )}
-            {cloudConfigured && (
-              <>
-                <div className="muted small" style={{ marginBottom: 10 }}>
-                  选择云端已有的密码库，输入该库的主密码下载到本机。
+
+            {cloudList !== null && (
+              <div className="settings-group">
+                <div className="settings-group-title">
+                  <span className="settings-group-dot" /> 云端密码库
                 </div>
-                {cloudList === null && busy && <div className="muted small">正在读取云端清单…</div>}
-                {cloudList && cloudList.length === 0 && !busy && (
-                  <div className="muted small" style={{ marginBottom: 10 }}>
-                    云端没有任何密码库。
-                  </div>
+                {busy && <div className="muted small">正在读取云端清单…</div>}
+                {!busy && cloudList.length === 0 && (
+                  <div className="muted small">云端没有任何密码库。</div>
                 )}
-                {cloudList?.map((c) => (
+                {cloudList.map((c) => (
                   <button
                     key={c.key}
                     className={`vault-row${cloudKey === c.key ? " active" : ""}`}
@@ -420,13 +515,13 @@ export function AuthScreens({
                   </button>
                 ))}
                 {cloudKey && (
-                  <div className="form-row">
+                  <div className="form-row" style={{ marginTop: 10 }}>
                     <label className="field-caption">该库的主密码</label>
                     <input
                       className="input"
                       type="password"
-                      value={cloudPw}
                       placeholder="输入该密码库的主密码"
+                      value={cloudPw}
                       onChange={(e) => setCloudPw(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") void doCloudRestore();
@@ -441,10 +536,10 @@ export function AuthScreens({
                 >
                   {busy ? "恢复中…" : "下载并恢复"}
                 </button>
-              </>
+              </div>
             )}
-            <div className="spacer-10" />
-            <div className="row" style={{ justifyContent: "center" }}>
+
+            <div className="row" style={{ justifyContent: "center", marginTop: 12 }}>
               <button className="link-btn" onClick={() => setMode(vaults.length === 0 ? "empty" : "select")}>
                 ← 返回
               </button>

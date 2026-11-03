@@ -616,6 +616,7 @@ export default function App() {
         onRestoreLocal={handleRestoreLocal}
         webdav={settings.webdav}
         onCloudRestored={refreshFromBackend}
+        onSaveWebdav={(cfg) => applySettings({ ...settings, webdav: cfg })}
       />
     );
   }
