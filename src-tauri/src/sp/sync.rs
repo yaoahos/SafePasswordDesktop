@@ -177,7 +177,9 @@ impl SyncEngine {
                     if remote_bytes.is_none() {
                         // 本地还有未同步的修改（例如刚在本地改名）时不能当作云端删除，
                         // 否则会误删用户数据：改为保留本地并提示。
-                        if local.vault.updated_at > local.vault.last_synced_at {
+                        // 容差 3 秒：上传时 touch() 会让 updatedAt 略大于 lastSyncedAt，
+                        // 不能把这种毫秒级抖动当成"有未同步修改"。
+                        if local.vault.updated_at > local.vault.last_synced_at + 3_000 {
                             return Ok(SyncResult {
                                 container: local,
                                 direction: SyncDirection::None,
@@ -198,8 +200,9 @@ impl SyncEngine {
 
         let Some(remote_bytes) = remote_bytes else {
             local.ensure_content_key();
-            local.vault.last_synced_at = now_ms();
             local.vault.touch();
+            // 不变式：lastSyncedAt >= updatedAt（"本地是否有未同步修改"的判定依赖它）
+            local.vault.last_synced_at = local.vault.updated_at;
             self.upload(&remote_path, &mut local, &remote_key).await?;
             return Ok(SyncResult {
                 container: local,
@@ -248,7 +251,7 @@ impl SyncEngine {
                 })
             }
             (true, false) => {
-                local.vault.last_synced_at = now_ms();
+                local.vault.last_synced_at = local.vault.updated_at.max(now_ms());
                 self.upload(&remote_path, &mut local, &remote_key).await?;
                 Ok(SyncResult {
                     container: local,
@@ -265,7 +268,7 @@ impl SyncEngine {
                     message: "检测到本地与云端都有新修改，请选择处理方式".to_string(),
                 }),
                 ConflictStrategy::KeepLocal => {
-                    local.vault.last_synced_at = now_ms();
+                    local.vault.last_synced_at = local.vault.updated_at.max(now_ms());
                     self.upload(&remote_path, &mut local, &remote_key).await?;
                     Ok(SyncResult {
                         container: local,
@@ -288,6 +291,7 @@ impl SyncEngine {
                 ConflictStrategy::Merge => {
                     let merged = merge(&local.vault, &remote.vault, last);
                     let mut updated = local.with_vault(merged.vault.clone());
+                    updated.vault.last_synced_at = updated.vault.updated_at.max(now_ms());
                     self.upload(&remote_path, &mut updated, &remote_key).await?;
                     let message = if merged.conflicts > 0 {
                         format!("已合并，产生 {} 个冲突副本", merged.conflicts)
