@@ -24,6 +24,7 @@ import {
   webdavGetVault,
   webdavListCloud,
   webdavPull,
+  webdavRestoreToCloud,
   webdavSync,
 } from "../api";
 import type { BackupInfo, CloudVaultEntry, VaultMeta, WebDavConfig } from "../types";
@@ -529,7 +530,9 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
       let cloudSynced = false;
       if (cfg.baseUrl.trim() && cfg.enabled) {
         try {
-          await webdavSync(cfg, "MERGE");
+          // 强制按"新库名"上传（并 upsert 云端清单），再清掉旧键文件。
+          // 不要用普通同步：普通同步可能把刚改的名认领回旧键，紧接着删旧键就把云端库删掉了。
+          await webdavRestoreToCloud(cfg);
           const newKey = await cloudKey(trimmed);
           if (newKey !== oldKey) await webdavDeleteCloud(cfg, oldKey);
           cloudSynced = true;
