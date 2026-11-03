@@ -965,6 +965,56 @@ pub async fn webdav_pull(
     run_sync(state, config, None, true).await
 }
 
+/// 「云端已删除」弹窗里的"恢复到云端"：无条件把本地库推上去并维护清单。
+#[tauri::command]
+pub async fn webdav_restore_to_cloud(
+    state: State<'_, AppState>,
+    config: WebDavConfig,
+) -> CmdResult<SyncSummary> {
+    let (engine, cur) = {
+        let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+        let engine = build_engine(&inner, &config)?;
+        let cur = inner.current.take().ok_or(NO_OPEN_VAULT)?;
+        (engine, cur)
+    };
+    let CurrentVault {
+        container,
+        meta,
+        password,
+    } = cur;
+    let outcome = engine.restore_to_cloud(container).await;
+    let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+    match outcome {
+        Ok(result) => {
+            let summary = to_summary(&result);
+            let mut restored = CurrentVault {
+                container: result.container,
+                meta,
+                password,
+            };
+            inner
+                .store
+                .save(&mut restored.container, &restored.meta)
+                .map_err(err)?;
+            inner.current = Some(restored);
+            Ok(summary)
+        }
+        Err(e) => {
+            match inner.store.open(&meta, &password) {
+                Ok(c) => {
+                    inner.current = Some(CurrentVault {
+                        container: c,
+                        meta,
+                        password,
+                    });
+                }
+                Err(_) => inner.current = None,
+            }
+            Err(e.to_string())
+        }
+    }
+}
+
 /// 自动拉取：只做 HEAD 比对，云端没变化时不下载整库（对齐 Android pullIfRemoteChanged）。
 /// 返回 Some(summary) 表示检测到云端变化并已按“本地修改优先”静默同步。
 #[tauri::command]

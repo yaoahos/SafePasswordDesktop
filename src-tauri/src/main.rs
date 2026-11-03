@@ -58,6 +58,7 @@ fn main() {
             commands::webdav_test_connection,
             commands::webdav_sync,
             commands::webdav_pull,
+            commands::webdav_restore_to_cloud,
             commands::webdav_pull_if_changed,
             commands::webdav_list_cloud,
             commands::webdav_get_vault,

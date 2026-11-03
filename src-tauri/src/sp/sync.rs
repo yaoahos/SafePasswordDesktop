@@ -301,6 +301,26 @@ impl SyncEngine {
         }
     }
 
+    /// 把本地库强制上传到云端（"云端已删除"弹窗里的"恢复到云端"）：
+    /// 不看时间戳、不判断云端是否存在，直接写云端文件并维护清单。
+    pub async fn restore_to_cloud(
+        &self,
+        mut local: VaultContainer,
+    ) -> Result<SyncResult, SyncError> {
+        let remote_path = self.config.remote_path(&self.remote_key);
+        local.ensure_content_key();
+        local.vault.touch();
+        local.vault.last_synced_at = local.vault.updated_at;
+        self.upload(&remote_path, &mut local, &self.remote_key)
+            .await?;
+        Ok(SyncResult {
+            container: local,
+            direction: SyncDirection::Uploaded,
+            conflicts: 0,
+            message: "已恢复到云端".to_string(),
+        })
+    }
+
     /// 上传密码库本体，并顺带维护云端清单（清单失败不影响整次同步）。
     async fn upload(
         &self,

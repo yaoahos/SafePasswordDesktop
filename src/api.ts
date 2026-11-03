@@ -109,6 +109,10 @@ export const webdavSync = (config: WebDavConfig, strategy?: SyncStrategy) =>
 
 export const webdavPull = (config: WebDavConfig) => invoke<SyncSummary>("webdav_pull", { config });
 
+/** 「云端已删除」弹窗里的"恢复到云端"：无条件把本地库重新上传并维护清单 */
+export const webdavRestoreToCloud = (config: WebDavConfig) =>
+  invoke<SyncSummary>("webdav_restore_to_cloud", { config });
+
 /** 自动拉取：先 HEAD 比对，云端没变化时返回 null（对齐手机端 pullIfRemoteChanged） */
 export const webdavPullIfChanged = (config: WebDavConfig) =>
   invoke<SyncSummary | null>("webdav_pull_if_changed", { config });
