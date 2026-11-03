@@ -383,7 +383,7 @@ export default function App() {
         // 新建（含空库）后立即同步，避免一端有库、另一端没有
         if (settings.webdav.enabled && settings.webdav.baseUrl.trim()) {
           try {
-            const r = await webdavSync(settings.webdav, "KEEP_LOCAL");
+            const r = await webdavSync(settings.webdav, "MERGE");
             await applySync(r, null);
           } catch (e) {
             flashSync("err", `同步失败：${String(e)}`);
@@ -462,7 +462,7 @@ export default function App() {
       void (async () => {
         try {
           flashSync("working", "正在同步…");
-          const r = await withSyncTimeout(webdavSync(cfg, "KEEP_LOCAL")); // 本地修改优先，对齐手机端 doSync 默认策略
+          const r = await withSyncTimeout(webdavSync(cfg, "MERGE")); // 合并优先：本地空库不会覆盖云端新增条目
           await applySync(r, vault.id);
         } catch (e) {
           flashSync("err", syncErrorText("自动同步失败：", e));
@@ -517,7 +517,7 @@ export default function App() {
     flashSync("working", "同步中…");
     try {
       // 与手机端一致：直接同步、本地优先，无需弹窗确认
-      const r = await withSyncTimeout(webdavSync(cfg, "KEEP_LOCAL"));
+      const r = await withSyncTimeout(webdavSync(cfg, "MERGE"));
       await applySync(r, vault?.id ?? null, true);
     } catch (e) {
       flashSync("err", syncErrorText("", e));

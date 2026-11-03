@@ -151,26 +151,55 @@ impl SyncEngine {
 
         // 云端既没有本库文件，也没有可认领的旧文件：
         // - 若曾同步过（lastSyncedAt > 0），先尝试从云端清单认领改名后的新键；
+        //   ① 同名条目；② 内容密钥相同（手机端改名后旧键被删，靠 contentKey 找回）
         // - 仍找不到 → 视为"云端已删除该库"，交给调用方弹窗询问（删除本地 / 恢复到云端）。
+        let mut adopted_name: Option<String> = None;
         if remote_bytes.is_none() && local.vault.last_synced_at > 0 {
             let manifest_text = self
                 .webdav
                 .get(&self.config.manifest_path())
                 .await
                 .map_err(dav_err)?;
-            if let Some(bytes) = manifest_text {
-                let text = String::from_utf8_lossy(&bytes).to_string();
-                let manifest = CloudManifest::parse(Some(text.as_str()));
-                let want = local.vault.name.trim().to_lowercase();
-                if let Some(entry) = manifest
-                    .vaults
-                    .iter()
-                    .find(|e| e.name.trim().to_lowercase() == want)
-                {
-                    if entry.key != remote_key {
+            let manifest = match manifest_text.as_ref() {
+                Some(bytes) => CloudManifest::parse(Some(String::from_utf8_lossy(bytes).as_ref())),
+                None => CloudManifest::parse(None),
+            };
+            // ① 云端清单里已有同名条目（正常同步/改名后两端都更新过的情况）
+            let want = local.vault.name.trim().to_lowercase();
+            if let Some(entry) = manifest
+                .vaults
+                .iter()
+                .find(|e| e.name.trim().to_lowercase() == want)
+            {
+                if entry.key != remote_key {
+                    let path = self.config.remote_path(&entry.key);
+                    if let Some(bytes) = self.webdav.get(&path).await.map_err(dav_err)? {
                         remote_key = entry.key.clone();
-                        remote_path = self.config.remote_path(&remote_key);
-                        remote_bytes = self.webdav.get(&remote_path).await.map_err(dav_err)?;
+                        remote_path = path;
+                        remote_bytes = Some(bytes);
+                    }
+                }
+            }
+            // ② 改名认领：手机端改名后按新名字散列出新键、删掉旧键文件。
+            //    内容密钥（contentKey）改名不变，用它逐条比对云端库文件即可认出"同一个库"。
+            if remote_bytes.is_none() && !local.vault.content_key.is_empty() {
+                for entry in manifest.vaults.iter() {
+                    if entry.key == remote_key {
+                        continue;
+                    }
+                    let path = self.config.remote_path(&entry.key);
+                    let Ok(Some(bytes)) = self.webdav.get(&path).await else {
+                        continue;
+                    };
+                    let Ok(container) = VaultContainer::open(&bytes, password) else {
+                        continue;
+                    };
+                    if container.vault.content_key == local.vault.content_key {
+                        remote_key = entry.key.clone();
+                        remote_path = path;
+                        remote_bytes = Some(bytes);
+                        adopted_name = Some(entry.name.clone());
+                        break;
                     }
                 }
             }
@@ -210,6 +239,15 @@ impl SyncEngine {
                 SyncError("无法用当前主密码解密远端数据库，请确认两端使用同一主密码".to_string())
             })?,
         };
+
+        // 改名认领：本地库名跟随云端（手机端改名后，桌面端同步过来即可看到新名字）
+        if let Some(name) = adopted_name {
+            let trimmed = name.trim().to_string();
+            if !trimmed.is_empty() && trimmed != local.vault.name {
+                local.vault.name = trimmed;
+                local.vault.touch();
+            }
+        }
 
         if !local.vault.content_key.is_empty()
             && !remote.vault.content_key.is_empty()
