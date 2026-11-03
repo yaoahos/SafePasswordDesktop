@@ -7,8 +7,8 @@ SafePassword 桌面版是一个离线优先的密码管理器。界面与数据�
 - 正式版本：`1.0.0`
 - 支持平台：Windows 10 / 11（x64，需要 WebView2 运行时）
 - 安装包：`SafePassword_1.0.0_x64-setup.exe`（NSIS）/ `SafePassword_1.0.0_x64_zh-CN.msi`
-- 安装包大小：2,348,169 字节（NSIS）/ 3,227,648 字节（MSI）
-- SHA-256：`F01996F09E5195A063583BF09D539E3ED94D8016188B99C2DFD8C05C6F73B9B5`（NSIS）/ `491E50C3C231FED6C7CC56550F9EEEE6EF69272C03BD13B1573E765C9C0A4040`（MSI）
+- 安装包大小：2,350,610 字节（NSIS）/ 3,227,648 字节（MSI）
+- SHA-256：`688BF70317BDBA6574DA9AC189A79990265739D851C7C356A8F8C7808643BF1E`（NSIS）/ `5CE655334A8885C0AAABFDBE80891FB2C2C4CD648657550CEC5C295B71249126`（MSI）
 - 发布下载：[Releases](https://github.com/yaoahos/SafePasswordDesktop/releases)
 
 > 本项目为独立实现，未使用任何第三方应用的源代码；界面与交互仅作设计参考。密码库格式与 Android 版互通。
@@ -101,7 +101,7 @@ SafePassword Desktop 面向希望把密码数据掌握在自己手里的用户�
 - 主密码通过 **PBKDF2-HMAC-SHA256** 派生密钥，迭代次数 **210,000**（与手机端一致）。
 - 使用 **AES-256-GCM** 加密密码库内容，每次随机 12 字节 IV，认证标签 128 位。
 - 密码库内容由数据密钥（DEK）加密，DEK 再由主密码派生的密钥包裹（AAD 固定串），更换主密码只需重新包裹 DEK。
-- 文件格式：`SICV` 魔数 + 版本 + 迭代次数 + salt + 包裹后的 DEK + 密文，全部大端；与 Android 版**逐字节互通**。
+- 文件格式：4 字节魔数 + 版本 + 迭代次数 + salt + 包裹后的 DEK + 密文，全部大端；与 Android 版**逐字节互通**。
 - 主密码不写入磁盘、不上传服务器；密码库文件与备份在离开设备前均为密文。
 
 ### 2. 本地配置
@@ -190,7 +190,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 **恢复数据**
 
-- 从本地恢复：选 `.spv` 文件（兼容旧版 `.sicv`）→ 输入该文件主密码 → 可改名 → 进入密码库。
+- 从本地恢复：选 `.spv` 文件→ 输入该文件主密码 → 可改名 → 进入密码库。
 - 从云端恢复：直接填写 WebDAV 地址、用户名、密码、远程目录 → 读取云端清单 → 选中一个库 → 输入该库主密码 → 下载并导入。
 
 **日常使用**
@@ -232,7 +232,7 @@ SafePasswordDesktop/
 │   ├── src/main.rs             应用入口、插件与命令注册
 │   ├── src/sp/                 与手机端字节兼容的核心移植
 │   │   ├── crypto.rs           PBKDF2 + AES-GCM + 密钥包裹
-│   │   ├── container.rs        .spv/.sicv 容器读写
+│   │   ├── container.rs        .spv/.spv 容器读写
 │   │   ├── model.rs            密码库数据模型
 │   │   ├── store.rs            密码库文件与索引
 │   │   ├── xml.rs              通用 XML 导入导出

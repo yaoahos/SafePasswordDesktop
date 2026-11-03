@@ -27,7 +27,7 @@ pub fn random_bytes(len: usize) -> Vec<u8> {
 }
 
 /// PBKDF2-HMAC-SHA256。口令按 UTF-8 字节派生（与 JCE PBKDF2WithHmacSHA256 一致，
-/// 以真机 .sicv 实测为准，见 docs/core-spec.md 歧义 B）。
+/// 以真机 .spv 实测为准，见 docs/core-spec.md 歧义 B）。
 pub fn derive_key(password: &str, salt: &[u8], iterations: i32) -> [u8; KEY_BYTES] {
     pbkdf2::pbkdf2_hmac_array::<Sha256, KEY_BYTES>(password.as_bytes(), salt, iterations as u32)
 }
@@ -151,7 +151,7 @@ mod tests {
         assert_eq!(wrapped.len(), IV_BYTES + KEY_BYTES + TAG_BYTES);
         assert_eq!(unwrap_dek(&kek, &wrapped).unwrap(), dek);
         assert!(unwrap_dek(&[1u8; KEY_BYTES], &wrapped).is_err());
-        // 短于 40 字节的包裹必须失败（.sicv 头部下限 40）
+        // 短于 40 字节的包裹必须失败（.spv 头部下限 40）
         assert!(unwrap_dek(&kek, &wrapped[..39]).is_err());
     }
 

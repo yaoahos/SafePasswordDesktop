@@ -4,7 +4,7 @@
 
 | 文件 | 说明 |
 |---|---|
-| `known1.v2.spv` | 由 `interop/fixtures/android/known1.sicv` 重新加密而来，1257 字节，头部 `version = 2` |
+| `known1.v2.spv` | 由 `interop/fixtures/android/known1.spv` 重新加密而来，1257 字节，头部 `version = 2` |
 
 口令与期望明文复用 Android 侧样本：
 
@@ -15,7 +15,7 @@
 
 ```powershell
 cargo run --example rewrite_fixture -- `
-  interop\fixtures\android\known1.sicv `
+  interop\fixtures\android\known1.spv `
   interop\fixtures\android\known1.password.txt `
   interop\fixtures\desktop\known1.v2.spv
 ```

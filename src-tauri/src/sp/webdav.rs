@@ -85,7 +85,7 @@ impl WebDavConfig {
         } else {
             taken
         };
-        format!("{}/{key}.sicv", self.normalized_dir())
+        format!("{}/{key}.spv", self.normalized_dir())
     }
 
     /// 云端密码库清单（key → 显示名），用于「从云端恢复」时列出可选的库。
@@ -439,15 +439,15 @@ mod tests {
     #[test]
     fn legacy_name_rules() {
         let config = WebDavConfig::default();
-        assert_eq!(config.legacy_name_path("My Vault"), "SafePassword/my-vault.sicv");
-        assert_eq!(config.legacy_name_path("  我的密码库  "), "SafePassword/我的密码库.sicv");
-        assert_eq!(config.legacy_name_path("Bank___Card"), "SafePassword/bank-card.sicv");
-        assert_eq!(config.legacy_name_path("---"), "SafePassword/vault.sicv");
-        assert_eq!(config.legacy_name_path(""), "SafePassword/vault.sicv");
-        // 64 字符截断（去掉 .sicv 后缀后）
+        assert_eq!(config.legacy_name_path("My Vault"), "SafePassword/my-vault.spv");
+        assert_eq!(config.legacy_name_path("  我的密码库  "), "SafePassword/我的密码库.spv");
+        assert_eq!(config.legacy_name_path("Bank___Card"), "SafePassword/bank-card.spv");
+        assert_eq!(config.legacy_name_path("---"), "SafePassword/vault.spv");
+        assert_eq!(config.legacy_name_path(""), "SafePassword/vault.spv");
+        // 64 字符截断（去掉 .spv 后缀后）
         let long = "a".repeat(100);
-        assert_eq!(config.legacy_name_path(&long), format!("SafePassword/{}.sicv", "a".repeat(64)));
-        assert_eq!(config.legacy_name_path("a!!!b"), "SafePassword/a-b.sicv");
+        assert_eq!(config.legacy_name_path(&long), format!("SafePassword/{}.spv", "a".repeat(64)));
+        assert_eq!(config.legacy_name_path("a!!!b"), "SafePassword/a-b.spv");
     }
 
     #[test]

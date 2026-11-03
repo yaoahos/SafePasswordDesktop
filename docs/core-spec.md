@@ -2,7 +2,7 @@
 
 > 本文档面向 Tauri (Rust) 桌面端实现者，逐字节描述 Android 端 `core/` 模块（纯 Kotlin/JVM）的
 > 加密格式、文件格式、JSON schema、WebDAV 协议行为与同步/合并算法，目标是 **字节兼容**：
-> 桌面端与 Android 端可以互读 `.sicv` 保险库、`.sica` 附件、WebDAV 上的同一份数据和备份文件。
+> 桌面端与 Android 端可以互读 `.spv` 保险库、`.sica` 附件、WebDAV 上的同一份数据和备份文件。
 >
 > 所有常量均直接摘自源码并标注 `文件名:行号`。凡源码行为存在歧义或历史不一致之处，
 > 集中列在第 15 节「已知歧义」，实现前请务必阅读。
@@ -89,7 +89,7 @@
 
 ## 2. 保险库容器格式（VaultContainer.kt）
 
-单文件扩展名 `.sicv`。字节布局（`DataOutputStream` 写入，**所有 int 均为大端 int32**）：
+单文件扩展名 `.spv`。字节布局（`DataOutputStream` 写入，**所有 int 均为大端 int32**）：
 
 | 偏移 | 内容 | 大小 | 说明 |
 |---|---|---|---|
@@ -255,19 +255,19 @@ Android 端根目录 = `context.filesDir/data`（AppContainer.kt:11），桌面�
 <root>/
   vaults/
     index.json                  # VaultIndex（明文 JSON）
-    <vault-uuid>.sicv           # 每个保险库一个加密容器
+    <vault-uuid>.spv           # 每个保险库一个加密容器
   attachments/
     <vault-uuid>/               # 按 vault.id 分目录（VaultStore.kt:28）
       <attachment-uuid>.sica    # 加密附件（见第 6 节）
 ```
 
 - `indexFile = vaults/index.json`（VaultStore.kt:19）。
-- 库文件名 = `"${vault.id}.sicv"`（VaultStore.kt:65,147）；`list()` 扫描 `*.sicv`，把不在 index
-  里的文件收编：`id = 文件名去掉 .sicv 后缀`、`name = "密码库"`、`createdAt = 文件 mtime`、
+- 库文件名 = `"${vault.id}.spv"`（VaultStore.kt:65,147）；`list()` 扫描 `*.spv`，把不在 index
+  里的文件收编：`id = 文件名去掉 .spv 后缀`、`name = "密码库"`、`createdAt = 文件 mtime`、
   `lastOpenedAt = 0`；同时剔除文件已不存在的 index 条目；结果按 `lastOpenedAt` **降序**（VaultStore.kt:31-59）。
   注意收编时的 id 可能与文件内 `Vault.id` 不一致（见第 15 节）。
 - `open`/`save` 更新 index 中对应条目的 `name` 与 `lastOpenedAt`；`updateMeta` 按 id 整体替换（VaultStore.kt:81-113）。
-- `delete`：删 `.sicv` + 递归删 `attachments/<vaultId>/` + 从 index 移除（VaultStore.kt:116-122）。
+- `delete`：删 `.spv` + 递归删 `attachments/<vaultId>/` + 从 index 移除（VaultStore.kt:116-122）。
 - `importEncrypted(bytes, password, newName)` / `importPlain(vault, password, newName)`：
   以**新 UUID** 建库（id 变化 ⇒ 文件名、附件目录都变），name 用 newName（空则沿用原名），
   `updatedAt = now`；条目/标签/墓碑/contentKey 原样带过来（VaultStore.kt:125-160）。
@@ -285,7 +285,7 @@ Android 端根目录 = `context.filesDir/data`（AppContainer.kt:11），桌面�
 4. 全部失败后兜底：`copy(REPLACE_EXISTING)` + `deleteIfExists(tmp)`（不依赖 rename）。
 5. 兜底也失败则抛出最后一次异常。
 
-`index.json` 与 `.sicv` 均通过 `writeAtomic` 落盘（VaultStore.kt:174-180；VaultContainer.kt:66-68）。
+`index.json` 与 `.spv` 均通过 `writeAtomic` 落盘（VaultStore.kt:174-180；VaultContainer.kt:66-68）。
 
 ### 4.3 同步结果类型（SyncEngine.kt:29-37）
 
@@ -306,19 +306,19 @@ SyncEngine.kt:30-31 注释；Android 调用方随后 `container.saveTo(vaultFile
 
 ## 5. 备份格式（BackupManager.kt）
 
-- **不是 zip、不二次加密**：备份 = 直接复制 `.sicv` 文件（`Files.copy(REPLACE_EXISTING)`，
-  BackupManager.kt:27）。`.sicv` 本身已加密。
+- **不是 zip、不二次加密**：备份 = 直接复制 `.spv` 文件（`Files.copy(REPLACE_EXISTING)`，
+  BackupManager.kt:27）。`.spv` 本身已加密。
 - 目录：Android 端 `context.filesDir/backups`（AppContainer.kt:12）；`BackupManager(root)` 构造时建目录。
-- 文件名：`"<safeName>-<yyyyMMdd-HHmmss>.sicv"`（BackupManager.kt:24-26）：
+- 文件名：`"<safeName>-<yyyyMMdd-HHmmss>.spv"`（BackupManager.kt:24-26）：
   - 时间戳：`SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)` 本地时间。
   - safeName：vault 名中所有不匹配 `[^\p{L}\p{N}_-]` 的字符替换为 `_`（正则 `Regex("[^\\p{L}\\p{N}_-]")`），
     截断 40 字符，全空则 `"vault"`。即保留所有 Unicode 字母数字、`_`、`-`。
-- `list()`：目录下 `*.sicv`，`createdAt = 文件 mtime`、`size = 文件大小`，按 createdAt **降序**；
+- `list()`：目录下 `*.spv`，`createdAt = 文件 mtime`、`size = 文件大小`，按 createdAt **降序**；
   单个文件读取失败则跳过（BackupManager.kt:31-47）。
 - `restore(backup, target)`：普通 `Files.copy(REPLACE_EXISTING)` **覆盖**目标（非原子，BackupManager.kt:49-52）。
 - `prune(keep = 10)`：按 list 顺序保留前 `keep` 个，删除其余（失败忽略）。Android 在每次备份后
   调 `prune(10)`（AppViewModel.kt:1111-1112, 1575-1576）。
-- **附件不进备份**：备份只含单个 `.sicv`。跨端恢复时附件需靠 WebDAV `attachments/` 目录补齐
+- **附件不进备份**：备份只含单个 `.spv`。跨端恢复时附件需靠 WebDAV `attachments/` 目录补齐
   （第 8 节 syncAttachments）或另行拷贝。
 - 恢复流程（Android）：`restore(info.path, vaultFile(meta))` 直接覆盖当前库文件（AppViewModel.kt:1138），
   下次打开即为备份内容；`lastSyncedAt` 随备份内容一起被带回旧值——恢复后第一次同步大概率
@@ -826,18 +826,18 @@ base64、`login` 字段名的邮箱识别等都有测试断言，可直接作为
 ## 15. 已知歧义 / 需要确认的点
 
 - **A. 远端文件名固定为 `SafePassword.spv`**：`WebDavConfig.remotePath()` 完全忽略 `vaultKey`
-  参数（WebDavClient.kt:40），一个 WebDAV 账号下一个远端文件。但 `WebDavClientTest.kt:34` 使用
-  `<dir>/<key>.sicv` 这类旧式路径，说明**旧版本**曾用 `<dir>/<key>.sicv`。桌面端应
+  参数（WebDavClient.kt:40），一个 WebDAV 账号下一个远端文件。`WebDavClientTest.kt:34` 里出现的
+  带 `key` 的路径只是测试用例写法，不代表运行时行为。桌面端应
   跟随**当前** Android 行为（`SafePassword.spv`）才能互通；如桌面端生成别的文件名，两端永远互相
   看不见。`vaultKey` 仅剩附件目录在用（SyncEngine.kt:223）。
 - **B. PBKDF2 口令编码**：JCE `PBKDF2WithHmacSHA256` 按 UTF-8 编码口令（无 NUL 终止）是 JDK 实现
-  事实，但 core 源码无法直接证明。**必须用 Android 真机生成的 `.sicv` 做 T1 验证**；若口令含
+  事实，但 core 源码无法直接证明。**必须用 Android 真机生成的 `.spv` 做 T1 验证**；若口令含
   非 ASCII（中文密码），编码差异会立即暴露。
 - **C. 冲突判定无 etag**：SyncEngine 完全用 `updatedAt`/`lastSyncedAt` 时间戳比较；
   `RemoteStat.etag` 被解析但从未消费；`stat()` 只在 Android UI 层做 HEAD 级预检
   （AppViewModel.kt:1018-1031）。任务书里假设的「etag 冲突检测」不存在。
 - **D. 无时钟偏移处理**（8.6 节）。
-- **E. index.json 收编逻辑**：`list()` 把未知 `.sicv` 的 id 取为文件名后缀，可能与文件内
+- **E. index.json 收编逻辑**：`list()` 把未知 `.spv` 的 id 取为文件名后缀，可能与文件内
   `Vault.id` 不一致（VaultStore.kt:46），进而附件目录（按 index 的 id 建）与库内 id 脱节。
   桌面端若自行创建文件，建议文件名严格使用 `Vault.id`。
 - **F. 合并比较忽略的字段**：`sameContent` 不比较 `favorite`、`notesLabel`、`notesType`、
@@ -861,9 +861,9 @@ base64、`login` 字段名的邮箱识别等都有测试断言，可直接作为
 
 用 Android 真机（或 JVM 跑 core）产生样本文件，Rust 端读取/产生，双向验证：
 
-- **T1 打开 Android 生成的 `.sicv`**：含非 ASCII 主密码（如 `密码-测试-123`）与 ASCII 主密码各一例；
+- **T1 打开 Android 生成的 `.spv`**：含非 ASCII 主密码（如 `密码-测试-123`）与 ASCII 主密码各一例；
   校验 PBKDF2 口令编码假设（歧义 B）。解析后逐字段比对 `Vault` JSON。
-- **T2 Rust 生成 `.sicv`，Android 打开**：确认 magic/version/iterations/salt/wrapped 长度与 JSON
+- **T2 Rust 生成 `.spv`，Android 打开**：确认 magic/version/iterations/salt/wrapped 长度与 JSON
   schema 被接受；条目内容一致。
 - **T3 头部校验**：坏 magic、version=2、iterations=9999/10000001、salt_len=7/65、
   wrapped_len=39/257、payload_len 超过实际文件——Rust 与 Kotlin 抛同类错误且不 panic/OOM。
@@ -888,7 +888,7 @@ base64、`login` 字段名的邮箱识别等都有测试断言，可直接作为
   body→报错；MKCOL 405 视为成功；DELETE 404 成功；PUT 前自动建多级目录；中文 vaultKey 的
   百分号编码；Basic 认证与 401 报错文案（可参照 WebDavClient.kt:24-71 三个测试）。
 - **T13 备份/恢复**：Android 备份 → Rust 复制还原 → Android 打开；文件名模式
-  `<safeName>-<yyyyMMdd-HHmmss>.sicv` 与 prune(keep=10) 行为一致（中文库名、特殊字符库名）。
+  `<safeName>-<yyyyMMdd-HHmmss>.spv` 与 prune(keep=10) 行为一致（中文库名、特殊字符库名）。
 - **T14 XML 往返**：Android 导出 XML → Rust parse → 逐字段比对（labelNames、favorite、
   notes 拼接、iconData、time_stamp 秒）；Rust export → Android parse（可用 ToolsTest.kt:53-123
   的样例 XML 与断言作为固定用例）。另加：`deleted="1"`/`template="true"` 卡跳过、秒/毫秒
