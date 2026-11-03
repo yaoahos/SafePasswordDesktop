@@ -16,7 +16,7 @@ use crate::sp::model::now_ms;
 use crate::sp::webdav::{WebDavClient, WebDavConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SyncDirection {
     None,
     Uploaded,
@@ -386,5 +386,33 @@ mod tests {
         // 1.4.1 旧键：小写、非 ASCII 字母数字转 '-'，落在 <dir>/<key>.sicv
         assert_eq!(config.legacy_name_path("My Vault"), "SafePassword/my-vault.sicv");
         assert_eq!(config.legacy_name_path("!!!"), "SafePassword/vault.sicv");
+    }
+
+    /// 前端按字符串判断同步方向：必须是 SCREAMING_SNAKE_CASE（曾经 "UPPERCASE"
+    /// 把 RemoteDeleted 序列化成 "REMOTEDELETED"，导致云端删除弹窗永远不触发）。
+    #[test]
+    fn sync_direction_wire_names() {
+        use serde_json::json;
+        assert_eq!(serde_json::to_value(SyncDirection::None).unwrap(), json!("NONE"));
+        assert_eq!(
+            serde_json::to_value(SyncDirection::Uploaded).unwrap(),
+            json!("UPLOADED")
+        );
+        assert_eq!(
+            serde_json::to_value(SyncDirection::Downloaded).unwrap(),
+            json!("DOWNLOADED")
+        );
+        assert_eq!(
+            serde_json::to_value(SyncDirection::Merged).unwrap(),
+            json!("MERGED")
+        );
+        assert_eq!(
+            serde_json::to_value(SyncDirection::Conflict).unwrap(),
+            json!("CONFLICT")
+        );
+        assert_eq!(
+            serde_json::to_value(SyncDirection::RemoteDeleted).unwrap(),
+            json!("REMOTE_DELETED")
+        );
     }
 }
