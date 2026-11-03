@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CloudVaultEntry, VaultMeta, WebDavConfig } from "../types";
 import { evaluateStrength, importVaultBytes, webdavGetVault, webdavListCloud } from "../api";
 import { arrayBufferToBase64, formatTime } from "../utils";
@@ -52,6 +52,8 @@ export function AuthScreens({
   const [cloudKey, setCloudKey] = useState("");
   const [cloudPw, setCloudPw] = useState("");
   const [cloudCfg, setCloudCfg] = useState<WebDavConfig | null>(null);
+  /** 云端恢复页默认只显示"用哪个服务器"，需要换账号时才展开表单 */
+  const [showCfg, setShowCfg] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -237,6 +239,72 @@ export function AuthScreens({
   };
 
   const selectedMeta = vaults.find((v) => v.id === selected);
+
+  // 选择项自愈：库里已没有这个 id（删除/恢复重新分配 id）时，退回默认库或第一个库，
+  // 避免拿着不存在的 id 去解锁（后端会回"找不到该密码库"）
+  useEffect(() => {
+    if (selected && vaults.some((v) => v.id === selected)) return;
+    const next =
+      defaultVaultId && vaults.some((v) => v.id === defaultVaultId) ? defaultVaultId : vaults[0]?.id ?? "";
+    setSelected(next);
+  }, [vaults, defaultVaultId, selected]);
+
+  /** "服务器 dav.jianguoyun.com · 账号 xxx" */
+  const davLabel = (c: WebDavConfig) => {
+    let host = c.baseUrl.trim();
+    try {
+      host = new URL(host).host;
+    } catch {
+      /* 保持原样 */
+    }
+    return `${host} · ${c.username}`;
+  };
+
+  const davForm = cloudCfg ? (
+    <div className="restore-card">
+      <div className="restore-card-title">WebDAV 服务器</div>
+      <div className="form-row">
+        <label className="field-caption">服务器地址</label>
+        <input
+          className="input"
+          placeholder="https://dav.jianguoyun.com/dav/"
+          value={cloudCfg.baseUrl}
+          onChange={(e) => setCloudCfg({ ...cloudCfg, baseUrl: e.target.value })}
+        />
+      </div>
+      <div className="form-row">
+        <label className="field-caption">用户名</label>
+        <input
+          className="input"
+          placeholder="邮箱或账号"
+          value={cloudCfg.username}
+          onChange={(e) => setCloudCfg({ ...cloudCfg, username: e.target.value })}
+        />
+      </div>
+      <div className="form-row">
+        <label className="field-caption">密码 / 应用密码</label>
+        <input
+          className="input"
+          type="password"
+          placeholder="坚果云请用应用密码"
+          value={cloudCfg.password}
+          onChange={(e) => setCloudCfg({ ...cloudCfg, password: e.target.value })}
+        />
+      </div>
+      <div className="form-row">
+        <label className="field-caption">远程目录</label>
+        <input
+          className="input"
+          placeholder="SafePassword"
+          value={cloudCfg.remoteDir}
+          onChange={(e) => setCloudCfg({ ...cloudCfg, remoteDir: e.target.value })}
+        />
+      </div>
+      <button className="btn primary block tall" disabled={busy} onClick={() => void saveCloudCfg()}>
+        {busy ? "连接中…" : cfgReady(cloudCfg) ? "保存并读取云端清单" : "保存并连接"}
+      </button>
+    </div>
+  ) : null;
 
   return (
     <div className="auth-wrap">
@@ -439,59 +507,20 @@ export function AuthScreens({
               只需要 WebDAV 地址与账号；服务器上只保存加密后的密码库，主密码不会上传。
             </div>
 
-            {cloudCfg && (
-              <div className="settings-group">
-                <div className="settings-group-title">
-                  <span className="settings-group-dot" /> WebDAV 服务器
-                </div>
-                <div className="form-row">
-                  <label className="field-caption">服务器地址</label>
-                  <input
-                    className="input"
-                    placeholder="https://dav.jianguoyun.com/dav/"
-                    value={cloudCfg.baseUrl}
-                    onChange={(e) => setCloudCfg({ ...cloudCfg, baseUrl: e.target.value })}
-                  />
-                </div>
-                <div className="form-row">
-                  <label className="field-caption">用户名</label>
-                  <input
-                    className="input"
-                    placeholder="邮箱或账号"
-                    value={cloudCfg.username}
-                    onChange={(e) => setCloudCfg({ ...cloudCfg, username: e.target.value })}
-                  />
-                </div>
-                <div className="form-row">
-                  <label className="field-caption">密码 / 应用密码</label>
-                  <input
-                    className="input"
-                    type="password"
-                    placeholder="坚果云请用应用密码"
-                    value={cloudCfg.password}
-                    onChange={(e) => setCloudCfg({ ...cloudCfg, password: e.target.value })}
-                  />
-                </div>
-                <div className="form-row">
-                  <label className="field-caption">远程目录</label>
-                  <input
-                    className="input"
-                    placeholder="SafePassword"
-                    value={cloudCfg.remoteDir}
-                    onChange={(e) => setCloudCfg({ ...cloudCfg, remoteDir: e.target.value })}
-                  />
-                </div>
-                <button className="btn primary block tall" disabled={busy} onClick={() => void saveCloudCfg()}>
-                  {busy ? "连接中…" : cfgReady(cloudCfg) ? "保存并读取云端清单" : "保存并连接"}
+            {cloudCfg && cfgReady(cloudCfg) && (
+              <div className="restore-server-line">
+                <Icon name="cloud" size={14} />
+                <span className="restore-server-text">{davLabel(cloudCfg)}</span>
+                <button className="link-btn" onClick={() => setShowCfg((v) => !v)}>
+                  {showCfg ? "收起" : "更换"}
                 </button>
               </div>
             )}
+            {cloudCfg && (!cfgReady(cloudCfg) || showCfg) && davForm}
 
             {cloudList !== null && (
-              <div className="settings-group">
-                <div className="settings-group-title">
-                  <span className="settings-group-dot" /> 云端密码库
-                </div>
+              <div className="restore-card">
+                <div className="restore-card-title">云端密码库</div>
                 {busy && <div className="cloud-empty">正在读取云端清单…</div>}
                 {!busy && cloudList.length === 0 && (
                   <div className="cloud-empty">云端没有任何密码库。</div>

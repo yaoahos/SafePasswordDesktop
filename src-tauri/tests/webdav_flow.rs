@@ -10,7 +10,6 @@ use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use base64::Engine;
 use safepassword::commands as c;
 use safepassword::commands::AppState;
 use safepassword::sp::sync::ConflictStrategy;

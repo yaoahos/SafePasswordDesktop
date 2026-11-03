@@ -351,22 +351,35 @@ pub fn rename_vault(state: State<AppState>, id: String, name: String) -> CmdResu
         return Err("名称不能为空".to_string());
     }
     let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
-    if inner.current.as_ref().is_some_and(|c| c.meta.id == id) {
+    let matches_current = inner.current.as_ref().is_some_and(|c| c.meta.id == id);
+    if matches_current {
         let cur = inner.current.as_mut().unwrap();
         cur.container.vault.name = trimmed;
         cur.meta.name = cur.container.vault.name.clone();
         cur.container.vault.touch();
         return inner.save_current();
     }
-    let mut meta = inner
+    let found = inner
         .store
         .list()
         .map_err(err)?
         .into_iter()
-        .find(|m| m.id == id)
-        .ok_or("找不到该密码库")?;
-    meta.name = trimmed;
-    inner.store.update_meta(&meta).map_err(err)
+        .find(|m| m.id == id);
+    if let Some(mut meta) = found {
+        meta.name = trimmed;
+        return inner.store.update_meta(&meta).map_err(err);
+    }
+    // 兜底：界面上的库对象可能是导入/恢复前的旧 id（恢复会重新分配 id），
+    // 这种情况直接改"当前打开的库"——用户看到的同一个库，不会误改别的库。
+    match inner.current.as_mut() {
+        Some(cur) => {
+            cur.container.vault.name = trimmed;
+            cur.meta.name = cur.container.vault.name.clone();
+            cur.container.vault.touch();
+            inner.save_current()
+        }
+        None => Err("找不到该密码库".to_string()),
+    }
 }
 
 /// UI 整体编辑后回写（替换当前 vault 并 touch + 落盘）。

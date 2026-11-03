@@ -1905,6 +1905,52 @@ input[type="password"]::-ms-clear {
 .cloud-row.active .cloud-size { color: var(--primary); font-weight: 600; }
 .cloud-empty { font-size: 12px; color: var(--text-3); padding: 8px 2px; }
 
+/* 解锁页「从云端恢复」：恢复页自己的卡片样式，不再复用设置页分区（避免看起来像设置弹窗） */
+.restore-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px 14px;
+  margin: 10px 0 4px;
+  background: var(--surface);
+}
+
+.restore-card-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 10px;
+}
+
+.restore-server-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface-2, transparent);
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.restore-server-line svg {
+  color: var(--primary);
+  flex: none;
+}
+
+.restore-server-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.restore-server-line .link-btn {
+  margin-left: auto;
+  flex: none;
+}
+
 /* 密码库页：本地/云端行 */
 .vault-row {
   display: flex;
