@@ -321,6 +321,11 @@ export default function App() {
         return;
       }
       await refreshFromBackend();
+      // 定时/自动同步已是最新时不要打扰用户；手动同步才提示
+      if (r.direction === "NONE" && !manual) {
+        clearSync();
+        return;
+      }
       flashSync("ok", r.message || "已同步");
     },
     [refreshFromBackend, flashSync, clearSync, vault?.name, vault?.id, vaults, remoteGoneSnoozed],
