@@ -256,6 +256,37 @@ function ItemDetailInner({
     </Dialog>
   ) : null;
 
+  /** 历史记录弹窗（预览态与编辑态共用） */
+  const historyDialog =
+    histFieldId &&
+    (() => {
+      const field = draft.fields.find((f) => f.id === histFieldId);
+      if (!field) return null;
+      return (
+        <PasswordHistoryDialog
+          field={field}
+          notify={notify}
+          onClose={() => setHistFieldId(null)}
+          onDelete={async (index) => {
+            try {
+              await deleteFieldHistory(draft.id, field.id, index);
+              setDraft((d) => ({
+                ...d,
+                fields: d.fields.map((x) =>
+                  x.id === field.id
+                    ? { ...x, history: (x.history ?? []).filter((_, i) => i !== index) }
+                    : x,
+                ),
+              }));
+              notify("已删除这条历史记录", "success");
+            } catch (e) {
+              notify(String(e), "error");
+            }
+          }}
+        />
+      );
+    })();
+
   if (!editing && !trashed) {
     const user =
       draft.fields
@@ -361,6 +392,15 @@ function ItemDetailInner({
                     >
                       <Icon name="copy" size={15} />
                     </button>
+                    {(f.history?.length ?? 0) > 0 && (
+                      <button
+                        className="icon-btn"
+                        title={`历史记录（${f.history?.length}）`}
+                        onClick={() => setHistFieldId(f.id)}
+                      >
+                        <Icon name="history" size={15} />
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -411,6 +451,7 @@ function ItemDetailInner({
           </button>
         </div>
         {deleteConfirm}
+        {historyDialog}
         <div className="spacer-16" />
       </div>
     );
@@ -565,15 +606,6 @@ function ItemDetailInner({
                       <button className="icon-btn" title="生成密码" onClick={() => setGenFieldId(f.id)}>
                         <Icon name="dice" size={15} />
                       </button>
-                      {(f.history?.length ?? 0) > 0 && (
-                        <button
-                          className="icon-btn"
-                          title={`密码历史（${f.history?.length}）`}
-                          onClick={() => setHistFieldId(f.id)}
-                        >
-                          <Icon name="history" size={15} />
-                        </button>
-                      )}
                     </>
                   )}
                 </>
@@ -785,34 +817,7 @@ function ItemDetailInner({
           onUse={(pw) => patchField(genFieldId, { value: pw })}
         />
       )}
-      {histFieldId &&
-        (() => {
-          const field = draft.fields.find((f) => f.id === histFieldId);
-          if (!field) return null;
-          return (
-            <PasswordHistoryDialog
-              field={field}
-              notify={notify}
-              onClose={() => setHistFieldId(null)}
-              onDelete={async (index) => {
-                try {
-                  await deleteFieldHistory(draft.id, field.id, index);
-                  setDraft((d) => ({
-                    ...d,
-                    fields: d.fields.map((x) =>
-                      x.id === field.id
-                        ? { ...x, history: (x.history ?? []).filter((_, i) => i !== index) }
-                        : x,
-                    ),
-                  }));
-                  notify("已删除这条历史记录", "success");
-                } catch (e) {
-                  notify(String(e), "error");
-                }
-              }}
-            />
-          );
-        })()}
+      {historyDialog}
       {deleteConfirm}
       <div className="spacer-16" />
     </div>

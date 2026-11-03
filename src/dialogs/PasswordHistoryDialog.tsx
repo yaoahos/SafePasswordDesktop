@@ -33,7 +33,10 @@ export function PasswordHistoryDialog({
   };
 
   return (
-    <Dialog title={`${field.label || "密码"}历史`} onClose={onClose} width={460}>
+    <Dialog title="历史记录" onClose={onClose} width={460}>
+      <div className="muted small" style={{ marginBottom: 10 }}>
+        {field.label || "密码"}
+      </div>
       {entries.length === 0 ? (
         <div className="hint-text">还没有历史记录。改一次这个字段就会把旧值记下来。</div>
       ) : (
