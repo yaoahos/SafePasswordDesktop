@@ -50,6 +50,31 @@ const DEFAULT_SETTINGS: AppSettings = {
   lastVaultId: null,
 };
 
+/** 同步请求上限：超时给出明确提示，避免界面一直停在"同步中…" */
+const SYNC_TIMEOUT_MS = 30_000;
+
+function withSyncTimeout<T>(p: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("同步超时")), SYNC_TIMEOUT_MS);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
+/** 同步失败文案：超时单独提示 */
+function syncErrorText(prefix: string, e: unknown): string {
+  const msg = String(e);
+  return msg.includes("同步超时") ? `${prefix}同步超时，请检查网络或 WebDAV 设置` : `${prefix}${msg}`;
+}
+
 const SECTION_TITLES: Record<SectionFilter, string> = {
   ALL: "全部",
   FAVORITES: "收藏",
@@ -420,10 +445,10 @@ export default function App() {
       void (async () => {
         try {
           flashSync("working", "正在同步…");
-          const r = await webdavSync(cfg, "KEEP_LOCAL"); // 本地修改优先，对齐手机端 doSync 默认策略
+          const r = await withSyncTimeout(webdavSync(cfg, "KEEP_LOCAL")); // 本地修改优先，对齐手机端 doSync 默认策略
           await applySync(r, vault.id);
         } catch (e) {
-          flashSync("err", `自动同步失败：${String(e)}`);
+          flashSync("err", syncErrorText("自动同步失败：", e));
         }
       })();
     }, 1500); // 对齐手机端 scheduleSync 的 1500ms 防抖
@@ -439,7 +464,7 @@ export default function App() {
     const iv = window.setInterval(() => {
       void (async () => {
         try {
-          const r = await webdavPullIfChanged(cfg);
+          const r = await withSyncTimeout(webdavPullIfChanged(cfg));
           if (r) await applySync(r, vault.id); // 有更新才刷新（对齐手机端 silent pull）
         } catch (e) {
           // 对齐手机端 runCatching：拉取失败不打扰用户
@@ -475,10 +500,10 @@ export default function App() {
     flashSync("working", "同步中…");
     try {
       // 与手机端一致：直接同步、本地优先，无需弹窗确认
-      const r = await webdavSync(cfg, "KEEP_LOCAL");
+      const r = await withSyncTimeout(webdavSync(cfg, "KEEP_LOCAL"));
       await applySync(r, vault?.id ?? null, true);
     } catch (e) {
-      flashSync("err", String(e));
+      flashSync("err", syncErrorText("", e));
     }
   }, [settings.webdav, vault?.id, notify, applySync, flashSync]);
 
