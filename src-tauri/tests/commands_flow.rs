@@ -24,10 +24,6 @@ fn mock_app(root: &PathBuf) -> App<MockRuntime> {
         .unwrap()
 }
 
-fn b64(data: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(data)
-}
-
 fn unb64(s: &str) -> Vec<u8> {
     base64::engine::general_purpose::STANDARD
         .decode(s.trim())

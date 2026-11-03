@@ -277,8 +277,15 @@ pub fn current_vault(state: State<AppState>) -> CmdResult<Option<Vault>> {
 
 #[tauri::command]
 pub async fn delete_vault(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    let (meta, cfg) = {
+    let (meta, cfg, content_key) = {
         let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+        // 删之前先记下内容密钥：云端文件名由它派生（改名不变），用来精确删云端文件
+        let content_key = inner
+            .current
+            .as_ref()
+            .filter(|c| c.meta.id == id)
+            .map(|c| c.container.vault.content_key.clone())
+            .filter(|k| !k.trim().is_empty());
         if inner.current.as_ref().is_some_and(|c| c.meta.id == id) {
             inner.current = None;
         }
@@ -292,11 +299,11 @@ pub async fn delete_vault(state: State<'_, AppState>, id: String) -> CmdResult<(
         match found {
             Some(meta) => {
                 inner.store.delete(&meta).map_err(err)?;
-                (Some(meta), cfg)
+                (Some(meta), cfg, content_key)
             }
             // 本地已经不存在这个库（例如文件已被删掉、只是界面上还残留一条）：
             // 删除是幂等操作，这里按成功处理，让界面刷新后自然消失。
-            None => (None, cfg),
+            None => (None, cfg, content_key),
         }
     };
     let Some(meta) = meta else {
@@ -305,18 +312,28 @@ pub async fn delete_vault(state: State<'_, AppState>, id: String) -> CmdResult<(
     // 云端同步删除（尽力而为：失败不影响本地删除结果，保证一端操作另一端也能感知）
     if cfg.is_configured() && cfg.enabled {
         if let Ok(client) = WebDavClient::new(cfg.clone()) {
-            let key = key_for(&meta.name);
-            let path = cfg.remote_path(&key);
-            let _ = client.delete(&path).await;
+            // 云端文件名可能有两种：内容密钥键（新方案，改名不变）与库名键（旧版本写的）
+            let mut keys: Vec<String> = Vec::new();
+            if let Some(ck) = content_key.as_deref() {
+                if let Some(k) = crate::sp::cloud::key_for_content(ck) {
+                    keys.push(k);
+                }
+            }
+            let name_key = key_for(&meta.name);
+            if !keys.contains(&name_key) {
+                keys.push(name_key);
+            }
+            for key in keys.iter() {
+                let _ = client.delete(&cfg.remote_path(key)).await;
+            }
             if let Ok(Some(bytes)) = client.get(&cfg.manifest_path()).await {
                 let text = String::from_utf8_lossy(&bytes).to_string();
                 let mut manifest = CloudManifest::parse(Some(text.as_str()));
-                if manifest
+                let before = manifest.vaults.len();
+                manifest
                     .vaults
-                    .iter()
-                    .any(|e| e.key == key || e.name.trim() == meta.name.trim())
-                {
-                    manifest.remove(&key);
+                    .retain(|e| !keys.contains(&e.key) && e.name.trim() != meta.name.trim());
+                if manifest.vaults.len() != before {
                     let _ = client
                         .put(&cfg.manifest_path(), manifest.to_json().as_bytes())
                         .await;
@@ -886,16 +903,30 @@ pub async fn webdav_delete_cloud(config: WebDavConfig, key: String) -> CmdResult
         .map_err(err)
 }
 
-/// 密码库名 → 云端稳定键（前端改名时比对旧/新键）。
+/// 云端稳定键：由库的**内容密钥**决定（改名不变）。库里没有内容密钥时才退回按库名派生。
 #[tauri::command]
-pub fn cloud_key(name: String) -> CmdResult<String> {
-    Ok(crate::sp::cloud::key_for(&name))
+pub fn cloud_key(state: State<AppState>, name: String) -> CmdResult<String> {
+    let content_key = {
+        let inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+        inner
+            .current
+            .as_ref()
+            .map(|c| c.container.vault.content_key.clone())
+            .unwrap_or_default()
+    };
+    Ok(crate::sp::cloud::key_for_content(&content_key)
+        .unwrap_or_else(|| crate::sp::cloud::key_for(&name)))
 }
 
 fn build_engine(inner: &AppStateInner, config: &WebDavConfig) -> CmdResult<SyncEngine> {
     let cur = inner.current.as_ref().ok_or(NO_OPEN_VAULT)?;
     let client = WebDavClient::new(config.clone()).map_err(err)?;
-    Ok(SyncEngine::new(client, config.clone(), &cur.container.vault.name))
+    Ok(SyncEngine::new(
+        client,
+        config.clone(),
+        &cur.container.vault.name,
+        &cur.container.vault.content_key,
+    ))
 }
 
 async fn run_sync(
@@ -1034,7 +1065,7 @@ pub async fn webdav_pull_if_changed(
     if !config.is_configured() {
         return Ok(None);
     }
-    let (name, last_synced, interval) = {
+    let (name, last_synced, interval, content_key) = {
         let inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
         let cur = match inner.current.as_ref() {
             Some(c) => c,
@@ -1044,6 +1075,7 @@ pub async fn webdav_pull_if_changed(
             cur.container.vault.name.clone(),
             cur.container.vault.last_synced_at,
             inner.settings.pull_interval_seconds,
+            cur.container.vault.content_key.clone(),
         )
     };
     if interval <= 0 {
@@ -1059,7 +1091,9 @@ pub async fn webdav_pull_if_changed(
         inner.last_pull_check_at = now;
     }
     let client = WebDavClient::new(config.clone()).map_err(err)?;
-    let key = key_for(&name);
+    // 云端文件名与库名无关：由内容密钥派生（改名/换服务器都不会变）
+    let key = crate::sp::cloud::key_for_content(&content_key)
+        .unwrap_or_else(|| key_for(&name));
     let path = config.remote_path(&key);
     let stat = client.stat(&path).await.map_err(err)?;
     let changed = match stat {

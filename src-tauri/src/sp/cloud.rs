@@ -70,6 +70,42 @@ pub fn key_for(name: &str) -> String {
     key
 }
 
+/// 密码库内容密钥 → 稳定 ASCII 键：**只由内容密钥决定，改名不变**。
+/// contentKey 是建库时随机生成的 32 字节（Base64），跨设备拷贝、跨改名都保持不变，
+/// 因此它就是"这个密码库"的身份。键形如 `k` + 64 位小写 hex；Base64 解析失败时退回哈希。
+pub fn key_for_content(content_key: &str) -> Option<String> {
+    use base64::Engine as _;
+    let trimmed = content_key.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(trimmed)
+        .ok()
+        .or_else(|| base64::engine::general_purpose::STANDARD_NO_PAD.decode(trimmed).ok());
+    match bytes {
+        Some(bytes) if !bytes.is_empty() => {
+            let mut key = String::with_capacity(1 + bytes.len() * 2);
+            key.push('k');
+            for byte in bytes.iter() {
+                key.push_str(&format!("{byte:02x}"));
+            }
+            Some(key)
+        }
+        _ => {
+            // 不是标准 Base64（历史数据）：退化为内容密钥的哈希，但仍与库名无关。
+            let mut hasher = Sha256::new();
+            hasher.update(trimmed.as_bytes());
+            let digest = hasher.finalize();
+            let mut key = String::from("k");
+            for byte in digest.iter().take(8) {
+                key.push_str(&format!("{byte:02x}"));
+            }
+            Some(key)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,6 +119,21 @@ mod tests {
         // trim 后同名 → 同键
         assert_eq!(key_for(" 我的密码库 "), key_for("我的密码库"));
         assert_ne!(key_for("我的密码库"), key_for("工作库"));
+    }
+
+    #[test]
+    fn content_key_is_name_independent() {
+        use base64::Engine as _;
+        let ck = base64::engine::general_purpose::STANDARD.encode([7u8; 32]);
+        let key = key_for_content(&ck).expect("有内容密钥就有稳定键");
+        assert!(key.starts_with('k'));
+        assert_eq!(key.len(), 1 + 64);
+        // 同一个内容密钥 → 永远同一个键（与库名无关，改名不影响）
+        assert_eq!(key_for_content(&ck), Some(key.clone()));
+        // 空/坏值
+        assert!(key_for_content("").is_none());
+        assert!(key_for_content("   ").is_none());
+        assert!(key_for_content("不是一个 base64!!").is_some());
     }
 
     #[test]

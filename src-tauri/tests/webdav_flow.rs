@@ -159,16 +159,6 @@ fn tmp_root(tag: &str) -> PathBuf {
     root
 }
 
-fn b64(data: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(data)
-}
-
-fn unb64(s: &str) -> Vec<u8> {
-    base64::engine::general_purpose::STANDARD
-        .decode(s.trim())
-        .expect("base64 decode")
-}
-
 // ---------------------------------------------------------------- E2E
 
 #[tokio::test(flavor = "multi_thread")]
@@ -205,10 +195,11 @@ async fn two_devices_sync_through_mock_webdav() {
     assert_eq!(s.direction, "UPLOADED", "首传方向不对：{s:?}");
     assert_eq!(s.message, "已上传到 WebDAV");
     let keys: Vec<String> = files.lock().unwrap().keys().cloned().collect();
+    // 云端文件名按**内容密钥**派生：SafePassword-k<64 位 hex>.spv（改名不变）
     assert!(
         keys.iter()
-            .any(|k| k.contains("/SafePassword-v") && k.ends_with(".spv")),
-        "远端应按库名哈希分文件 SafePassword-<key>.spv，实际：{keys:?}"
+            .any(|k| k.contains("/SafePassword-k") && k.ends_with(".spv")),
+        "远端应按内容密钥分文件 SafePassword-<key>.spv，实际：{keys:?}"
     );
     assert!(
         keys.iter().any(|k| k.ends_with("/SafePassword-index.json")),
@@ -222,7 +213,7 @@ async fn two_devices_sync_through_mock_webdav() {
     assert_eq!(s.direction, "NONE", "二次同步应无变化：{s:?}");
     assert_eq!(s.message, "已是最新状态");
 
-    // ---- 设备 B：导出 A 的加密副本并按同名导入（云端 key 由库名派生，两端同名才指同一文件）
+    // ---- 设备 B：导出 A 的加密副本并按同名导入（云端 key 由内容密钥派生，跨设备/改名都不变）
     let root_b = tmp_root("b");
     let app_b = mock_app(&root_b);
     let export_b64 = c::export_vault_spv(app_a.state::<AppState>()).unwrap();

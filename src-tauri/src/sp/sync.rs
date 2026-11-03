@@ -61,13 +61,21 @@ fn dav_err(err: crate::sp::webdav::WebDavError) -> SyncError {
 pub struct SyncEngine {
     webdav: WebDavClient,
     config: WebDavConfig,
-    /// 云端文件名里的 ASCII 键；只由库名决定，跨设备稳定，且不含中文。
+    /// 云端文件名里的 ASCII 键。**只由内容密钥（contentKey）决定**：
+    /// 内容密钥是建库时随机生成的，跨设备拷贝、跨改名都不变 → 同一密码库永远同一个键。
+    /// 只有当库里还没有内容密钥（极老的库）时才退回按库名派生。
     remote_key: String,
 }
 
 impl SyncEngine {
-    pub fn new(webdav: WebDavClient, config: WebDavConfig, vault_name: &str) -> Self {
-        let remote_key = key_for(vault_name);
+    pub fn new(
+        webdav: WebDavClient,
+        config: WebDavConfig,
+        vault_name: &str,
+        content_key: &str,
+    ) -> Self {
+        let remote_key = crate::sp::cloud::key_for_content(content_key)
+            .unwrap_or_else(|| key_for(vault_name));
         SyncEngine { webdav, config, remote_key }
     }
 
@@ -87,6 +95,14 @@ impl SyncEngine {
             remote_bytes = self
                 .webdav
                 .get(&self.config.legacy_remote_path())
+                .await
+                .map_err(dav_err)?;
+        }
+        if remote_bytes.is_none() {
+            // 旧版本按库名写的文件（内容密钥方案之前上传的），也要能拉下来
+            remote_bytes = self
+                .webdav
+                .get(&self.config.remote_path(&key_for(&local.vault.name)))
                 .await
                 .map_err(dav_err)?;
         }
@@ -128,10 +144,11 @@ impl SyncEngine {
         if remote_bytes.is_none() {
             // 升级迁移：旧版文件只有内容密钥一致（同一密码库）才认领，
             // 否则视为云端还没有本库文件，直接上传本地，避免读到别的密码库的数据。
-            // 依次尝试：旧版单文件 SafePassword.spv → 1.4.1 的按库名键。
+            // 依次尝试：旧版单文件 SafePassword.spv → 1.4.1 的按库名键 → 现在的按库名键（v 前缀）。
             let candidates = [
                 self.config.legacy_remote_path(),
                 self.config.legacy_name_path(&local.vault.name),
+                self.config.remote_path(&key_for(&local.vault.name)),
             ];
             for candidate in candidates.iter().filter(|p| **p != remote_path) {
                 let Some(bytes) = self.webdav.get(candidate).await.map_err(dav_err)? else {
@@ -242,20 +259,29 @@ impl SyncEngine {
             })?,
         };
 
-        // 认出云端里属于本库的文件（改名/迁移）后，决定用哪个名字：
-        // - 本地更晚（本端刚改名）→ 保留本地名，按新名上传；旧键由调用方清理
-        // - 云端更晚（其它设备改名）→ 本地库名跟随云端，并继续沿用云端那个键
+        // 认领到的旧文件名（按库名派生的键）→ 上传成功后做迁移清理，避免云端同名两份
+        let mut migrate_from: Option<String> = None;
         if let Some((key, name, updated)) = adopted {
+            let stable_key = self.remote_key.clone();
             if local.vault.updated_at > updated {
-                remote_key = self.remote_key.clone();
+                remote_key = stable_key.clone();
                 remote_path = self.config.remote_path(&remote_key);
+                if key != remote_key {
+                    migrate_from = Some(key);
+                }
             } else {
                 let trimmed = name.trim().to_string();
                 if !trimmed.is_empty() && trimmed != local.vault.name {
                     local.vault.name = trimmed;
                     local.vault.touch();
                 }
-                remote_key = key.clone();
+                // 云端内容更晚：内容已按旧键读入 remote_bytes，这里把"写"的目标统一切到稳定键
+                if !stable_key.is_empty() && key != stable_key {
+                    migrate_from = Some(key);
+                    remote_key = stable_key;
+                } else {
+                    remote_key = key;
+                }
                 remote_path = self.config.remote_path(&remote_key);
             }
         }
@@ -273,7 +299,7 @@ impl SyncEngine {
         let local_changed = local.vault.updated_at > last;
         let remote_changed = remote.vault.updated_at > last;
 
-        match (local_changed, remote_changed) {
+        let result = match (local_changed, remote_changed) {
             (false, false) => Ok(SyncResult {
                 container: local,
                 direction: SyncDirection::None,
@@ -347,7 +373,32 @@ impl SyncEngine {
                     })
                 }
             },
+        }?;
+
+        // 迁移清理：从"按库名派的旧键"迁到"按内容密钥派生的稳定键"后，
+        // 删掉旧的云端文件并从清单移除旧条目，避免云端出现同名两份。
+        if let Some(old_key) = migrate_from {
+            if matches!(
+                result.direction,
+                SyncDirection::Uploaded | SyncDirection::Merged
+            ) {
+                let old_path = self.config.remote_path(&old_key);
+                let _ = self.webdav.delete(&old_path).await;
+                if let Ok(Some(bytes)) = self.webdav.get(&self.config.manifest_path()).await {
+                    let text = String::from_utf8_lossy(&bytes).to_string();
+                    let mut manifest = CloudManifest::parse(Some(text.as_str()));
+                    let before = manifest.vaults.len();
+                    manifest.vaults.retain(|e| e.key != old_key);
+                    if manifest.vaults.len() != before {
+                        let _ = self
+                            .webdav
+                            .put(&self.config.manifest_path(), manifest.to_json().as_bytes())
+                            .await;
+                    }
+                }
+            }
         }
+        Ok(result)
     }
 
     /// 把本地库强制上传到云端（"云端已删除"弹窗里的"恢复到云端"）：
@@ -455,6 +506,27 @@ mod tests {
         // 1.4.1 旧键：小写、非 ASCII 字母数字转 '-'，落在 <dir>/<key>.sicv
         assert_eq!(config.legacy_name_path("My Vault"), "SafePassword/my-vault.sicv");
         assert_eq!(config.legacy_name_path("!!!"), "SafePassword/vault.sicv");
+    }
+
+    /// 云端文件名只由内容密钥派生：同一密码库改名后文件名不变（改名不会再触发"云端被删除"）。
+    #[test]
+    fn remote_key_follows_content_key_not_name() {
+        use base64::Engine as _;
+        let config = WebDavConfig::default();
+        let content_key = base64::engine::general_purpose::STANDARD.encode([0x42u8; 32]);
+        let key = crate::sp::cloud::key_for_content(&content_key).expect("content key");
+        assert!(key.starts_with('k'));
+        assert_eq!(key.len(), 65);
+        assert_eq!(
+            config.remote_path(&key),
+            format!("SafePassword/SafePassword-{key}.spv")
+        );
+        // 库名怎么改都不影响：键取自内容密钥，与名字无关
+        for name in ["我的密码库", "改名后", "Renamed"] {
+            let engine_key =
+                crate::sp::cloud::key_for_content(&content_key).unwrap_or_else(|| key_for(name));
+            assert_eq!(engine_key, key);
+        }
     }
 
     /// 前端按字符串判断同步方向：必须是 SCREAMING_SNAKE_CASE（曾经 "UPPERCASE"
