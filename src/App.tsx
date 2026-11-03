@@ -418,7 +418,7 @@ export default function App() {
   const handleRestoreLocal = useCallback(
     async (fileName: string, base64Data: string, password: string): Promise<string | null> => {
       try {
-        const base = fileName.replace(/\.(sicv|spv)$/i, "");
+        const base = fileName.replace(/\.spv$/i, "");
         await importVaultBytes(base64Data, password, base || "恢复的密码库");
         await refreshFromBackend();
         setSelectItemId(null);

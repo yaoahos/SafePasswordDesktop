@@ -877,8 +877,8 @@ function DisplayTab({ ctx }: { ctx: AppCtx }) {
 // ---------------------------------------------------------------- 导入与导出（只允许文件选择，不提供文本输入）
 
 function TransferTab({ ctx }: { ctx: AppCtx }) {
-  const [sicvPw, setSicvPw] = useState("");
-  const [sicvName, setSicvName] = useState("");
+  const [spvPw, setSpvPw] = useState("");
+  const [spvName, setSpvName] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -949,24 +949,24 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
       }
     });
 
-  const spvReady = sicvName.trim().length > 0 && sicvPw.length > 0;
+  const spvReady = spvName.trim().length > 0 && spvPw.length > 0;
 
   const importSpv = (f: File) =>
     void run("imp-spv", async () => {
       setTScope("spv");
       setErr(null);
       setMsg(null);
-      if (!sicvName.trim()) throw new Error("请先填写库名称");
-      if (!sicvPw) throw new Error("请先填写主密码");
+      if (!spvName.trim()) throw new Error("请先填写库名称");
+      if (!spvPw) throw new Error("请先填写主密码");
       const buf = await f.arrayBuffer();
       const meta = await importVaultBytes(
         arrayBufferToBase64(buf),
-        sicvPw,
-        sicvName.trim(),
+        spvPw,
+        spvName.trim(),
       );
       await ctx.refreshFromBackend();
-      setSicvPw("");
-      setSicvName("");
+      setSpvPw("");
+      setSpvName("");
       setMsg({ ok: true, text: `已导入密码库「${meta.name}」并切换过去` });
     });
 
@@ -1015,8 +1015,8 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
         <input
           className="input"
           placeholder="导入后的密码库名称"
-          value={sicvName}
-          onChange={(e) => setSicvName(e.target.value)}
+          value={spvName}
+          onChange={(e) => setSpvName(e.target.value)}
         />
       </div>
       <div className="form-row">
@@ -1025,13 +1025,13 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
           className="input"
           type="password"
           placeholder="该备份的主密码"
-          value={sicvPw}
-          onChange={(e) => setSicvPw(e.target.value)}
+          value={spvPw}
+          onChange={(e) => setSpvPw(e.target.value)}
         />
       </div>
       <FilePicker
         label="选择加密备份文件…"
-        accept=".spv,.sicv"
+        accept=".spv"
         disabled={busy !== null}
         blocked={!spvReady}
         onBlocked={() => {

@@ -26,7 +26,7 @@ export function AuthScreens({
   /** 成功返回 null，失败返回后端错误文案 */
   onUnlock: (id: string, password: string) => Promise<string | null>;
   onCreate: (name: string, password: string) => Promise<string | null>;
-  /** 从本地恢复 .sicv/.spv（成功返回 null） */
+  /** 从本地恢复 .spv/.spv（成功返回 null） */
   onRestoreLocal?: (fileName: string, base64Data: string, password: string) => Promise<string | null>;
   /** WebDAV 配置（用于无本地库时从云端恢复） */
   webdav?: WebDavConfig;
@@ -474,7 +474,7 @@ export function AuthScreens({
             <input
               ref={fileRef}
               type="file"
-              accept=".sicv,.spv"
+              accept=".spv"
               style={{ display: "none" }}
               onChange={(e) => {
                 const f = e.target.files?.[0];

@@ -58,7 +58,7 @@ mod tests {
     #[test]
     fn write_creates_overwrites_and_leaves_no_tmp() {
         let dir = std::env::temp_dir().join(format!("sp-fsutil-{}", uuid::Uuid::new_v4()));
-        let path = dir.join("sub").join("a.sicv");
+        let path = dir.join("sub").join("a.spv");
         write_atomic(&path, b"one").unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"one");
         write_atomic(&path, b"two").unwrap();

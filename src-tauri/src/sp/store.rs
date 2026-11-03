@@ -1,5 +1,5 @@
 //! 对齐 Android VaultStore.kt 的保险库存储层：
-//! root/vaults/<vaultId>.sicv、root/vaults/index.json、root/attachments/<vaultId>/。
+//! root/vaults/<vaultId>.spv、root/vaults/index.json、root/attachments/<vaultId>/。
 #![allow(dead_code)]
 
 use crate::sp::container::{ContainerError, VaultContainer};
@@ -62,8 +62,8 @@ impl VaultStore {
         for entry in fs::read_dir(&self.vaults_dir).map_err(io)? {
             let entry = entry.map_err(io)?;
             let file_name = entry.file_name().to_string_lossy().into_owned();
-            // 兼容新旧扩展：当前写 .spv，历史库仍是 .sicv
-            if file_name.ends_with(".spv") || file_name.ends_with(".sicv") {
+            // 只收 .spv 保险库文件
+            if file_name.ends_with(".spv") {
                 files.push(file_name);
             }
         }
@@ -75,9 +75,7 @@ impl VaultStore {
         }
         let known: HashSet<String> = index.vaults.iter().map(|m| m.file_name.clone()).collect();
         for file_name in files {
-            let stem = file_name
-                .strip_suffix(".spv")
-                .or_else(|| file_name.strip_suffix(".sicv"));
+            let stem = file_name.strip_suffix(".spv");
             let Some(stem) = stem else { continue };
             if known.contains(&file_name) {
                 continue;
@@ -327,12 +325,12 @@ mod tests {
     }
 
     #[test]
-    fn list_adopts_orphan_sicv_files() {
+    fn list_adopts_orphan_spv_files() {
         let dir = temp_dir("orphan");
         let store = VaultStore::new(&dir).unwrap();
-        // 手工放一个不在 index 里的 .sicv
+        // 手工放一个不在 index 里的 .spv
         let orphan_id = "vault-0000-0000-0000-00000000or42";
-        let vault_file = dir.join("vaults").join(format!("{orphan_id}.sicv"));
+        let vault_file = dir.join("vaults").join(format!("{orphan_id}.spv"));
         let (_c, meta) = store.create("正规库", "pw").unwrap();
         fs::copy(store.vault_file(&meta), &vault_file).unwrap();
         let metas = store.list().unwrap();

@@ -558,7 +558,7 @@ mod tests {
     fn save_to_writes_and_reopens() {
         let dir = std::env::temp_dir().join(format!("sp-container-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("v.sicv");
+        let path = dir.join("v.spv");
         let mut c = VaultContainer::create(sample_vault(), "pw");
         c.save_to(&path).unwrap();
         let bytes = std::fs::read(&path).unwrap();

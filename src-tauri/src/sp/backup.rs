@@ -1,4 +1,4 @@
-//! 对齐 Android BackupManager.kt：原始复制 .sicv，命名 <safeName>-<yyyyMMdd-HHmmss>.sicv。
+//! 对齐 Android BackupManager.kt：原始复制 .spv，命名 <safeName>-<yyyyMMdd-HHmmss>.spv。
 #![allow(dead_code)]
 
 use std::fs;
@@ -48,9 +48,8 @@ impl BackupManager {
         for entry in fs::read_dir(&self.root).map_err(io)? {
             let entry = entry.map_err(io)?;
             let path = entry.path();
-            // 兼容历史 .sicv 备份
             let ext = path.extension().and_then(|e| e.to_str());
-            if ext != Some("spv") && ext != Some("sicv") {
+            if ext != Some("spv") {
                 continue;
             }
             if let Ok(info) = info_of(&path) {
@@ -136,7 +135,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sp-backup-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let bm = BackupManager::new(&dir).unwrap();
-        // 源保险库文件必须放在备份目录之外（Kotlin list() 只列 backupsDir/*.sicv）
+        // 源保险库文件必须放在备份目录之外（Kotlin list() 只列 backupsDir/*.spv）
         let src_dir = std::env::temp_dir().join(format!("sp-backup-src-{}", std::process::id()));
         let _ = fs::remove_dir_all(&src_dir);
         fs::create_dir_all(&src_dir).unwrap();

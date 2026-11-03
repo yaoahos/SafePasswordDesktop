@@ -724,9 +724,9 @@ mod tests {
             config.manifest_path(),
             "SafePassword/SafePassword-index.json"
         );
-        // 1.4.1 旧键：小写、非 ASCII 字母数字转 '-'，落在 <dir>/<key>.sicv
-        assert_eq!(config.legacy_name_path("My Vault"), "SafePassword/my-vault.sicv");
-        assert_eq!(config.legacy_name_path("!!!"), "SafePassword/vault.sicv");
+        // 1.4.1 旧键：小写、非 ASCII 字母数字转 '-'，落在 <dir>/<key>.spv
+        assert_eq!(config.legacy_name_path("My Vault"), "SafePassword/my-vault.spv");
+        assert_eq!(config.legacy_name_path("!!!"), "SafePassword/vault.spv");
     }
 
     /// 云端文件名只由内容密钥派生：同一密码库改名后文件名不变（改名不会再触发"云端被删除"）。

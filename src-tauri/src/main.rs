@@ -11,7 +11,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // 数据根目录：<appData>/com.yaoahos.safepassword.desktop
-            //   vaults/<id>.spv   保险库（兼容历史 .sicv）
+            //   vaults/<id>.spv   保险库（兼容历史 v1 容器）
             //   backups/          备份
             //   settings.json      主题/HIBP key/WebDAV 配置
             let dir = app
