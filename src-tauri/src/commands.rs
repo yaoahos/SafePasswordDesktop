@@ -1075,7 +1075,7 @@ async fn run_sync(
         engine.pull_remote(container, &password).await
     } else {
         engine
-            .sync(container, &password, strategy.unwrap_or(ConflictStrategy::Detect))
+            .sync(container, &password, strategy.unwrap_or(ConflictStrategy::Merge))
             .await
     };
     let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;

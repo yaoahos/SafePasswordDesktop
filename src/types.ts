@@ -168,7 +168,7 @@ export interface AppSettings {
   lastVaultId: string | null;
 }
 
-export type SyncStrategy = "DETECT" | "KEEP_LOCAL" | "KEEP_REMOTE" | "MERGE";
+export type SyncStrategy = "KEEP_LOCAL" | "MERGE";
 
 /** 对齐手机端 SortMode（仅会话内，不持久化） */
 export type SortMode = "TITLE" | "UPDATED" | "CREATED";

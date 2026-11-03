@@ -239,18 +239,16 @@ async fn two_devices_sync_through_mock_webdav() {
         "同步库".into(),
     )
     .unwrap();
-    // 3. B 首同步：import 会复制 A 的 lastSyncedAt 并 bump updatedAt → 判定"本地更新"→
-    //    UPLOADED（与远端内容相同，属无害同内容覆盖，与 Kotlin 行为一致）
+    // 3. B 首同步：内容与云端完全一致（import 只换了本地库 id），写回抑制生效 → NONE，不上传
     let s = c::webdav_sync(app_b.state::<AppState>(), cfg(), Some(ConflictStrategy::Merge))
         .await
         .unwrap();
-    assert_eq!(s.direction, "UPLOADED", "B 首同步应本地更新上传：{s:?}");
-    assert_eq!(s.message, "已上传本地更新");
+    assert_eq!(s.direction, "NONE", "B 首同步内容未变应跳过上传：{s:?}");
+    assert_eq!(s.message, "已是最新状态");
     let vb = c::current_vault(app_b.state::<AppState>()).unwrap().unwrap();
     assert!(vb.items.iter().any(|i| i.title == "GitHub"));
 
-    // 4. A 加第二条 → 用 KeepLocal 覆盖上传（此刻两端 updatedAt 都新，DETECT 会报冲突；
-    //    真实场景自动同步也走 KEEP_LOCAL）→ B 下载到 2 条
+    // 4. A 加第二条 → 用 KeepLocal 覆盖上传（显式"本地优先"策略）→ B 下载到 2 条
     let item2 = VaultItem {
         id: "item-a2".to_string(),
         title: "Second".to_string(),
@@ -278,6 +276,8 @@ async fn two_devices_sync_through_mock_webdav() {
         .find(|i| i.id == "item-a1")
         .expect("B 有 item-a1");
     edited.title = "GitHub-改".to_string();
+    // 界面保存时会写 updatedAt（ItemDetail 里 onSave 显式设置），同步靠它判断谁更新
+    edited.updated_at = now_ms();
     c::put_item(app_b.state::<AppState>(), edited).unwrap();
     // 只有本机改动、云端没变：HEAD 比对后就上传，不必先下载整包
     let gets_before = GETS.load(Ordering::Relaxed);
