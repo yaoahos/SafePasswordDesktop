@@ -226,6 +226,10 @@ pub fn attach_window_state(app: &AppHandle, path: PathBuf) {
         SAVED.store(false, Ordering::Relaxed);
     }
 
+    // 窗口在配置里是隐藏创建的：位置/尺寸恢复完再显示，避免"先居中再跳位"的闪动。
+    let _ = window.show();
+    let _ = window.set_focus();
+
     let tracked = window.clone();
     window.on_window_event(move |event| match event {
         WindowEvent::Moved(_) | WindowEvent::Resized(_) => remember(&tracked, event),
