@@ -70,10 +70,10 @@ fn ui_full_flow_roundtrip() {
     let v = c::put_item(app.state::<AppState>(), item).unwrap();
     assert_eq!(v.items.len(), 1);
 
-    // 3. 导出 .spv → 独立容器打开（SICV 魔数 + 条目还在）
+    // 3. 导出 .spv → 独立容器打开（SPV 魔数 + 条目还在）
     let spv = c::export_vault_spv(app.state::<AppState>()).unwrap();
     let bytes = unb64(&spv);
-    assert_eq!(&bytes[..4], b"SICV");
+    assert_eq!(&bytes[..3], b"SPV");
     let c2 = VaultContainer::open(&bytes, "pw-主密码123🚀").unwrap();
     assert_eq!(c2.vault.items.len(), 1);
     assert_eq!(c2.vault.items[0].title, "GitHub");

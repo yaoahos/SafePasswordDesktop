@@ -1,7 +1,7 @@
 //! 加密保险库容器，逐条对应 Kotlin core/crypto/VaultContainer.kt。
 //!
 //! 文件结构（大端）：
-//! magic "SICV" | version | iterations | salt_len | salt | wrapped_len | wrapped | payload_len | payload
+//! magic "SPV" | version | iterations | salt_len | salt | wrapped_len | wrapped | payload_len | payload
 //!
 //! 主密码只用于派生 KEK；真正加密数据的是随机 DEK。修改主密码只需重新包裹 DEK。
 //!
@@ -19,11 +19,9 @@ use crate::sp::fsutil::write_atomic;
 use crate::sp::model::Vault;
 use std::path::Path;
 
-const MAGIC: &[u8; 4] = b"SICV";
-/// 当前写出的版本：payload 先 gzip 再加密。
+const MAGIC: &[u8; 3] = b"SPV";
+/// 当前（也是唯一支持的）版本：payload 先 gzip 再加密。
 const VERSION: i32 = 2;
-/// 仍可读取的旧版本：payload 是明文 JSON（不压缩）。
-const VERSION_PLAIN: i32 = 1;
 const SALT_BYTES: usize = 16;
 const MIN_ITERATIONS: i32 = 10_000;
 const MAX_ITERATIONS: i32 = 10_000_000;
@@ -31,7 +29,7 @@ const MAX_ITERATIONS: i32 = 10_000_000;
 const MAX_PAYLOAD_BYTES: i32 = 64 * 1024 * 1024;
 /// 解压后的 JSON 上限，防止压缩炸弹把内存撑爆。
 const MAX_PLAINTEXT_BYTES: usize = 256 * 1024 * 1024;
-const PAYLOAD_AAD: &[u8] = b"SICV-PAYLOAD";
+const PAYLOAD_AAD: &[u8] = b"SPV-PAYLOAD";
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ContainerError {
@@ -105,12 +103,12 @@ impl<'a> Reader<'a> {
 
 fn read_header(bytes: &[u8]) -> Result<Header, String> {
     let mut r = Reader::new(bytes);
-    let magic = r.take(4)?;
+    let magic = r.take(3)?;
     if magic != MAGIC {
         return Err("不是有效的保险库文件".to_string());
     }
     let version = r.i32()?;
-    if version != VERSION_PLAIN && version != VERSION {
+    if version != VERSION {
         return Err(format!("不支持的数据库版本：{version}"));
     }
     let iterations = r.i32()?;
@@ -186,13 +184,11 @@ impl VaultContainer {
         wipe(&mut kek);
         let mut sealed =
             decrypt(&dek, &header.payload, PAYLOAD_AAD).map_err(|_| ContainerError::WrongPassword)?;
-        // v2：密文解开后是 gzip 流；v1：直接就是 JSON
-        let mut plain = if header.version == VERSION {
+        // 载荷一律是 gzip 流
+        let mut plain = {
             let unpacked = decompress(&sealed).map_err(ContainerError::Format)?;
             wipe(&mut sealed);
             unpacked
-        } else {
-            std::mem::take(&mut sealed)
         };
         // Kotlin: plain.toString(Charsets.UTF_8) 再解析 —— 非法 UTF-8 会替换成 U+FFFD
         let parsed = {
@@ -223,10 +219,9 @@ impl VaultContainer {
         let payload = encrypt(&self.dek, &plain, PAYLOAD_AAD).expect("AES-GCM 加密不会失败");
         wipe(&mut plain);
         let mut out = Vec::with_capacity(
-            16 + self.salt.len() + 4 + self.wrapped_dek.len() + 4 + payload.len(),
+            15 + self.salt.len() + 4 + self.wrapped_dek.len() + 4 + payload.len(),
         );
         out.extend_from_slice(MAGIC);
-        // 打开旧库（v1）后再保存，一律升级为当前版本
         out.extend_from_slice(&VERSION.to_be_bytes());
         out.extend_from_slice(&self.iterations.to_be_bytes());
         out.extend_from_slice(&(self.salt.len() as i32).to_be_bytes());
@@ -346,14 +341,14 @@ mod tests {
         let mut c = VaultContainer::create(sample_vault(), "口令123");
         let bytes = c.to_bytes();
 
-        // 文件头布局（v2 = gzip 后加密）
-        assert_eq!(&bytes[0..4], b"SICV");
-        assert_eq!(i32::from_be_bytes(bytes[4..8].try_into().unwrap()), 2);
+        // 文件头布局：magic(3) + version + iterations + salt_len + salt
+        assert_eq!(&bytes[0..3], b"SPV");
+        assert_eq!(i32::from_be_bytes(bytes[3..7].try_into().unwrap()), 2);
         assert_eq!(
-            i32::from_be_bytes(bytes[8..12].try_into().unwrap()),
+            i32::from_be_bytes(bytes[7..11].try_into().unwrap()),
             PBKDF2_ITERATIONS
         );
-        let salt_len = i32::from_be_bytes(bytes[12..16].try_into().unwrap());
+        let salt_len = i32::from_be_bytes(bytes[11..15].try_into().unwrap());
         assert_eq!(salt_len, 16);
 
         let mut c2 = VaultContainer::open(&bytes, "口令123").unwrap();
@@ -393,29 +388,29 @@ mod tests {
         bytes[0] = b'S';
 
         // 版本不支持
-        bytes[4..8].copy_from_slice(&3i32.to_be_bytes());
+        bytes[3..7].copy_from_slice(&3i32.to_be_bytes());
         let err = VaultContainer::open(&bytes, "pw").unwrap_err();
         assert_eq!(err.to_string(), "无法读取数据库文件：不支持的数据库版本：3");
-        bytes[4..8].copy_from_slice(&2i32.to_be_bytes());
+        bytes[3..7].copy_from_slice(&2i32.to_be_bytes());
 
         // 迭代次数异常
-        bytes[8..12].copy_from_slice(&5_000i32.to_be_bytes());
+        bytes[7..11].copy_from_slice(&5_000i32.to_be_bytes());
         let err = VaultContainer::open(&bytes, "pw").unwrap_err();
         assert_eq!(err.to_string(), "无法读取数据库文件：PBKDF2 迭代次数异常");
-        bytes[8..12].copy_from_slice(&PBKDF2_ITERATIONS.to_be_bytes());
+        bytes[7..11].copy_from_slice(&PBKDF2_ITERATIONS.to_be_bytes());
 
         // 截断（EOF → "null"）
         let err = VaultContainer::open(&bytes[..10], "pw").unwrap_err();
         assert_eq!(err.to_string(), "无法读取数据库文件：null");
 
         // salt 长度越界
-        bytes[12..16].copy_from_slice(&7i32.to_be_bytes());
+        bytes[11..15].copy_from_slice(&7i32.to_be_bytes());
         let err = VaultContainer::open(&bytes, "pw").unwrap_err();
         assert_eq!(err.to_string(), "无法读取数据库文件：salt 长度异常");
-        bytes[12..16].copy_from_slice(&16i32.to_be_bytes());
+        bytes[11..15].copy_from_slice(&16i32.to_be_bytes());
 
         // 密文长度声明超出文件实际大小
-        let wrapped_len_offset = 16 + 16; // magic+version+iterations+salt_len(16) + salt(16)
+        let wrapped_len_offset = 15 + 16; // magic(3)+version+iterations+salt_len(16) + salt(16)
         let w_len = i32::from_be_bytes(
             bytes[wrapped_len_offset..wrapped_len_offset + 4]
                 .try_into()
@@ -437,7 +432,7 @@ mod tests {
         let mut c = VaultContainer::create(sample_vault(), "pw");
         let mut bytes = c.to_bytes();
         // 找到 payload 起点并篡改一个字节 → GCM 解密失败 → WrongPassword（与 Kotlin 一致）
-        let w_offset = 16 + 16;
+        let w_offset = 15 + 16; // magic(3)+version+iterations+salt_len(4) + salt(16)
         let w_len = i32::from_be_bytes(bytes[w_offset..w_offset + 4].try_into().unwrap()) as usize;
         let p_offset = w_offset + 4 + w_len;
         let p_len = i32::from_be_bytes(bytes[p_offset..p_offset + 4].try_into().unwrap()) as usize;
@@ -473,42 +468,6 @@ mod tests {
         let _ = c.to_bytes();
         assert!(c.password_correct("pw123"));
         assert!(!c.password_correct("nope"));
-    }
-
-    /// 手工拼一个 v1（未压缩）容器，验证读旧格式的兼容路径。
-    fn legacy_v1_bytes(c: &VaultContainer) -> Vec<u8> {
-        let mut json = serde_json::to_vec(&c.vault).unwrap();
-        let payload = encrypt(&c.dek, &json, PAYLOAD_AAD).unwrap();
-        wipe(&mut json);
-        let mut out = Vec::new();
-        out.extend_from_slice(MAGIC);
-        out.extend_from_slice(&VERSION_PLAIN.to_be_bytes());
-        out.extend_from_slice(&c.iterations.to_be_bytes());
-        out.extend_from_slice(&(c.salt.len() as i32).to_be_bytes());
-        out.extend_from_slice(&c.salt);
-        out.extend_from_slice(&(c.wrapped_dek.len() as i32).to_be_bytes());
-        out.extend_from_slice(&c.wrapped_dek);
-        out.extend_from_slice(&(payload.len() as i32).to_be_bytes());
-        out.extend_from_slice(&payload);
-        out
-    }
-
-    #[test]
-    fn legacy_v1_file_still_opens() {
-        let c = VaultContainer::create(sample_vault(), "pw");
-        let v1 = legacy_v1_bytes(&c);
-        assert_eq!(i32::from_be_bytes(v1[4..8].try_into().unwrap()), 1);
-
-        let mut opened = VaultContainer::open(&v1, "pw").unwrap();
-        assert_eq!(opened.vault.items.len(), 1);
-        assert_eq!(opened.version(), 1);
-
-        // 旧库再保存会自动升级成 v2
-        let upgraded = opened.to_bytes();
-        assert_eq!(i32::from_be_bytes(upgraded[4..8].try_into().unwrap()), 2);
-        let again = VaultContainer::open(&upgraded, "pw").unwrap();
-        assert_eq!(again.version(), 2);
-        assert_eq!(again.vault, c.vault);
     }
 
     #[test]

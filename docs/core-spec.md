@@ -48,14 +48,14 @@
 
 | 用途 | AAD 字节 | 出处 |
 |---|---|---|
-| DEK 包裹（key wrap） | ASCII `"SICV-WRAP"`（UTF-8 编码，9 字节） | Crypto.kt:54,57 |
-| 保险库 payload | ASCII `"SICV-PAYLOAD"`（13 字节） | VaultContainer.kt:93,49,122 |
+| DEK 包裹（key wrap） | ASCII `"SPV-WRAP"`（UTF-8 编码，8 字节） | Crypto.kt:54,57 |
+| 保险库 payload | ASCII `"SPV-PAYLOAD"`（11 字节） | VaultContainer.kt:93,49,122 |
 | 附件 | 附件 id 的 UTF-8 字节（UUID 字符串，36 字节） | AttachmentStore.kt:30,47 |
 
 ### 1.3 密钥包裹（DEK/KEK 两层结构）
 
 - 主密码只用于派生 **KEK**；实际加密数据的是每次建库随机生成的 **DEK**（32 字节，VaultContainer.kt:98）。
-- `wrapDek(kek, dek) = AES-GCM(kek, dek.encoded, aad="SICV-WRAP")` → 12 + 32 + 16 = **60 字节**
+- `wrapDek(kek, dek) = AES-GCM(kek, dek.encoded, aad="SPV-WRAP")` → 12 + 32 + 16 = **60 字节**
   （Crypto.kt:53-54）。
 - `unwrapDek` 解出后要求长度恰好 32 字节，否则抛 `IllegalArgumentException("数据密钥长度无效")`（Crypto.kt:58）。
 - 修改主密码 = 换 salt + 重新派生 KEK + 重新包裹 DEK；**payload 密文完全不变**
@@ -93,25 +93,25 @@
 
 | 偏移 | 内容 | 大小 | 说明 |
 |---|---|---|---|
-| 0 | magic | 4 | ASCII `SICV`（0x53 0x49 0x43 0x56，VaultContainer.kt:87） |
-| 4 | version | 4 | 大端 int32：`2` = payload 先 gzip 再加密（**当前写入版本**）；`1` = payload 直接是 JSON（旧格式，仅读） |
-| 8 | iterations | 4 | 大端 int32，读取时校验 `10_000 <= n <= 10_000_000`（VaultContainer.kt:152） |
-| 12 | salt_len | 4 | 大端 int32，校验 8 ≤ n ≤ 64（VaultContainer.kt:155） |
-| 16 | salt | salt_len | 随机 salt（新建时 16 字节） |
+| 0 | magic | 3 | ASCII `SPV`（0x53 0x50 0x56） |
+| 3 | version | 4 | 大端 int32：`2` = payload 先 gzip 再加密（**唯一支持的版本**） |
+| 7 | iterations | 4 | 大端 int32，读取时校验 `10_000 <= n <= 10_000_000`（VaultContainer.kt:152） |
+| 11 | salt_len | 4 | 大端 int32，校验 8 ≤ n ≤ 64（VaultContainer.kt:155） |
+| 15 | salt | salt_len | 随机 salt（新建时 16 字节） |
 | … | wrapped_dek_len | 4 | 大端 int32，校验 40 ≤ n ≤ 256（VaultContainer.kt:156） |
-| … | wrapped_dek | wrapped_dek_len | `IV(12)||GCM(DEK)||tag`，AAD=`SICV-WRAP`，通常 60 字节 |
+| … | wrapped_dek | wrapped_dek_len | `IV(12)||GCM(DEK)||tag`，AAD=`SPV-WRAP`，通常 60 字节 |
 | … | payload_len | 4 | 大端 int32，校验 1 ≤ n ≤ 64 MiB（`MAX_PAYLOAD_BYTES = 64*1024*1024`，VaultContainer.kt:92,157） |
-| … | payload | payload_len | `IV(12)||GCM(明文)||tag`，AAD=`SICV-PAYLOAD`；明文见下方版本说明 |
+| … | payload | payload_len | `IV(12)||GCM(明文)||tag`，AAD=`SPV-PAYLOAD`；明文见下方版本说明 |
 
-**版本 1 / 2 的差别只在 payload 的明文部分**（头部布局完全一致）：
+**版本 2（当前唯一格式）**：payload 明文 = **gzip(JSON)**，即 `Vault` 的 JSON 先做一遍 gzip（RFC 1952），再交给 AES-GCM。
+gzip 是自描述格式，压缩级别不影响解码，但**两端都必须实现"先解压再解析 JSON"**。
+实测 10k 条目的库从 8.87 MB 降到约 0.55 MB（≈16×）。
 
-- `version = 1`：payload 明文 = `Vault` 的 JSON（UTF-8）。
-- `version = 2`：payload 明文 = **gzip(JSON)**，即 `Vault` 的 JSON 先做一遍 gzip（RFC 1952），再交给 AES-GCM。
-  gzip 是自描述格式，压缩级别不影响解码，但**两端都必须实现"先解压再解析 JSON"**。
-  实测 10k 条目的库从 8.87 MB 降到约 0.55 MB（≈16×）。
-- 读取端必须同时接受 1 和 2；写入端当前一律写 2（打开旧库后再次保存即自动升级）。
-  桌面端与 Android 端**必须同时升级**：只升级一端会导致另一端读云端文件时报
-  `不支持的数据库版本：2`。
+- **不再兼容旧格式**：magic 由 4 字节 `SICV` 改为 3 字节 `SPV`，同时删除 `version = 1`（payload 直接是
+  明文 JSON）的读取分支。旧的 `SICV` 容器会报 `无法读取数据库文件：不是有效的保险库文件`，
+  `version != 2` 会报 `不支持的数据库版本：N`。
+- 桌面端与 Android 端仍**必须同时升级**：只升级一端会导致另一端读云端文件时报错。
+- gzip 解压后的明文上限为 256 MiB，超出报 `数据库内容解压后过大`（防压缩炸弹）。
 
 - 打开流程（VaultContainer.kt:109-135）：读头 → 用 header 的 salt/iterations 派生 KEK →
   `unwrapDek` 失败 ⇒ `WrongPasswordException("主密码错误，或数据库文件已损坏")`（VaultContainer.kt:17）；
@@ -792,7 +792,7 @@ base64、`login` 字段名的邮箱识别等都有测试断言，可直接作为
    salt, iterations, &mut okm)`，输出 32 字节。**iterations 必须取文件头存储值**，不是常量
    210000。口令按 UTF-8 字节（见 1.1 的说明，用 T1 向量验证）。
 3. **AES-GCM**：`aes-gcm` crate（`Aes256Gcm`，96-bit nonce）。输出布局 `nonce(12) || ct || tag(16)`。
-   AAD 必须逐字节一致：`b"SICV-WRAP"`、`b"SICV-PAYLOAD"`、附件 id 的 UTF-8。
+   AAD 必须逐字节一致：`b"SPV-WRAP"`、`b"SPV-PAYLOAD"`、附件 id 的 UTF-8。
 4. **大端 int32**：`DataInputStream.readInt()` 是大端。用 `u32::from_be_bytes` / `to_be_bytes`
    （长度字段用 `u32`，读回后做范围校验）。
 5. **JSON**：`serde_json` + `serde`。字段名逐个按第 3 节抄写（已是 camelCase，勿再 rename_all）；
