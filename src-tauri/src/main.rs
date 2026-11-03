@@ -10,7 +10,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // 数据根目录：<安装目录>/data（便携语义；不可写时回落旧的应用数据目录）
-            //   vaults/<id>.spv   保险库（兼容历史 v1 容器）
+            //   vaults/<id>.spv   保险库（容器 magic "SPV"，version 2）
             //   backups/          备份
             //   settings.json      主题/HIBP key/WebDAV 配置
             //   window.json        上次窗口位置与尺寸

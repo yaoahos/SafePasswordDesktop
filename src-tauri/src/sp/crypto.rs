@@ -2,7 +2,7 @@
 //!
 //! - PBKDF2-HMAC-SHA256，默认 210,000 迭代（打开文件时以文件头存储值为准）
 //! - AES-256-GCM，12 字节随机 IV，128 位 tag，输出 IV||CT||TAG
-//! - AAD：包裹 DEK 用 "SICV-WRAP"，payload 用 "SICV-PAYLOAD"，附件用附件 id
+//! - AAD：包裹 DEK 用 "SPV-WRAP"，payload 用 "SPV-PAYLOAD"，附件用附件 id
 
 use aes_gcm::aead::{Aead, Payload};
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
@@ -18,7 +18,7 @@ pub const IV_BYTES: usize = 12;
 pub const TAG_BYTES: usize = 16;
 pub const KEY_BYTES: usize = 32;
 
-pub const WRAP_AAD: &[u8] = b"SICV-WRAP";
+pub const WRAP_AAD: &[u8] = b"SPV-WRAP";
 
 pub fn random_bytes(len: usize) -> Vec<u8> {
     let mut buf = vec![0u8; len];
