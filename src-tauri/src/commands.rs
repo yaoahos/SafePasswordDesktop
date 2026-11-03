@@ -26,7 +26,7 @@ use crate::sp::xml;
 use crate::sp::security::{self, SecurityReport};
 use crate::sp::store::VaultStore;
 use crate::sp::strength::{self, StrengthResult};
-use crate::sp::sync::{ConflictStrategy, SyncEngine, SyncResult};
+use crate::sp::sync::{ConflictStrategy, SyncCacheEntry, SyncEngine, SyncResult};
 use crate::sp::webdav::{WebDavClient, WebDavConfig};
 
 type CmdResult<T> = Result<T, String>;
@@ -64,6 +64,10 @@ pub struct AppStateInner {
     pub last_remote_mtime: i64,
     /// 自动拉取：上次检查时间（对齐 Android lastPullCheckAt，防坚果云限流）
     pub last_pull_check_at: i64,
+    /// 同步缓存（按云端键）：版本指纹 + 内容指纹，用来跳过无谓的整包下载与重传。
+    /// 只存指纹，不含任何密钥或明文内容。
+    pub sync_cache: HashMap<String, SyncCacheEntry>,
+    pub sync_cache_path: PathBuf,
 }
 
 pub struct AppState {
@@ -128,6 +132,11 @@ impl AppState {
         // 敏感字段落盘是 DPAPI 密文，读入时解码为内存明文（旧版明文无前缀原样通过）
         settings.hibp_api_key = dpapi::decode_secret(&settings.hibp_api_key);
         settings.webdav.password = dpapi::decode_secret(&settings.webdav.password);
+        let sync_cache_path = data_root.join("sync-cache.json");
+        let sync_cache: HashMap<String, SyncCacheEntry> = fs::read_to_string(&sync_cache_path)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
         Ok(AppState {
             inner: Mutex::new(AppStateInner {
                 data_root: data_root.clone(),
@@ -137,6 +146,8 @@ impl AppState {
                 settings_path,
                 last_remote_mtime: 0,
                 last_pull_check_at: 0,
+                sync_cache,
+                sync_cache_path,
             }),
         })
     }
@@ -150,6 +161,13 @@ impl AppStateInner {
         s.webdav.password = dpapi::encode_secret(&s.webdav.password);
         let text = serde_json::to_string_pretty(&s).map_err(err)?;
         write_atomic(&self.settings_path, text.as_bytes()).map_err(err)
+    }
+
+    /// 同步缓存落盘。写失败不致命：下一次同步只是退化成完整流程（下载整包）。
+    fn persist_sync_cache(&self) {
+        if let Ok(text) = serde_json::to_string(&self.sync_cache) {
+            let _ = write_atomic(&self.sync_cache_path, text.as_bytes());
+        }
     }
 
     fn backups_dir(&self) -> PathBuf {
@@ -939,14 +957,25 @@ pub fn cloud_key(state: State<AppState>, name: String) -> CmdResult<String> {
         .unwrap_or_else(|| crate::sp::cloud::key_for(&name)))
 }
 
+/// 同步缓存用的键：与云端文件名同源（内容密钥优先），改名不影响。
+fn cloud_cache_key(vault: &Vault) -> String {
+    crate::sp::cloud::key_for_content(&vault.content_key).unwrap_or_else(|| key_for(&vault.name))
+}
+
 fn build_engine(inner: &AppStateInner, config: &WebDavConfig) -> CmdResult<SyncEngine> {
     let cur = inner.current.as_ref().ok_or(NO_OPEN_VAULT)?;
     let client = WebDavClient::new(config.clone()).map_err(err)?;
+    let cache = inner
+        .sync_cache
+        .get(&cloud_cache_key(&cur.container.vault))
+        .cloned()
+        .unwrap_or_default();
     Ok(SyncEngine::new(
         client,
         config.clone(),
         &cur.container.vault.name,
         &cur.container.vault.content_key,
+        cache,
     ))
 }
 
@@ -957,7 +986,7 @@ async fn run_sync(
     pull: bool,
 ) -> CmdResult<SyncSummary> {
     // 引擎构建（需要引用 current），随后把 current 整体取出，await 期间不碰锁。
-    let (engine, cur) = {
+    let (mut engine, cur) = {
         let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
         let engine = build_engine(&inner, &config)?;
         let cur = inner.current.take().ok_or(NO_OPEN_VAULT)?;
@@ -989,6 +1018,12 @@ async fn run_sync(
                 .store
                 .save(&mut restored.container, &restored.meta)
                 .map_err(err)?;
+            // 记下这次的版本指纹与内容指纹，下次同步先用 HEAD 比对再决定要不要下载
+            inner.sync_cache.insert(
+                cloud_cache_key(&restored.container.vault),
+                engine.cache_entry(),
+            );
+            inner.persist_sync_cache();
             inner.current = Some(restored);
             Ok(summary)
         }
@@ -1032,7 +1067,7 @@ pub async fn webdav_restore_to_cloud(
     state: State<'_, AppState>,
     config: WebDavConfig,
 ) -> CmdResult<SyncSummary> {
-    let (engine, cur) = {
+    let (mut engine, cur) = {
         let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
         let engine = build_engine(&inner, &config)?;
         let cur = inner.current.take().ok_or(NO_OPEN_VAULT)?;
@@ -1057,6 +1092,11 @@ pub async fn webdav_restore_to_cloud(
                 .store
                 .save(&mut restored.container, &restored.meta)
                 .map_err(err)?;
+            inner.sync_cache.insert(
+                cloud_cache_key(&restored.container.vault),
+                engine.cache_entry(),
+            );
+            inner.persist_sync_cache();
             inner.current = Some(restored);
             Ok(summary)
         }
@@ -1086,27 +1126,36 @@ pub async fn webdav_pull_if_changed(
     if !config.is_configured() {
         return Ok(None);
     }
-    let (name, last_synced, interval, content_key) = {
+    let (name, last_synced, interval, content_key, cached_rev, cached_size) = {
         let inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
         let cur = match inner.current.as_ref() {
             Some(c) => c,
             None => return Ok(None),
         };
+        let key = cloud_cache_key(&cur.container.vault);
+        let cached = inner.sync_cache.get(&key);
         (
             cur.container.vault.name.clone(),
             cur.container.vault.last_synced_at,
             inner.settings.pull_interval_seconds,
             cur.container.vault.content_key.clone(),
+            cached.and_then(|c| c.rev.clone()),
+            cached.map(|c| c.rev.as_ref().map(|r| r.size).unwrap_or(0)).unwrap_or(0),
         )
     };
     if interval <= 0 {
         return Ok(None);
     }
+    // 自适应间隔：库越大，检查越稀（坚果云免费版 600 次 / 30 分钟、下载 3 GB / 月）。
+    // 8.9 MB 的库 ≈ 4.5 分钟一次；小库保持用户设置的 60 秒。
+    let size_mb = cached_size.max(0) as f64 / 1_048_576.0;
+    let adaptive = (30.0 * size_mb).clamp(60.0, 900.0) as i64;
+    let effective = i64::from(interval).max(adaptive);
     let now = now_ms();
     {
         // 限流（坚果云免费版 600 次 / 30 分钟）：先记时间再发请求
         let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
-        if now - inner.last_pull_check_at < i64::from(interval) * 1_000 {
+        if now - inner.last_pull_check_at < effective * 1_000 {
             return Ok(None);
         }
         inner.last_pull_check_at = now;
@@ -1122,16 +1171,20 @@ pub async fn webdav_pull_if_changed(
         None => true,
         Some(s) => {
             let mtime = s.last_modified as i64;
-            let changed = {
-                let inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
-                if mtime <= 0 {
-                    // 服务器没给 Last-Modified，只能保守地认为有变化
-                    true
-                } else if inner.last_remote_mtime <= 0 {
-                    // 首次检查：比本机上次同步时间新才算有更新
-                    mtime > last_synced
-                } else {
-                    mtime != inner.last_remote_mtime
+            let changed = match cached_rev.as_ref() {
+                // 有版本指纹时直接比 ETag（最准，不受服务器时间精度影响）
+                Some(rev) => !rev.matches(&s),
+                None => {
+                    let inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+                    if mtime <= 0 {
+                        // 服务器没给 Last-Modified，只能保守地认为有变化
+                        true
+                    } else if inner.last_remote_mtime <= 0 {
+                        // 首次检查：比本机上次同步时间新才算有更新
+                        mtime > last_synced
+                    } else {
+                        mtime != inner.last_remote_mtime
+                    }
                 }
             };
             {

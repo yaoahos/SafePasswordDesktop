@@ -8,12 +8,71 @@
 #![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::sp::cloud::{key_for, CloudManifest};
 use crate::sp::container::VaultContainer;
+use crate::sp::crypto::to_hex;
 use crate::sp::merger::merge;
-use crate::sp::model::now_ms;
-use crate::sp::webdav::{WebDavClient, WebDavConfig};
+use crate::sp::model::{now_ms, Vault};
+use crate::sp::webdav::{RemoteStat, WebDavClient, WebDavConfig};
+
+/// 云端版本的指纹：HEAD 拿到的 ETag / Last-Modified / Content-Length。
+///
+/// 用途：同步前先发一个 HEAD（约 200 字节），和上次同步记下的指纹比对，
+/// 一致就说明云端没变，可以直接跳过整包 GET（大库省下数 MB 下载）。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RemoteRev {
+    pub etag: String,
+    pub last_modified: i64,
+    pub size: i64,
+}
+
+impl RemoteRev {
+    pub fn from_stat(stat: &RemoteStat) -> Self {
+        RemoteRev {
+            etag: stat.etag.clone().unwrap_or_default(),
+            last_modified: stat.last_modified as i64,
+            size: stat.size,
+        }
+    }
+
+    /// 服务器给了 ETag 就只认 ETag（坚果云、Nextcloud 都稳定返回）；
+    /// 没给才退回 (Last-Modified, Content-Length) 组合。
+    pub fn matches(&self, stat: &RemoteStat) -> bool {
+        let etag = stat.etag.clone().unwrap_or_default();
+        if !self.etag.is_empty() && !etag.is_empty() {
+            return self.etag == etag;
+        }
+        self.last_modified == stat.last_modified as i64 && self.size == stat.size
+    }
+}
+
+/// 每个密码库在本地记的同步状态（按云端键存放，改名不影响）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SyncCacheEntry {
+    /// 上次与云端一致时的版本指纹；`None` = 还没有可用指纹（下一次走完整流程）
+    pub rev: Option<RemoteRev>,
+    /// 上次成功同步时的内容指纹，用来抑制"内容没变却整包重传"
+    pub content_hash: String,
+}
+
+/// 同步意义上的内容指纹：抹掉每次同步都会变、但用户不可见的字段。
+///
+/// `last_synced_at` / `device_id` / `revision` 变化不该算"内容变了"，
+/// 否则每次同步都会重新上传一遍整个库。
+pub fn content_hash(vault: &Vault) -> String {
+    let mut copy = vault.clone();
+    copy.last_synced_at = 0;
+    copy.device_id.clear();
+    copy.revision = 0;
+    match serde_json::to_vec(&copy) {
+        Ok(bytes) => to_hex(&Sha256::digest(&bytes)),
+        Err(_) => String::new(),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -65,6 +124,8 @@ pub struct SyncEngine {
     /// 内容密钥是建库时随机生成的，跨设备拷贝、跨改名都不变 → 同一密码库永远同一个键。
     /// 只有当库里还没有内容密钥（极老的库）时才退回按库名派生。
     remote_key: String,
+    /// 上次同步缓存（版本指纹 + 内容指纹），同步成功后由调用方持久化。
+    cache: SyncCacheEntry,
 }
 
 impl SyncEngine {
@@ -73,19 +134,25 @@ impl SyncEngine {
         config: WebDavConfig,
         vault_name: &str,
         content_key: &str,
+        cache: SyncCacheEntry,
     ) -> Self {
         let remote_key = crate::sp::cloud::key_for_content(content_key)
             .unwrap_or_else(|| key_for(vault_name));
-        SyncEngine { webdav, config, remote_key }
+        SyncEngine { webdav, config, remote_key, cache }
     }
 
     pub fn remote_key(&self) -> &str {
         &self.remote_key
     }
 
+    /// 同步结束后的缓存快照，调用方负责落盘。
+    pub fn cache_entry(&self) -> SyncCacheEntry {
+        self.cache.clone()
+    }
+
     /// 强制用云端覆盖本地，无视时间戳（WebDAV 界面的"拉取云端数据"）。
     pub async fn pull_remote(
-        &self,
+        &mut self,
         local: VaultContainer,
         password: &str,
     ) -> Result<SyncResult, SyncError> {
@@ -135,6 +202,9 @@ impl SyncEngine {
         let mut downloaded = remote.vault.clone();
         downloaded.last_synced_at = now_ms();
         downloaded.device_id = local.vault.device_id.clone();
+        // 内容是刚下载的，指纹未知（可能是旧键/旧布局文件）→ 下次同步走完整流程重新取指纹
+        self.cache.rev = None;
+        self.cache.content_hash = content_hash(&downloaded);
         Ok(SyncResult {
             container: local.with_vault(downloaded),
             direction: SyncDirection::Downloaded,
@@ -144,13 +214,58 @@ impl SyncEngine {
     }
 
     pub async fn sync(
-        &self,
+        &mut self,
         mut local: VaultContainer,
         password: &str,
         conflict_strategy: ConflictStrategy,
     ) -> Result<SyncResult, SyncError> {
         let mut remote_key = self.remote_key.clone();
         let mut remote_path = self.config.remote_path(&remote_key);
+
+        // ---- 快速判断：只有之前成功同步过（缓存里有版本指纹）才用 HEAD ----
+        // 没有指纹（首次同步 / 服务器不支持 HEAD / 刚手动覆盖过）→ 走完整流程，
+        // 与旧版行为完全一致；这样绝不会把"HEAD 不支持"误判成"云端已删除"。
+        let mut head: Option<RemoteStat> = None;
+        if let Some(rev) = self.cache.rev.clone() {
+            if let Ok(Some(stat)) = self.webdav.stat(&remote_path).await {
+                if rev.matches(&stat) {
+                    let local_changed = local.vault.updated_at > local.vault.last_synced_at;
+                    if !local_changed {
+                        // 云端没变、本地也没改：一个 HEAD 结束，正文 0 字节
+                        return Ok(SyncResult {
+                            container: local,
+                            direction: SyncDirection::None,
+                            conflicts: 0,
+                            message: "已是最新状态".to_string(),
+                        });
+                    }
+                    // 云端没变、本地有改动：跳过下载，直接上传
+                    if !self.cache.content_hash.is_empty()
+                        && content_hash(&local.vault) == self.cache.content_hash
+                    {
+                        local.vault.last_synced_at = local.vault.updated_at.max(now_ms());
+                        return Ok(SyncResult {
+                            container: local,
+                            direction: SyncDirection::None,
+                            conflicts: 0,
+                            message: "内容未变化，已跳过上传".to_string(),
+                        });
+                    }
+                    local.ensure_content_key();
+                    local.vault.last_synced_at = local.vault.updated_at.max(now_ms());
+                    let stable_key = self.remote_key.clone();
+                    self.upload(&remote_path, &mut local, &stable_key).await?;
+                    return Ok(SyncResult {
+                        container: local,
+                        direction: SyncDirection::Uploaded,
+                        conflicts: 0,
+                        message: "已上传本地更新".to_string(),
+                    });
+                }
+                head = Some(stat);
+            }
+        }
+
         let mut remote_bytes = self.webdav.get(&remote_path).await.map_err(dav_err)?;
         let mut adopted_legacy: Option<VaultContainer> = None;
         if remote_bytes.is_none() {
@@ -328,6 +443,8 @@ impl SyncEngine {
                 let mut downloaded = remote.vault.clone();
                 downloaded.last_synced_at = now_ms();
                 downloaded.device_id = local.vault.device_id.clone();
+                self.cache.rev = head.as_ref().map(RemoteRev::from_stat);
+                self.cache.content_hash = content_hash(&downloaded);
                 Ok(SyncResult {
                     container: local.with_vault(downloaded),
                     direction: SyncDirection::Downloaded,
@@ -337,6 +454,16 @@ impl SyncEngine {
             }
             (true, false) => {
                 local.vault.last_synced_at = local.vault.updated_at.max(now_ms());
+                if !self.cache.content_hash.is_empty()
+                    && content_hash(&local.vault) == self.cache.content_hash
+                {
+                    return Ok(SyncResult {
+                        container: local,
+                        direction: SyncDirection::None,
+                        conflicts: 0,
+                        message: "内容未变化，已跳过上传".to_string(),
+                    });
+                }
                 self.upload(&remote_path, &mut local, &remote_key).await?;
                 Ok(SyncResult {
                     container: local,
@@ -366,6 +493,8 @@ impl SyncEngine {
                     let mut downloaded = remote.vault.clone();
                     downloaded.last_synced_at = now_ms();
                     downloaded.device_id = local.vault.device_id.clone();
+                    self.cache.rev = head.as_ref().map(RemoteRev::from_stat);
+                    self.cache.content_hash = content_hash(&downloaded);
                     Ok(SyncResult {
                         container: local.with_vault(downloaded),
                         direction: SyncDirection::Downloaded,
@@ -377,6 +506,18 @@ impl SyncEngine {
                     let merged = merge(&local.vault, &remote.vault, last);
                     let mut updated = local.with_vault(merged.vault.clone());
                     updated.vault.last_synced_at = updated.vault.updated_at.max(now_ms());
+                    // 合并结果与上次同步时完全一致（例如本地改动早已被远端覆盖）：
+                    // 不必再把整包重传一遍。
+                    let unchanged = !self.cache.content_hash.is_empty()
+                        && content_hash(&updated.vault) == self.cache.content_hash;
+                    if unchanged {
+                        return Ok(SyncResult {
+                            container: updated,
+                            direction: SyncDirection::None,
+                            conflicts: merged.conflicts as i32,
+                            message: "已合并，内容未变化".to_string(),
+                        });
+                    }
                     self.upload(&remote_path, &mut updated, &remote_key).await?;
                     let message = if merged.conflicts > 0 {
                         format!("已合并，产生 {} 个冲突副本", merged.conflicts)
@@ -422,15 +563,15 @@ impl SyncEngine {
     /// 把本地库强制上传到云端（"云端已删除"弹窗里的"恢复到云端"）：
     /// 不看时间戳、不判断云端是否存在，直接写云端文件并维护清单。
     pub async fn restore_to_cloud(
-        &self,
+        &mut self,
         mut local: VaultContainer,
     ) -> Result<SyncResult, SyncError> {
         let remote_path = self.config.remote_path(&self.remote_key);
+        let stable_key = self.remote_key.clone();
         local.ensure_content_key();
         local.vault.touch();
         local.vault.last_synced_at = local.vault.updated_at;
-        self.upload(&remote_path, &mut local, &self.remote_key)
-            .await?;
+        self.upload(&remote_path, &mut local, &stable_key).await?;
         Ok(SyncResult {
             container: local,
             direction: SyncDirection::Uploaded,
@@ -441,13 +582,23 @@ impl SyncEngine {
 
     /// 上传密码库本体，并顺带维护云端清单（清单失败不影响整次同步）。
     async fn upload(
-        &self,
+        &mut self,
         remote_path: &str,
         container: &mut VaultContainer,
         remote_key: &str,
     ) -> Result<(), SyncError> {
         let bytes = container.to_bytes();
         self.webdav.put(remote_path, &bytes).await.map_err(dav_err)?;
+        // 记下新的版本指纹：下一次同步用 HEAD 比对即可，不必再下载整包。
+        // 服务器不支持 HEAD 时留空 → 下次退回完整流程，行为安全。
+        self.cache.rev = self
+            .webdav
+            .stat(remote_path)
+            .await
+            .ok()
+            .flatten()
+            .map(|s| RemoteRev::from_stat(&s));
+        self.cache.content_hash = content_hash(&container.vault);
         let manifest_text = self
             .webdav
             .get(&self.config.manifest_path())
@@ -484,6 +635,58 @@ mod tests {
             (true, false) => ("UPLOADED", "已上传本地更新"),
             (true, true) => ("BOTH", "需要冲突策略"),
         }
+    }
+
+    /// 云端版本指纹：有 ETag 就只比 ETag，没有才退回 (Last-Modified, Content-Length)。
+    #[test]
+    fn remote_rev_prefers_etag() {
+        let stat = |mtime: u64, size: i64, etag: Option<&str>| crate::sp::webdav::RemoteStat {
+            last_modified: mtime,
+            size,
+            etag: etag.map(|s| s.to_string()),
+        };
+        let rev = RemoteRev::from_stat(&stat(100, 42, Some("\"abc\"")));
+        // ETag 相同：mtime/size 变了也算没变（某些服务器 mtime 精度只到秒）
+        assert!(rev.matches(&stat(999, 1, Some("\"abc\""))));
+        assert!(!rev.matches(&stat(100, 42, Some("\"def\""))));
+        // 服务器不给 ETag：退回 (mtime, size)
+        let no_etag = RemoteRev::from_stat(&stat(5, 7, None));
+        assert!(no_etag.matches(&stat(5, 7, None)));
+        assert!(!no_etag.matches(&stat(5, 8, None)));
+    }
+
+    /// 内容指纹必须忽略"每次同步都会变"的三个字段，否则每次都判定为有改动而整包重传。
+    #[test]
+    fn content_hash_ignores_sync_bookkeeping() {
+        let mut vault = Vault::default();
+        let base = content_hash(&vault);
+        vault.last_synced_at += 1_000;
+        vault.device_id = "另一台设备".to_string();
+        vault.revision += 3;
+        assert_eq!(content_hash(&vault), base, "同步簿记字段不应算内容变化");
+        vault.name = "改过的名字".to_string();
+        assert_ne!(content_hash(&vault), base, "真实内容变化必须改变指纹");
+    }
+
+    /// 云端文件版本戳落到缓存条目后能原样往返（sync-cache.json 的线上格式）。
+    #[test]
+    fn sync_cache_entry_roundtrip() {
+        let entry = SyncCacheEntry {
+            rev: Some(RemoteRev {
+                etag: "\"x\"".to_string(),
+                last_modified: 1_700_000_000,
+                size: 8_870_000,
+            }),
+            content_hash: "AB12".to_string(),
+        };
+        let text = serde_json::to_string(&entry).unwrap();
+        let back: SyncCacheEntry = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.rev, entry.rev);
+        assert_eq!(back.content_hash, entry.content_hash);
+        // 旧版本 / 缺字段时用默认值，不影响启动
+        let empty: SyncCacheEntry = serde_json::from_str("{}").unwrap();
+        assert!(empty.rev.is_none());
+        assert!(empty.content_hash.is_empty());
     }
 
     #[test]

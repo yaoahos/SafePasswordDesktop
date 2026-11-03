@@ -1,7 +1,21 @@
 # 同步策略设计（大库 / 多端 / WebDAV 限流）
 
-> 状态：**方案留档，尚未实现**。当前代码行为见文末「现状诊断」。
+> 状态：**已实现（R1–R5 + 自适应调度）**，0.1.0 桌面端。Android 端仍是旧逻辑，但协议完全兼容——桌面端只是少发了请求，云端文件格式与布局都没有改变。
+>
 > 目标：在不改动 `.sicv` 格式、不改动 Android 端的前提下，把同步的往返流量与请求次数压到最低，避免坚果云之类 WebDAV 服务的流量 / 频率限制。
+
+## 0. 实现落点（代码索引）
+
+| 规则 | 实现位置 |
+|---|---|
+| R1 远端版本戳 | `sp/sync.rs` 的 `RemoteRev` / `RemoteRev::matches`；引擎在 `sync()` 开头 `HEAD` |
+| R3 三向决策 | `sp/sync.rs::sync()` 开头的「快速判断」块（有指纹才 HEAD；无指纹走完整流程） |
+| R4 写回抑制 | `sp/sync.rs::content_hash()`（排除 `last_synced_at`/`device_id`/`revision`） |
+| 缓存持久化 | `commands.rs` 的 `sync_cache`（键 = 云端键）+ 数据目录 `sync-cache.json`（只存指纹，无密钥/明文） |
+| R5 清单收敛 | `upload()` 仍是 GET+PUT 清单（清单含 `updated_at`/`size`，上传时必然变化） |
+| 自适应调度 | `commands.rs::webdav_pull_if_changed` 按缓存里的库大小算间隔；前端 30 s 心跳 + 窗口可见时才发 + 回到前台立即检查 |
+
+实测（`tests/webdav_flow.rs`）：云端没变化时同步 **0 次整库 GET**（只发 HEAD），只有本机改动时也 **0 次整库 GET**（直接 PUT）。
 
 ## 1. 先说清楚现在的数据体量
 

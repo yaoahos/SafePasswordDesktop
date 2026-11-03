@@ -483,24 +483,37 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, [vault, settings.autoSync, settings.webdav, applySync, flashSync]);
 
-  // ------------------------------------------------------------ 自动拉取（对齐手机端 restartPullLoop）
+  // ------------------------------------------------------------ 自动拉取（HEAD 判定 + 按库大小自适应间隔）
 
   useEffect(() => {
     const secs = settings.pullIntervalSeconds;
     const cfg = settings.webdav;
     if (!vault || secs <= 0 || !cfg.enabled || !/^https?:\/\//i.test(cfg.baseUrl)) return;
-    const iv = window.setInterval(() => {
-      void (async () => {
-        try {
-          const r = await withSyncTimeout(webdavPullIfChanged(cfg));
-          if (r) await applySync(r, vault.id); // 有更新才刷新（对齐手机端 silent pull）
-        } catch (e) {
-          // 对齐手机端 runCatching：拉取失败不打扰用户
-          console.warn("自动拉取失败", e);
-        }
-      })();
-    }, secs * 1000);
-    return () => window.clearInterval(iv);
+    let stopped = false;
+    const check = async () => {
+      if (stopped || document.hidden) return; // 窗口不可见时不发请求：省请求数，也省电量
+      try {
+        const r = await withSyncTimeout(webdavPullIfChanged(cfg));
+        if (r) await applySync(r, vault.id); // 有更新才刷新（对齐手机端 silent pull）
+      } catch (e) {
+        // 对齐手机端 runCatching：拉取失败不打扰用户
+        console.warn("自动拉取失败", e);
+      }
+    };
+    // 30 秒心跳，真正的频率由后端按库大小限流（小库 60 秒，8.9 MB 的库约 4.5 分钟，最长 15 分钟）
+    const iv = window.setInterval(() => void check(), Math.min(secs, 30) * 1000);
+    // 回到窗口立即检查一次（后端仍会限流，不会因此多打请求）
+    const onActive = () => {
+      if (!document.hidden) void check();
+    };
+    window.addEventListener("focus", onActive);
+    document.addEventListener("visibilitychange", onActive);
+    return () => {
+      stopped = true;
+      window.clearInterval(iv);
+      window.removeEventListener("focus", onActive);
+      document.removeEventListener("visibilitychange", onActive);
+    };
   }, [vault, settings.pullIntervalSeconds, settings.webdav, applySync]);
 
   // ------------------------------------------------------------ 切换密码库后回到「全部」视图（含云端下载切换）
