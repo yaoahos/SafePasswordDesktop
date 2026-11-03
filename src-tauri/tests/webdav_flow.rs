@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use safepassword::commands as c;
@@ -21,6 +22,9 @@ use tauri::{App, Manager};
 // ---------------------------------------------------------------- mock 服务器
 
 type Files = Arc<Mutex<HashMap<String, (Vec<u8>, i64)>>>;
+
+/// 本测试进程内所有 GET 的次数：用来断言"云端没变化时不下载整包"。
+static GETS: AtomicUsize = AtomicUsize::new(0);
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -90,13 +94,19 @@ fn handle(stream: TcpStream, files: &Files) {
             );
             write_resp(&mut stream, "207 Multi-Status", "application/xml; charset=utf-8", &[], xml.as_bytes());
         }
-        "GET" => match files.lock().unwrap().get(&target) {
-            Some((data, _)) => {
-                let data = data.clone();
-                write_resp(&mut stream, "200 OK", "application/octet-stream", &[], &data);
+        "GET" => {
+            // 只统计密码库本体（.spv）的下载：清单 GET 是上传顺带的小文件，不算整库流量
+            if target.ends_with(".spv") {
+                GETS.fetch_add(1, Ordering::Relaxed);
             }
-            None => write_resp(&mut stream, "404 Not Found", "text/plain", &[], b"not found"),
-        },
+            match files.lock().unwrap().get(&target) {
+                Some((data, _)) => {
+                    let data = data.clone();
+                    write_resp(&mut stream, "200 OK", "application/octet-stream", &[], &data);
+                }
+                None => write_resp(&mut stream, "404 Not Found", "text/plain", &[], b"not found"),
+            }
+        }
         "HEAD" => {
             let snapshot = files.lock().unwrap().get(&target).cloned();
             match snapshot {
@@ -205,12 +215,18 @@ async fn two_devices_sync_through_mock_webdav() {
         "上传后应维护云端清单，实际：{keys:?}"
     );
 
-    // 3. A 二次同步（无变化 → NONE）
+    // 3. A 二次同步（无变化 → NONE，且只发 HEAD，不下载整包）
+    let gets_before = GETS.load(Ordering::Relaxed);
     let s = c::webdav_sync(app_a.state::<AppState>(), cfg(), None)
         .await
         .unwrap();
     assert_eq!(s.direction, "NONE", "二次同步应无变化：{s:?}");
     assert_eq!(s.message, "已是最新状态");
+    assert_eq!(
+        GETS.load(Ordering::Relaxed) - gets_before,
+        0,
+        "云端没变化时不应下载整库（应只用 HEAD 比对版本）"
+    );
 
     // ---- 设备 B：导出 A 的加密副本并按同名导入（云端 key 由内容密钥派生，跨设备/改名都不变）
     let root_b = tmp_root("b");
@@ -263,10 +279,18 @@ async fn two_devices_sync_through_mock_webdav() {
         .expect("B 有 item-a1");
     edited.title = "GitHub-改".to_string();
     c::put_item(app_b.state::<AppState>(), edited).unwrap();
+    // 只有本机改动、云端没变：HEAD 比对后就上传，不必先下载整包
+    let gets_before = GETS.load(Ordering::Relaxed);
     let s = c::webdav_sync(app_b.state::<AppState>(), cfg(), None)
         .await
         .unwrap();
     assert_eq!(s.direction, "UPLOADED", "B 编辑应上传：{s:?}");
+    assert_eq!(s.message, "已上传本地更新");
+    assert_eq!(
+        GETS.load(Ordering::Relaxed) - gets_before,
+        0,
+        "只有本地改动时不应下载整库"
+    );
     let s = c::webdav_sync(app_a.state::<AppState>(), cfg(), None)
         .await
         .unwrap();
