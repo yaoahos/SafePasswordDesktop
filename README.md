@@ -4,13 +4,11 @@ SafePassword 桌面版是一个离线优先的密码管理器。界面与数据�
 
 - 项目名：`SafePassword Desktop`
 - 应用标识：`com.yaoahos.safepassword.desktop`
-- 正式版本：`0.1.0`
+- 正式版本：`1.0.0`
 - 支持平台：Windows 10 / 11（x64，需要 WebView2 运行时）
-- 安装包：`SafePassword_0.1.0_x64-setup.exe`（NSIS）/ `SafePassword_0.1.0_x64_en-US.msi`
-- 安装包大小：2,267,594 字节（NSIS）/ 3,174,400 字节（MSI）
-- SHA-256：`46F71EEF825E8BF1BD307F2C01775692E8863AB255D8018C2D2559B4A6071630`
-- 发布下载：[Releases · SafePasswordDesktop](https://github.com/yaoahos/SafePasswordDesktop/releases)
-- 仓库地址：<https://github.com/yaoahos/SafePasswordDesktop>
+- 安装包：`SafePassword_1.0.0_x64-setup.exe`（NSIS）/ `SafePassword_1.0.0_x64_en-US.msi`
+- 安装包大小：2,332,460 字节（NSIS）/ 3,252,224 字节（MSI）
+- SHA-256：`CE661E2B5FF93AA4845A52CBFBDE1F707AB3BFD4D0F89597907CFB081067EA79`
 
 > 本项目为独立实现，未使用任何第三方应用的源代码；界面与交互仅作设计参考。密码库格式与 Android 版互通。
 
@@ -163,8 +161,8 @@ npx tauri build
 产物：
 
 ```text
-src-tauri/target/release/bundle/nsis/SafePassword_0.1.0_x64-setup.exe
-src-tauri/target/release/bundle/msi/SafePassword_0.1.0_x64_en-US.msi
+src-tauri/target/release/bundle/nsis/SafePassword_1.0.0_x64-setup.exe
+src-tauri/target/release/bundle/msi/SafePassword_1.0.0_x64_en-US.msi
 ```
 
 首次打包若卡在 NSIS 工具下载，可设置代理后重试：
@@ -284,7 +282,7 @@ SafePasswordDesktop/
 
 ## 十、版本记录
 
-**2026/11/03 · 0.1.0**
+**2026/11/03 · 1.0.0**
 - 新增 密码库创建、恢复、解锁、自动锁定；密码库文件与 Android 端逐字节兼容
 - 新增 条目、字段（增删改与排序）、标签、收藏、回收站与搜索排序
 - 新增 WebDAV 多库同步：云端清单、自动同步、自动拉取、解锁即同步、云端删除提示、改名同步云端
@@ -293,4 +291,8 @@ SafePasswordDesktop/
 - 新增 密码生成器、安全中心（强度、重复、长期未更新、HIBP）
 - 新增 20 种主题色与自定义颜色、浅色 / 深色 / 跟随系统
 - 新增 自定义标题栏、三栏自适应布局、复制敏感内容 30 秒自动清空
+- 优化 密码库容器改为压缩后再加密（格式版本 2），大库体积降至约 1/8~1/15，旧库打开后自动升级
+- 优化 同步改为先比对云端版本（ETag / 时间戳 + 大小）再决定下载，合并结果未变时跳过上传，同步间隔按库大小自适应，大库免流
+- 优化 同步合并、库索引、列表渲染改哈希索引与记忆化，大库操作不再卡顿
 - 安全 主密码 PBKDF2-HMAC-SHA256（210,000）派生，AES-256-GCM 加密；设置中的敏感字段用 Windows DPAPI 加密
+- 安全 密钥与主密码在使用后立即擦除，写盘改为原子替换，自更新只接受来自 GitHub 发布地址且校验过的安装包

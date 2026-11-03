@@ -280,14 +280,14 @@ function ItemDetailInner({
             <div className="preview-pass">
               <span className="preview-pass-mask">
                 {shown["hero"] ? pass : pass ? "•".repeat(Math.min(Math.max(pass.length, 8), 16)) : ""}
+                <button
+                  className="icon-btn"
+                  title={shown["hero"] ? "隐藏" : "显示"}
+                  onClick={() => setShown((s) => ({ ...s, hero: !s.hero }))}
+                >
+                  <Icon name={shown["hero"] ? "eye-off" : "eye"} size={16} />
+                </button>
               </span>
-              <button
-                className="icon-btn"
-                title={shown["hero"] ? "隐藏" : "显示"}
-                onClick={() => setShown((s) => ({ ...s, hero: !s.hero }))}
-              >
-                <Icon name={shown["hero"] ? "eye-off" : "eye"} size={16} />
-              </button>
             </div>
           )}
           {labelObjs.length > 0 && (

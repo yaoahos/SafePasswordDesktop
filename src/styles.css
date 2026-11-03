@@ -1575,8 +1575,20 @@ select.input {
 .preview-url-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .preview-open { font-size: 15px; }
 .preview-user { margin-top: 8px; font-size: 14.5px; font-weight: 600; color: var(--text-2); }
-.preview-pass { margin-top: 6px; display: flex; align-items: center; justify-content: center; gap: 6px; }
-.preview-pass-mask { letter-spacing: 2px; font-size: 15px; color: var(--text-2); }
+.preview-pass { margin-top: 6px; display: flex; justify-content: center; }
+/* 密码点串本身严格居中；眼睛浮在它右侧、不参与居中（不把两者当成一个整体去居中） */
+.preview-pass-mask { position: relative; letter-spacing: 2px; font-size: 15px; color: var(--text-2); }
+.preview-pass .icon-btn {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin-left: 2px;
+}
+.preview-pass .icon-btn svg { display: block; }
 .preview-labels { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 10px; }
 .preview-label {
   display: inline-flex;
