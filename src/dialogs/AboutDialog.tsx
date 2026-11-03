@@ -5,7 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type { UpdateInfo } from "../types";
 import type { AppCtx } from "../app-context";
 
-const APP_VERSION = "0.1.0";
+const APP_VERSION = "1.0.0";
 const PROJECT_URL = "https://github.com/yaoahos/SafePasswordDesktop";
 const RELEASES_URL = "https://github.com/yaoahos/SafePasswordDesktop/releases";
 

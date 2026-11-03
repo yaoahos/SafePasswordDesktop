@@ -10,7 +10,7 @@ export type TopAction =
   | "SYNC"
   | "LOCK";
 
-export const APP_VERSION = "0.1.0";
+export const APP_VERSION = "1.0.0";
 
 /** 顶部动作：线性图标、放大加深；WebDAV 与导入入口已移除（改由设置页承载） */
 export const TOP_ACTIONS: { key: TopAction; label: string; icon: IconName; color: string }[] = [
