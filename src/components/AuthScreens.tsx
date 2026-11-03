@@ -492,28 +492,37 @@ export function AuthScreens({
                 <div className="settings-group-title">
                   <span className="settings-group-dot" /> 云端密码库
                 </div>
-                {busy && <div className="muted small">正在读取云端清单…</div>}
+                {busy && <div className="cloud-empty">正在读取云端清单…</div>}
                 {!busy && cloudList.length === 0 && (
-                  <div className="muted small">云端没有任何密码库。</div>
+                  <div className="cloud-empty">云端没有任何密码库。</div>
                 )}
-                {cloudList.map((c) => (
-                  <button
-                    key={c.key}
-                    className={`vault-row${cloudKey === c.key ? " active" : ""}`}
-                    style={{ width: "100%", textAlign: "left", cursor: "pointer" }}
-                    onClick={() => {
-                      setCloudKey(c.key);
-                      setError(null);
-                    }}
-                  >
-                    <span className="vault-row-name">
-                      <Icon name="cloud" size={15} /> {c.name}
-                    </span>
-                    <span className="muted small">
-                      {cloudKey === c.key ? "已选择" : `${Math.max(1, Math.round(c.size / 1024))} KB`}
-                    </span>
-                  </button>
-                ))}
+                {cloudList.length > 0 && (
+                  <div className="cloud-list">
+                    {cloudList.map((c) => (
+                      <button
+                        key={c.key}
+                        className={`cloud-row${cloudKey === c.key ? " active" : ""}`}
+                        onClick={() => {
+                          setCloudKey(c.key);
+                          setError(null);
+                        }}
+                      >
+                        <span className="cloud-ico">
+                          <Icon name="cloud" size={16} />
+                        </span>
+                        <span className="cloud-main">
+                          <span className="cloud-name">{c.name}</span>
+                          <span className="cloud-meta">更新于 {formatTime(c.updatedAt)}</span>
+                        </span>
+                        <span className="cloud-size">
+                          {cloudKey === c.key
+                            ? "已选择"
+                            : `${Math.max(1, Math.round(c.size / 1024))} KB`}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {cloudKey && (
                   <div className="form-row" style={{ marginTop: 10 }}>
                     <label className="field-caption">该库的主密码</label>
