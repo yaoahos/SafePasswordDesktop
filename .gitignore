@@ -12,3 +12,4 @@ interop/fixtures/android/rust-open*.json
 interop/fixtures/android/*.reopen.json
 interop/fixtures/android/reopen*.json
 interop/fixtures/android/*.rust-rewritten.sicv
+AGENTS.md
