@@ -1,11 +1,11 @@
 import { useRef, useState } from "react";
-import type { VaultMeta } from "../types";
-import { evaluateStrength } from "../api";
+import type { CloudVaultEntry, VaultMeta, WebDavConfig } from "../types";
+import { evaluateStrength, importVaultBytes, webdavGetVault, webdavListCloud } from "../api";
 import { arrayBufferToBase64, formatTime } from "../utils";
 import { Icon } from "./icons";
 import { AppTitleBar } from "./TopBar";
 
-type Mode = "empty" | "select" | "create" | "restore";
+type Mode = "empty" | "select" | "create" | "restore" | "cloud";
 
 /** 强度条颜色（对齐手机端 StrengthBar 分段） */
 const STRENGTH_COLORS = ["#EF4444", "#F59E0B", "#EAB308", "#22C55E", "#16A34A"];
@@ -16,6 +16,8 @@ export function AuthScreens({
   onUnlock,
   onCreate,
   onRestoreLocal,
+  webdav,
+  onCloudRestored,
 }: {
   vaults: VaultMeta[];
   /** 最近打开的密码库（对齐手机端 lastVaultId 预选） */
@@ -25,6 +27,10 @@ export function AuthScreens({
   onCreate: (name: string, password: string) => Promise<string | null>;
   /** 从本地恢复 .sicv/.spv（成功返回 null） */
   onRestoreLocal?: (fileName: string, base64Data: string, password: string) => Promise<string | null>;
+  /** WebDAV 配置（用于无本地库时从云端恢复） */
+  webdav?: WebDavConfig;
+  /** 从云端恢复成功后刷新库列表 */
+  onCloudRestored?: () => Promise<void>;
 }) {
   const [mode, setMode] = useState<Mode>(vaults.length === 0 ? "empty" : "select");
   const [selected, setSelected] = useState<string>(
@@ -39,6 +45,9 @@ export function AuthScreens({
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [restoreData, setRestoreData] = useState("");
   const [restorePw, setRestorePw] = useState("");
+  const [cloudList, setCloudList] = useState<CloudVaultEntry[] | null>(null);
+  const [cloudKey, setCloudKey] = useState("");
+  const [cloudPw, setCloudPw] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -131,6 +140,53 @@ export function AuthScreens({
     }
   };
 
+  const cloudConfigured =
+    !!webdav && /^https?:\/\//i.test((webdav.baseUrl || "").trim()) && !!webdav.username.trim();
+
+  const openCloud = async () => {
+    setMode("cloud");
+    setError(null);
+    setCloudList(null);
+    setCloudKey("");
+    setCloudPw("");
+    if (!webdav || !cloudConfigured) return;
+    setBusy(true);
+    try {
+      setCloudList(await webdavListCloud(webdav));
+    } catch (e) {
+      setCloudList([]);
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doCloudRestore = async () => {
+    if (!webdav) return;
+    if (!cloudKey) {
+      setError("请选择要恢复的云端密码库");
+      return;
+    }
+    if (!cloudPw) {
+      setError("请输入该密码库的主密码");
+      return;
+    }
+    const entry = cloudList?.find((c) => c.key === cloudKey);
+    setBusy(true);
+    setError(null);
+    try {
+      const b64 = await webdavGetVault(webdav, cloudKey);
+      if (!b64) throw new Error("云端没有找到该密码库文件");
+      await importVaultBytes(b64, cloudPw, entry?.name ?? "");
+      await onCloudRestored?.();
+      setCloudPw("");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const selectedMeta = vaults.find((v) => v.id === selected);
 
   return (
@@ -156,7 +212,9 @@ export function AuthScreens({
               <button className="link-btn" onClick={() => setMode("restore")}>
                 从本地恢复
               </button>
-              <span className="muted small">云端数据请解锁后在设置 → 同步与备份中拉取</span>
+              <button className="link-btn" onClick={() => void openCloud()}>
+                从云端恢复
+              </button>
             </div>
           </>
         )}
@@ -314,6 +372,77 @@ export function AuthScreens({
             <button className="btn primary block tall" disabled={busy} onClick={() => void doRestore()}>
               {busy ? "恢复中…" : "恢复"}
             </button>
+            <div className="spacer-10" />
+            <div className="row" style={{ justifyContent: "center" }}>
+              <button className="link-btn" onClick={() => setMode(vaults.length === 0 ? "empty" : "select")}>
+                ← 返回
+              </button>
+            </div>
+          </>
+        )}
+
+        {mode === "cloud" && (
+          <>
+            <div className="field-caption">从云端恢复</div>
+            {!cloudConfigured && (
+              <div className="muted small" style={{ marginBottom: 10, lineHeight: 1.7 }}>
+                还没有配置 WebDAV。请先解锁任意一个密码库，在「设置 → 同步与备份」里填写服务器地址与账号，
+                再回到这里从云端恢复。
+              </div>
+            )}
+            {cloudConfigured && (
+              <>
+                <div className="muted small" style={{ marginBottom: 10 }}>
+                  选择云端已有的密码库，输入该库的主密码下载到本机。
+                </div>
+                {cloudList === null && busy && <div className="muted small">正在读取云端清单…</div>}
+                {cloudList && cloudList.length === 0 && !busy && (
+                  <div className="muted small" style={{ marginBottom: 10 }}>
+                    云端没有任何密码库。
+                  </div>
+                )}
+                {cloudList?.map((c) => (
+                  <button
+                    key={c.key}
+                    className={`vault-row${cloudKey === c.key ? " active" : ""}`}
+                    style={{ width: "100%", textAlign: "left", cursor: "pointer" }}
+                    onClick={() => {
+                      setCloudKey(c.key);
+                      setError(null);
+                    }}
+                  >
+                    <span className="vault-row-name">
+                      <Icon name="cloud" size={15} /> {c.name}
+                    </span>
+                    <span className="muted small">
+                      {cloudKey === c.key ? "已选择" : `${Math.max(1, Math.round(c.size / 1024))} KB`}
+                    </span>
+                  </button>
+                ))}
+                {cloudKey && (
+                  <div className="form-row">
+                    <label className="field-caption">该库的主密码</label>
+                    <input
+                      className="input"
+                      type="password"
+                      value={cloudPw}
+                      placeholder="输入该密码库的主密码"
+                      onChange={(e) => setCloudPw(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void doCloudRestore();
+                      }}
+                    />
+                  </div>
+                )}
+                <button
+                  className="btn primary block tall"
+                  disabled={busy || !cloudKey}
+                  onClick={() => void doCloudRestore()}
+                >
+                  {busy ? "恢复中…" : "下载并恢复"}
+                </button>
+              </>
+            )}
             <div className="spacer-10" />
             <div className="row" style={{ justifyContent: "center" }}>
               <button className="link-btn" onClick={() => setMode(vaults.length === 0 ? "empty" : "select")}>
