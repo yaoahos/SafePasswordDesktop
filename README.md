@@ -247,8 +247,7 @@ SafePasswordDesktop/
 │   ├── capabilities/           Tauri 权限（窗口、opener、dialog）
 │   └── tauri.conf.json         窗口、CSP、打包配置
 ├── interop/                    与 Android core 的互操作夹具工程（Kotlin + Gradle）
-├── docs/images/                README 截图
-├── public/                     应用图标
+├── docs/                       格式说明与 README 截图
 └── README.md
 ```
 
