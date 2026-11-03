@@ -153,7 +153,8 @@ impl SyncEngine {
         // - 若曾同步过（lastSyncedAt > 0），先尝试从云端清单认领改名后的新键；
         //   ① 同名条目；② 内容密钥相同（手机端改名后旧键被删，靠 contentKey 找回）
         // - 仍找不到 → 视为"云端已删除该库"，交给调用方弹窗询问（删除本地 / 恢复到云端）。
-        let mut adopted_name: Option<String> = None;
+        // 认领到的云端条目：(键, 库名, 该文件更新时间)
+        let mut adopted: Option<(String, String, i64)> = None;
         if remote_bytes.is_none() && local.vault.last_synced_at > 0 {
             let manifest_text = self
                 .webdav
@@ -177,6 +178,7 @@ impl SyncEngine {
                         remote_key = entry.key.clone();
                         remote_path = path;
                         remote_bytes = Some(bytes);
+                        adopted = Some((entry.key.clone(), entry.name.clone(), entry.updated_at));
                     }
                 }
             }
@@ -198,7 +200,7 @@ impl SyncEngine {
                         remote_key = entry.key.clone();
                         remote_path = path;
                         remote_bytes = Some(bytes);
-                        adopted_name = Some(entry.name.clone());
+                        adopted = Some((entry.key.clone(), entry.name.clone(), entry.updated_at));
                         break;
                     }
                 }
@@ -240,12 +242,21 @@ impl SyncEngine {
             })?,
         };
 
-        // 改名认领：本地库名跟随云端（手机端改名后，桌面端同步过来即可看到新名字）
-        if let Some(name) = adopted_name {
-            let trimmed = name.trim().to_string();
-            if !trimmed.is_empty() && trimmed != local.vault.name {
-                local.vault.name = trimmed;
-                local.vault.touch();
+        // 认出云端里属于本库的文件（改名/迁移）后，决定用哪个名字：
+        // - 本地更晚（本端刚改名）→ 保留本地名，按新名上传；旧键由调用方清理
+        // - 云端更晚（其它设备改名）→ 本地库名跟随云端，并继续沿用云端那个键
+        if let Some((key, name, updated)) = adopted {
+            if local.vault.updated_at > updated {
+                remote_key = self.remote_key.clone();
+                remote_path = self.config.remote_path(&remote_key);
+            } else {
+                let trimmed = name.trim().to_string();
+                if !trimmed.is_empty() && trimmed != local.vault.name {
+                    local.vault.name = trimmed;
+                    local.vault.touch();
+                }
+                remote_key = key.clone();
+                remote_path = self.config.remote_path(&remote_key);
             }
         }
 
