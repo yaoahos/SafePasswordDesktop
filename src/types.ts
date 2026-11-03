@@ -167,7 +167,7 @@ export type SyncStrategy = "DETECT" | "KEEP_LOCAL" | "KEEP_REMOTE" | "MERGE";
 export type SortMode = "TITLE" | "UPDATED" | "CREATED";
 
 export interface SyncSummary {
-  direction: "NONE" | "UPLOADED" | "DOWNLOADED" | "MERGED" | "CONFLICT";
+  direction: "NONE" | "UPLOADED" | "DOWNLOADED" | "MERGED" | "CONFLICT" | "REMOTE_DELETED";
   conflicts: number;
   message: string;
 }

@@ -23,6 +23,8 @@ pub enum SyncDirection {
     Downloaded,
     Merged,
     Conflict,
+    /// 云端已删除该密码库（别处删除），调用方应删除本地库并回到解锁 / 初始界面
+    RemoteDeleted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,7 +121,8 @@ impl SyncEngine {
         password: &str,
         conflict_strategy: ConflictStrategy,
     ) -> Result<SyncResult, SyncError> {
-        let remote_path = self.config.remote_path(&self.remote_key);
+        let mut remote_key = self.remote_key.clone();
+        let mut remote_path = self.config.remote_path(&remote_key);
         let mut remote_bytes = self.webdav.get(&remote_path).await.map_err(dav_err)?;
         let mut adopted_legacy: Option<VaultContainer> = None;
         if remote_bytes.is_none() {
@@ -146,11 +149,48 @@ impl SyncEngine {
             }
         }
 
+        // 云端既没有本库文件，也没有可认领的旧文件：
+        // - 若曾同步过（lastSyncedAt > 0）且云端清单存在，视为别处删除或改过名；
+        //   改名 → 认领清单里的同名条目；删除 → 通知调用方删本地。
+        if remote_bytes.is_none() && local.vault.last_synced_at > 0 {
+            let manifest_text = self
+                .webdav
+                .get(&self.config.manifest_path())
+                .await
+                .map_err(dav_err)?;
+            if let Some(bytes) = manifest_text {
+                let text = String::from_utf8_lossy(&bytes).to_string();
+                let manifest = CloudManifest::parse(Some(text.as_str()));
+                if !manifest.vaults.is_empty() {
+                    let want = local.vault.name.trim().to_lowercase();
+                    if let Some(entry) = manifest
+                        .vaults
+                        .iter()
+                        .find(|e| e.name.trim().to_lowercase() == want)
+                    {
+                        if entry.key != remote_key {
+                            remote_key = entry.key.clone();
+                            remote_path = self.config.remote_path(&remote_key);
+                            remote_bytes = self.webdav.get(&remote_path).await.map_err(dav_err)?;
+                        }
+                    }
+                    if remote_bytes.is_none() {
+                        return Ok(SyncResult {
+                            container: local,
+                            direction: SyncDirection::RemoteDeleted,
+                            conflicts: 0,
+                            message: "云端已删除该密码库".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
         let Some(remote_bytes) = remote_bytes else {
             local.ensure_content_key();
             local.vault.last_synced_at = now_ms();
             local.vault.touch();
-            self.upload(&remote_path, &mut local).await?;
+            self.upload(&remote_path, &mut local, &remote_key).await?;
             return Ok(SyncResult {
                 container: local,
                 direction: SyncDirection::Uploaded,
@@ -199,7 +239,7 @@ impl SyncEngine {
             }
             (true, false) => {
                 local.vault.last_synced_at = now_ms();
-                self.upload(&remote_path, &mut local).await?;
+                self.upload(&remote_path, &mut local, &remote_key).await?;
                 Ok(SyncResult {
                     container: local,
                     direction: SyncDirection::Uploaded,
@@ -216,7 +256,7 @@ impl SyncEngine {
                 }),
                 ConflictStrategy::KeepLocal => {
                     local.vault.last_synced_at = now_ms();
-                    self.upload(&remote_path, &mut local).await?;
+                    self.upload(&remote_path, &mut local, &remote_key).await?;
                     Ok(SyncResult {
                         container: local,
                         direction: SyncDirection::Uploaded,
@@ -238,7 +278,7 @@ impl SyncEngine {
                 ConflictStrategy::Merge => {
                     let merged = merge(&local.vault, &remote.vault, last);
                     let mut updated = local.with_vault(merged.vault.clone());
-                    self.upload(&remote_path, &mut updated).await?;
+                    self.upload(&remote_path, &mut updated, &remote_key).await?;
                     let message = if merged.conflicts > 0 {
                         format!("已合并，产生 {} 个冲突副本", merged.conflicts)
                     } else {
@@ -256,7 +296,12 @@ impl SyncEngine {
     }
 
     /// 上传密码库本体，并顺带维护云端清单（清单失败不影响整次同步）。
-    async fn upload(&self, remote_path: &str, container: &mut VaultContainer) -> Result<(), SyncError> {
+    async fn upload(
+        &self,
+        remote_path: &str,
+        container: &mut VaultContainer,
+        remote_key: &str,
+    ) -> Result<(), SyncError> {
         let bytes = container.to_bytes();
         self.webdav.put(remote_path, &bytes).await.map_err(dav_err)?;
         let manifest_text = self
@@ -268,8 +313,7 @@ impl SyncEngine {
             .and_then(|b| String::from_utf8(b).ok());
         let mut manifest = CloudManifest::parse(manifest_text.as_deref());
         manifest.upsert(
-            &self.remote_key,
-            &container.vault.name,
+            remote_key,            &container.vault.name,
             container.vault.updated_at,
             bytes.len() as i64,
         );

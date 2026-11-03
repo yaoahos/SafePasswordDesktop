@@ -1,7 +1,6 @@
-//! SafePassword core —— Kotlin core 的 Rust 移植（字节兼容目标）。
+﻿//! SafePassword core —— Kotlin core 的 Rust 移植（字节兼容目标）。
 #![allow(dead_code)]
 
-pub mod attachment;
 pub mod backup;
 pub mod cloud;
 pub mod codec;

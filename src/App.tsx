@@ -13,8 +13,9 @@ import {
   importVaultBytes,
   webdavSync,
   webdavPullIfChanged,
+  deleteVault,
 } from "./api";
-import type { AppSettings, SortMode, Vault, VaultItem, VaultMeta } from "./types";
+import type { AppSettings, SortMode, SyncSummary, Vault, VaultItem, VaultMeta } from "./types";
 import type { AppCtx, SectionFilter, ToastKind } from "./app-context";
 import { AuthScreens } from "./components/AuthScreens";
 import { ItemDetail } from "./components/ItemDetail";
@@ -214,6 +215,43 @@ export default function App() {
     void closeVault().catch(() => undefined);
   }, []);
 
+  // ------------------------------------------------------------ 同步状态文本（对齐手机端 3 秒状态）
+
+  const [syncState, setSyncState] = useState<{ kind: "working" | "ok" | "err"; text: string } | null>(null);
+  const syncStateTimer = useRef<number | null>(null);
+
+  const flashSync = useCallback((kind: "working" | "ok" | "err", text: string) => {
+    setSyncState({ kind, text });
+    if (syncStateTimer.current !== null) window.clearTimeout(syncStateTimer.current);
+    // 对齐手机端：状态文本 3 秒后自动消失
+    syncStateTimer.current =
+      kind === "working" ? null : window.setTimeout(() => setSyncState(null), 3000);
+  }, []);
+
+  /** 同步结果落地：云端已删除 → 删本地并回到解锁/初始界面；否则刷新数据 */
+  const applySync = useCallback(
+    async (r: SyncSummary, vaultId: string | null) => {
+      if (r.direction === "REMOTE_DELETED") {
+        if (vaultId) {
+          try {
+            await deleteVault(vaultId);
+          } catch {
+            /* 本地删除失败也不阻塞界面切换 */
+          }
+        }
+        await refreshFromBackend();
+        setVault(null);
+        setSelectItemId(null);
+        setDialog(null);
+        flashSync("ok", "云端已删除该密码库，本地已同步删除");
+        return;
+      }
+      await refreshFromBackend();
+      flashSync("ok", r.message || "已同步");
+    },
+    [refreshFromBackend, flashSync],
+  );
+
   const gotoSelect = useCallback((vaultId?: string) => {
     setPreselectVaultId(vaultId ?? null);
     setVault(null);
@@ -236,16 +274,16 @@ export default function App() {
         setLabelFilter(null);
         setQuery("");
         void listVaults().then(setVaults).catch(() => undefined);
-        // 解锁后检查一次云端更新（对齐手机端：解锁后与回到前台各检查一次）
+        // 解锁后做一次完整同步（合并双端，避免云端与本地不一致）
         void (async () => {
+          const cfg = settings.webdav;
+          if (!cfg.enabled || !/^https?:\/\//i.test(cfg.baseUrl)) return;
           try {
-            const cfg = settings.webdav;
-            if (!cfg.enabled || !/^https?:\/\//i.test(cfg.baseUrl)) return;
-            if (settings.pullIntervalSeconds <= 0) return;
-            const r = await webdavPullIfChanged(cfg);
-            if (r) await refreshFromBackend();
-          } catch {
-            /* 静默失败，对齐手机端 runCatching */
+            flashSync("working", "正在同步…");
+            const r = await webdavSync(cfg, "MERGE");
+            await applySync(r, v.id);
+          } catch (e) {
+            flashSync("err", String(e));
           }
         })();
         return null;
@@ -253,7 +291,7 @@ export default function App() {
         return String(e);
       }
     },
-    [settings.webdav, settings.pullIntervalSeconds, refreshFromBackend],
+    [settings.webdav, refreshFromBackend, flashSync, applySync],
   );
 
   const handleCreate = useCallback(
@@ -333,15 +371,16 @@ export default function App() {
     const t = window.setTimeout(() => {
       void (async () => {
         try {
-          await webdavSync(cfg, "KEEP_LOCAL"); // 本地修改优先，对齐手机端 doSync 默认策略
-          await refreshFromBackend();
+          flashSync("working", "正在同步…");
+          const r = await webdavSync(cfg, "KEEP_LOCAL"); // 本地修改优先，对齐手机端 doSync 默认策略
+          await applySync(r, vault.id);
         } catch (e) {
-          notify(`自动同步失败：${String(e)}`, "error");
+          flashSync("err", `自动同步失败：${String(e)}`);
         }
       })();
     }, 1500); // 对齐手机端 scheduleSync 的 1500ms 防抖
     return () => window.clearTimeout(t);
-  }, [vault, settings.autoSync, settings.webdav, refreshFromBackend, notify]);
+  }, [vault, settings.autoSync, settings.webdav, applySync, flashSync]);
 
   // ------------------------------------------------------------ 自动拉取（对齐手机端 restartPullLoop）
 
@@ -353,7 +392,7 @@ export default function App() {
       void (async () => {
         try {
           const r = await webdavPullIfChanged(cfg);
-          if (r) await refreshFromBackend(); // 有更新才刷新（静默，对齐手机端 silent pull）
+          if (r) await applySync(r, vault.id); // 有更新才刷新（对齐手机端 silent pull）
         } catch (e) {
           // 对齐手机端 runCatching：拉取失败不打扰用户
           console.warn("自动拉取失败", e);
@@ -361,19 +400,23 @@ export default function App() {
       })();
     }, secs * 1000);
     return () => window.clearInterval(iv);
-  }, [vault, settings.pullIntervalSeconds, settings.webdav, refreshFromBackend]);
+  }, [vault, settings.pullIntervalSeconds, settings.webdav, applySync]);
+
+  // ------------------------------------------------------------ 切换密码库后回到「全部」视图（含云端下载切换）
+
+  const vaultIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = vault?.id ?? null;
+    if (vaultIdRef.current === id) return;
+    vaultIdRef.current = id;
+    if (!id) return;
+    setSection("ALL");
+    setLabelFilter(null);
+    setQuery("");
+    setDraftNew(null);
+  }, [vault?.id]);
 
   // ------------------------------------------------------------ 手动同步（顶栏"同步"直接执行，对齐手机端 doSync）
-
-  const [syncState, setSyncState] = useState<{ kind: "working" | "ok" | "err"; text: string } | null>(null);
-  const syncStateTimer = useRef<number | null>(null);
-
-  const flashSync = useCallback((kind: "ok" | "err", text: string) => {
-    setSyncState({ kind, text });
-    if (syncStateTimer.current !== null) window.clearTimeout(syncStateTimer.current);
-    // 对齐手机端：状态文本 3 秒后自动消失
-    syncStateTimer.current = window.setTimeout(() => setSyncState(null), 3000);
-  }, []);
 
   const runSync = useCallback(async () => {
     const cfg = settings.webdav;
@@ -381,16 +424,15 @@ export default function App() {
       notify("请先在设置 → 同步与备份中配置 WebDAV", "error");
       return;
     }
-    setSyncState({ kind: "working", text: "同步中…" });
+    flashSync("working", "同步中…");
     try {
       // 与手机端一致：直接同步、本地优先，无需弹窗确认
       const r = await webdavSync(cfg, "KEEP_LOCAL");
-      await refreshFromBackend();
-      flashSync("ok", r.message);
+      await applySync(r, vault?.id ?? null);
     } catch (e) {
       flashSync("err", String(e));
     }
-  }, [settings.webdav, refreshFromBackend, notify, flashSync]);
+  }, [settings.webdav, vault?.id, notify, applySync, flashSync]);
 
   // ------------------------------------------------------------ 条目操作
 
