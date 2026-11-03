@@ -68,6 +68,42 @@ export default function App() {
     name: string;
     pending: boolean;
   } | null>(null);
+  /** 用户选过「稍后处理」的库 id：自动同步不再弹窗，只在手动同步时提示（持久化到 localStorage） */
+  const [remoteGoneSnoozed, setRemoteGoneSnoozed] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem("sp.remoteGoneSnoozed");
+      return new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      return new Set<string>();
+    }
+  });
+
+  const snoozeRemoteGone = useCallback((id: string) => {
+    setRemoteGoneSnoozed((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      try {
+        localStorage.setItem("sp.remoteGoneSnoozed", JSON.stringify([...next]));
+      } catch {
+        /* 忽略 */
+      }
+      return next;
+    });
+  }, []);
+
+  const forgetRemoteGone = useCallback((id: string) => {
+    setRemoteGoneSnoozed((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      try {
+        localStorage.setItem("sp.remoteGoneSnoozed", JSON.stringify([...next]));
+      } catch {
+        /* 忽略 */
+      }
+      return next;
+    });
+  }, []);
   const [section, setSection] = useState<SectionFilter>("ALL");
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -236,13 +272,15 @@ export default function App() {
       kind === "working" ? null : window.setTimeout(() => setSyncState(null), 3000);
   }, []);
 
-  /** 同步结果落地：云端已删除 → 删本地并回到解锁/初始界面；否则刷新数据 */
+  /** 同步结果落地：云端已删除 → 弹窗让用户选择；手动同步时才强制弹窗 */
   const applySync = useCallback(
-    async (r: SyncSummary, vaultId: string | null) => {
+    async (r: SyncSummary, vaultId: string | null, manual = false) => {
       if (r.direction === "REMOTE_DELETED") {
         // 不自动删除：弹窗让用户选择（删除本地 / 恢复到云端）
         const id = vaultId ?? vault?.id ?? null;
         const name = (id && vaults.find((v) => v.id === id)?.name) || vault?.name || "";
+        // 用户选过"稍后处理"的库：自动同步时静默跳过，只有手动同步才再弹
+        if (id && !manual && remoteGoneSnoozed.has(id)) return;
         if (id) setRemoteGone({ id, name, pending: r.message.includes("未同步") });
         flashSync("err", r.message || "云端已删除该密码库，请选择处理方式");
         return;
@@ -250,7 +288,7 @@ export default function App() {
       await refreshFromBackend();
       flashSync("ok", r.message || "已同步");
     },
-    [refreshFromBackend, flashSync, vault?.name, vault?.id, vaults],
+    [refreshFromBackend, flashSync, vault?.name, vault?.id, vaults, remoteGoneSnoozed],
   );
 
   const gotoSelect = useCallback((vaultId?: string) => {
@@ -438,7 +476,7 @@ export default function App() {
     try {
       // 与手机端一致：直接同步、本地优先，无需弹窗确认
       const r = await webdavSync(cfg, "KEEP_LOCAL");
-      await applySync(r, vault?.id ?? null);
+      await applySync(r, vault?.id ?? null, true);
     } catch (e) {
       flashSync("err", String(e));
     }
@@ -720,13 +758,20 @@ export default function App() {
             </div>
           )}
           <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-            <button className="btn" onClick={() => setRemoteGone(null)}>
+            <button
+              className="btn"
+              onClick={() => {
+                snoozeRemoteGone(remoteGone.id);
+                setRemoteGone(null);
+              }}
+            >
               稍后处理
             </button>
             <button
               className="btn danger"
               onClick={() => {
                 const id = remoteGone.id;
+                forgetRemoteGone(id);
                 setRemoteGone(null);
                 void (async () => {
                   try {
@@ -747,6 +792,7 @@ export default function App() {
             <button
               className="btn primary"
               onClick={() => {
+                forgetRemoteGone(remoteGone.id);
                 setRemoteGone(null);
                 void (async () => {
                   try {
