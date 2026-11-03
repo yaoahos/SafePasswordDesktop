@@ -58,6 +58,16 @@ export function AuthScreens({
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // 库列表变化时修正页面形态：删掉最后一个库后必须回到"欢迎页"，
+  // 不能还停在"选择密码库"（那时已经没有任何库可选）
+  useEffect(() => {
+    setMode((m) => {
+      if (m !== "select" && m !== "empty") return m; // 创建/恢复/云端页面不动
+      if (vaults.length === 0) return "empty";
+      return "select";
+    });
+  }, [vaults.length]);
+
   const doUnlock = async () => {
     if (!selected) return;
     setBusy(true);
