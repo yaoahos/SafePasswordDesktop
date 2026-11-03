@@ -166,7 +166,7 @@ src-tauri/target/release/bundle/nsis/SafePassword_1.0.0_x64-setup.exe
 src-tauri/target/release/bundle/msi/SafePassword_1.0.0_x64_en-US.msi
 ```
 
-首次打包若卡在 NSIS 工具下载，可设置代理后重试：
+首次打包若卡在 NSIS 工具下载，可先设置本机代理再重试（地址与端口按自己的代理软件改）：
 
 ```bat
 set HTTP_PROXY=http://127.0.0.1:7890
@@ -179,7 +179,7 @@ set HTTPS_PROXY=http://127.0.0.1:7890
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-- 当前 85 个测试通过（80 个单元测试 + 3 个命令层 E2E + 1 个 WebDAV 双设备同步 E2E + 1 个 mock 冒烟），另有 1 个实网 HIBP 测试默认跳过（`cargo test -- --ignored`）。
+- 当前 93 个测试通过（88 个单元测试 + 3 个命令层 E2E + 1 个 WebDAV 双设备同步 E2E + 1 个 mock 冒烟），另有 1 个实网 HIBP 测试默认跳过（`cargo test -- --ignored`）。
 - 跨端字节兼容：`interop/` 下用手机端 Kotlin core 生成夹具，验证 Rust 能解、手机端能解 Rust 写出的 `.spv`，明文 JSON 逐字节一致。
 
 ---
