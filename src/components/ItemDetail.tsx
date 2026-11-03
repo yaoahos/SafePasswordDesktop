@@ -371,6 +371,15 @@ function ItemDetailInner({
                         <Icon name="external" size={15} />
                       </button>
                     )}
+                    {(f.history?.length ?? 0) > 0 && (
+                      <button
+                        className="icon-btn"
+                        title={`历史记录（${f.history?.length}）`}
+                        onClick={() => setHistFieldId(f.id)}
+                      >
+                        <Icon name="history" size={15} />
+                      </button>
+                    )}
                     {isMaskedField(f.type, f.sensitive) && (
                       <button
                         className="icon-btn"
@@ -392,15 +401,6 @@ function ItemDetailInner({
                     >
                       <Icon name="copy" size={15} />
                     </button>
-                    {(f.history?.length ?? 0) > 0 && (
-                      <button
-                        className="icon-btn"
-                        title={`历史记录（${f.history?.length}）`}
-                        onClick={() => setHistFieldId(f.id)}
-                      >
-                        <Icon name="history" size={15} />
-                      </button>
-                    )}
                   </div>
                 </div>
               );
