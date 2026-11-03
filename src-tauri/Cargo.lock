@@ -3274,6 +3274,7 @@ dependencies = [
  "aes-gcm",
  "base64 0.22.1",
  "chrono",
+ "flate2",
  "pbkdf2",
  "quick-xml 0.37.5",
  "rand",

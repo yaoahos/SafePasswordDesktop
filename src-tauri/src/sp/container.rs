@@ -4,6 +4,12 @@
 //! magic "SICV" | version | iterations | salt_len | salt | wrapped_len | wrapped | payload_len | payload
 //!
 //! 主密码只用于派生 KEK；真正加密数据的是随机 DEK。修改主密码只需重新包裹 DEK。
+//!
+//! 版本：
+//! - 1 = 明文 JSON 直接 AES-GCM（旧版，只读兼容）
+//! - 2 = 先 gzip 再 AES-GCM（当前写入版本；大库云端体积约为 1/10）
+//!
+//! 头部布局两个版本完全相同，只有 payload 的明文部分不同，所以读旧库不需要特殊路径。
 
 use crate::sp::crypto::{
     ct_eq, decrypt, derive_key, encrypt, random_bytes, to_base64, unwrap_dek, wipe, wrap_dek,
@@ -14,12 +20,17 @@ use crate::sp::model::Vault;
 use std::path::Path;
 
 const MAGIC: &[u8; 4] = b"SICV";
-const VERSION: i32 = 1;
+/// 当前写出的版本：payload 先 gzip 再加密。
+const VERSION: i32 = 2;
+/// 仍可读取的旧版本：payload 是明文 JSON（不压缩）。
+const VERSION_PLAIN: i32 = 1;
 const SALT_BYTES: usize = 16;
 const MIN_ITERATIONS: i32 = 10_000;
 const MAX_ITERATIONS: i32 = 10_000_000;
 /// 单个库文件的密文上限，防止伪造头部把内存撑爆。
 const MAX_PAYLOAD_BYTES: i32 = 64 * 1024 * 1024;
+/// 解压后的 JSON 上限，防止压缩炸弹把内存撑爆。
+const MAX_PLAINTEXT_BYTES: usize = 256 * 1024 * 1024;
 const PAYLOAD_AAD: &[u8] = b"SICV-PAYLOAD";
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -37,9 +48,12 @@ pub struct VaultContainer {
     salt: Vec<u8>,
     wrapped_dek: Vec<u8>,
     iterations: i32,
+    /// 读入/写出时的容器版本：1 = 明文 JSON，2 = gzip 后加密
+    version: i32,
 }
 
 struct Header {
+    version: i32,
     iterations: i32,
     salt: Vec<u8>,
     wrapped: Vec<u8>,
@@ -96,7 +110,7 @@ fn read_header(bytes: &[u8]) -> Result<Header, String> {
         return Err("不是有效的保险库文件".to_string());
     }
     let version = r.i32()?;
-    if version != VERSION {
+    if version != VERSION_PLAIN && version != VERSION {
         return Err(format!("不支持的数据库版本：{version}"));
     }
     let iterations = r.i32()?;
@@ -107,11 +121,34 @@ fn read_header(bytes: &[u8]) -> Result<Header, String> {
     let wrapped = r.chunk(40, 256, "密钥包裹")?;
     let payload = r.chunk(1, MAX_PAYLOAD_BYTES, "密文")?;
     Ok(Header {
+        version,
         iterations,
         salt,
         wrapped,
         payload,
     })
+}
+
+/// v2 的 payload 明文是 gzip 后的 JSON。
+fn compress(json: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::new(6));
+    enc.write_all(json).expect("gzip 写入内存不会失败");
+    enc.finish().expect("gzip 收尾不会失败")
+}
+
+fn decompress(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let decoder = flate2::read::GzDecoder::new(bytes);
+    let mut out = Vec::new();
+    decoder
+        .take(MAX_PLAINTEXT_BYTES as u64 + 1)
+        .read_to_end(&mut out)
+        .map_err(|e| format!("数据库内容解压失败：{e}"))?;
+    if out.len() > MAX_PLAINTEXT_BYTES {
+        return Err("数据库内容解压后过大".to_string());
+    }
+    Ok(out)
 }
 
 fn ensure_content_key(vault: &mut Vault) {
@@ -137,6 +174,7 @@ impl VaultContainer {
             salt,
             wrapped_dek: wrapped,
             iterations: PBKDF2_ITERATIONS,
+            version: VERSION,
         }
     }
 
@@ -146,8 +184,16 @@ impl VaultContainer {
         let mut kek = derive_key(password, &header.salt, header.iterations);
         let dek = unwrap_dek(&kek, &header.wrapped).map_err(|_| ContainerError::WrongPassword)?;
         wipe(&mut kek);
-        let mut plain =
+        let mut sealed =
             decrypt(&dek, &header.payload, PAYLOAD_AAD).map_err(|_| ContainerError::WrongPassword)?;
+        // v2：密文解开后是 gzip 流；v1：直接就是 JSON
+        let mut plain = if header.version == VERSION {
+            let unpacked = decompress(&sealed).map_err(ContainerError::Format)?;
+            wipe(&mut sealed);
+            unpacked
+        } else {
+            std::mem::take(&mut sealed)
+        };
         // Kotlin: plain.toString(Charsets.UTF_8) 再解析 —— 非法 UTF-8 会替换成 U+FFFD
         let parsed = {
             let text = String::from_utf8_lossy(&plain);
@@ -164,17 +210,23 @@ impl VaultContainer {
             salt: header.salt,
             wrapped_dek: header.wrapped,
             iterations: header.iterations,
+            version: header.version,
         })
     }
 
     pub fn to_bytes(&mut self) -> Vec<u8> {
         ensure_content_key(&mut self.vault);
-        let json = serde_json::to_vec(&self.vault).expect("Vault 序列化不会失败");
-        let payload = encrypt(&self.dek, &json, PAYLOAD_AAD).expect("AES-GCM 加密不会失败");
+        let mut json = serde_json::to_vec(&self.vault).expect("Vault 序列化不会失败");
+        let mut plain = compress(&json);
+        // 明文（哪怕只是压缩流）用完就擦，避免条目内容在堆里滞留
+        wipe(&mut json);
+        let payload = encrypt(&self.dek, &plain, PAYLOAD_AAD).expect("AES-GCM 加密不会失败");
+        wipe(&mut plain);
         let mut out = Vec::with_capacity(
             16 + self.salt.len() + 4 + self.wrapped_dek.len() + 4 + payload.len(),
         );
         out.extend_from_slice(MAGIC);
+        // 打开旧库（v1）后再保存，一律升级为当前版本
         out.extend_from_slice(&VERSION.to_be_bytes());
         out.extend_from_slice(&self.iterations.to_be_bytes());
         out.extend_from_slice(&(self.salt.len() as i32).to_be_bytes());
@@ -203,6 +255,7 @@ impl VaultContainer {
             salt,
             wrapped_dek: wrapped,
             iterations: self.iterations,
+            version: self.version,
         }
     }
 
@@ -213,7 +266,13 @@ impl VaultContainer {
             salt: self.salt.clone(),
             wrapped_dek: self.wrapped_dek.clone(),
             iterations: self.iterations,
+            version: self.version,
         }
+    }
+
+    /// 当前容器写盘用的版本号（1 = 未压缩旧格式，2 = gzip 新格式）。
+    pub fn version(&self) -> i32 {
+        self.version
     }
 
     pub fn ensure_content_key(&mut self) {
@@ -287,9 +346,9 @@ mod tests {
         let mut c = VaultContainer::create(sample_vault(), "口令123");
         let bytes = c.to_bytes();
 
-        // 文件头布局
+        // 文件头布局（v2 = gzip 后加密）
         assert_eq!(&bytes[0..4], b"SICV");
-        assert_eq!(i32::from_be_bytes(bytes[4..8].try_into().unwrap()), 1);
+        assert_eq!(i32::from_be_bytes(bytes[4..8].try_into().unwrap()), 2);
         assert_eq!(
             i32::from_be_bytes(bytes[8..12].try_into().unwrap()),
             PBKDF2_ITERATIONS
@@ -334,10 +393,10 @@ mod tests {
         bytes[0] = b'S';
 
         // 版本不支持
-        bytes[4..8].copy_from_slice(&2i32.to_be_bytes());
+        bytes[4..8].copy_from_slice(&3i32.to_be_bytes());
         let err = VaultContainer::open(&bytes, "pw").unwrap_err();
-        assert_eq!(err.to_string(), "无法读取数据库文件：不支持的数据库版本：2");
-        bytes[4..8].copy_from_slice(&1i32.to_be_bytes());
+        assert_eq!(err.to_string(), "无法读取数据库文件：不支持的数据库版本：3");
+        bytes[4..8].copy_from_slice(&2i32.to_be_bytes());
 
         // 迭代次数异常
         bytes[8..12].copy_from_slice(&5_000i32.to_be_bytes());
@@ -414,6 +473,85 @@ mod tests {
         let _ = c.to_bytes();
         assert!(c.password_correct("pw123"));
         assert!(!c.password_correct("nope"));
+    }
+
+    /// 手工拼一个 v1（未压缩）容器，验证读旧格式的兼容路径。
+    fn legacy_v1_bytes(c: &VaultContainer) -> Vec<u8> {
+        let mut json = serde_json::to_vec(&c.vault).unwrap();
+        let payload = encrypt(&c.dek, &json, PAYLOAD_AAD).unwrap();
+        wipe(&mut json);
+        let mut out = Vec::new();
+        out.extend_from_slice(MAGIC);
+        out.extend_from_slice(&VERSION_PLAIN.to_be_bytes());
+        out.extend_from_slice(&c.iterations.to_be_bytes());
+        out.extend_from_slice(&(c.salt.len() as i32).to_be_bytes());
+        out.extend_from_slice(&c.salt);
+        out.extend_from_slice(&(c.wrapped_dek.len() as i32).to_be_bytes());
+        out.extend_from_slice(&c.wrapped_dek);
+        out.extend_from_slice(&(payload.len() as i32).to_be_bytes());
+        out.extend_from_slice(&payload);
+        out
+    }
+
+    #[test]
+    fn legacy_v1_file_still_opens() {
+        let c = VaultContainer::create(sample_vault(), "pw");
+        let v1 = legacy_v1_bytes(&c);
+        assert_eq!(i32::from_be_bytes(v1[4..8].try_into().unwrap()), 1);
+
+        let mut opened = VaultContainer::open(&v1, "pw").unwrap();
+        assert_eq!(opened.vault.items.len(), 1);
+        assert_eq!(opened.version(), 1);
+
+        // 旧库再保存会自动升级成 v2
+        let upgraded = opened.to_bytes();
+        assert_eq!(i32::from_be_bytes(upgraded[4..8].try_into().unwrap()), 2);
+        let again = VaultContainer::open(&upgraded, "pw").unwrap();
+        assert_eq!(again.version(), 2);
+        assert_eq!(again.vault, c.vault);
+    }
+
+    #[test]
+    fn compressed_payload_is_much_smaller() {
+        let mut vault = Vault {
+            name: "大库".to_string(),
+            ..Vault::default()
+        };
+        for i in 0..300 {
+            let mut item = VaultItem {
+                id: format!("item-{i}"),
+                title: format!("站点 {i}"),
+                ..VaultItem::default()
+            };
+            item.fields = vec![
+                Field {
+                    label: "账号".to_string(),
+                    value: format!("user{i}@example.com"),
+                    ..Field::default()
+                },
+                Field {
+                    label: "密码".to_string(),
+                    value: "0123456789abcdef".to_string(),
+                    r#type: FieldType::Password,
+                    sensitive: true,
+                    ..Field::default()
+                },
+            ];
+            vault.items.push(item);
+        }
+        let mut c = VaultContainer::create(vault, "pw");
+        let v2 = c.to_bytes();
+        let json_len = serde_json::to_vec(&c.vault).unwrap().len();
+        assert!(
+            v2.len() * 2 < json_len,
+            "300 条重复度较高的库压缩后应明显更小：{} vs JSON {}",
+            v2.len(),
+            json_len
+        );
+        let opened = VaultContainer::open(&v2, "pw").unwrap();
+        assert_eq!(opened.version(), 2);
+        assert_eq!(opened.vault.items.len(), 300);
+        assert_eq!(opened.vault.items[299].title, "站点 299");
     }
 
     #[test]
