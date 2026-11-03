@@ -1819,6 +1819,48 @@ input[type="password"]::-ms-clear {
   max-width: 240px;
   margin-left: 4px;
 }
+/* 云端恢复页：云端密码库卡片列表 */
+.cloud-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 4px; }
+.cloud-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.cloud-row:hover { border-color: var(--primary); }
+.cloud-row.active { border-color: var(--primary); background: var(--primary-soft); }
+.cloud-ico {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.cloud-main { display: flex; flex-direction: column; min-width: 0; }
+.cloud-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cloud-meta { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
+.cloud-size { margin-left: auto; flex: none; font-size: 11.5px; color: var(--text-3); }
+.cloud-row.active .cloud-size { color: var(--primary); font-weight: 600; }
+.cloud-empty { font-size: 12px; color: var(--text-3); padding: 8px 2px; }
+
 /* 密码库页：本地/云端行 */
 .vault-row {
   display: flex;
