@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::sp::backup::{BackupInfo, BackupManager};
-use crate::sp::cloud::{CloudManifest, CloudVaultEntry};
+use crate::sp::cloud::{key_for, CloudManifest, CloudVaultEntry};
 use crate::sp::codec;
 use crate::sp::container::VaultContainer;
 use crate::sp::dpapi;
@@ -276,19 +276,46 @@ pub fn current_vault(state: State<AppState>) -> CmdResult<Option<Vault>> {
 }
 
 #[tauri::command]
-pub fn delete_vault(state: State<AppState>, id: String) -> CmdResult<()> {
-    let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
-    if inner.current.as_ref().is_some_and(|c| c.meta.id == id) {
-        inner.current = None;
+pub async fn delete_vault(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    let (meta, cfg) = {
+        let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+        if inner.current.as_ref().is_some_and(|c| c.meta.id == id) {
+            inner.current = None;
+        }
+        let meta = inner
+            .store
+            .list()
+            .map_err(err)?
+            .into_iter()
+            .find(|m| m.id == id)
+            .ok_or("找不到该密码库")?;
+        let cfg = inner.settings.webdav.clone();
+        inner.store.delete(&meta).map_err(err)?;
+        (meta, cfg)
+    };
+    // 云端同步删除（尽力而为：失败不影响本地删除结果，保证一端操作另一端也能感知）
+    if cfg.is_configured() && cfg.enabled {
+        if let Ok(client) = WebDavClient::new(cfg.clone()) {
+            let key = key_for(&meta.name);
+            let path = cfg.remote_path(&key);
+            let _ = client.delete(&path).await;
+            if let Ok(Some(bytes)) = client.get(&cfg.manifest_path()).await {
+                let text = String::from_utf8_lossy(&bytes).to_string();
+                let mut manifest = CloudManifest::parse(Some(text.as_str()));
+                if manifest
+                    .vaults
+                    .iter()
+                    .any(|e| e.key == key || e.name.trim() == meta.name.trim())
+                {
+                    manifest.remove(&key);
+                    let _ = client
+                        .put(&cfg.manifest_path(), manifest.to_json().as_bytes())
+                        .await;
+                }
+            }
+        }
     }
-    let meta = inner
-        .store
-        .list()
-        .map_err(err)?
-        .into_iter()
-        .find(|m| m.id == id)
-        .ok_or("找不到该密码库")?;
-    inner.store.delete(&meta).map_err(err)
+    Ok(())
 }
 
 #[tauri::command]
@@ -973,7 +1000,8 @@ pub async fn webdav_pull_if_changed(
         inner.last_pull_check_at = now;
     }
     let client = WebDavClient::new(config.clone()).map_err(err)?;
-    let path = config.remote_path(&name);
+    let key = key_for(&name);
+    let path = config.remote_path(&key);
     let stat = match client.stat(&path).await.map_err(err)? {
         Some(s) => s,
         None => return Ok(None),
