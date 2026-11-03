@@ -16,6 +16,7 @@ export function ItemList({
   sortAsc,
   onChangeSort,
   syncText,
+  onToggleFavorite,
 }: {
   items: VaultItem[];
   allLabels: Label[];
@@ -26,6 +27,8 @@ export function ItemList({
   selectedId: string | null;
   onSelect: (id: string) => void;
   onNew: () => void;
+  /** 行内收藏按钮：点击即生效（对齐手机端） */
+  onToggleFavorite: (item: VaultItem) => void;
   sortMode: SortMode;
   sortAsc: boolean;
   onChangeSort: (m: SortMode) => void;
@@ -87,10 +90,15 @@ export function ItemList({
             .map((id) => allLabels.find((l) => l.id === id))
             .filter((l): l is Label => Boolean(l));
           return (
-            <button
+            <div
               key={item.id}
+              role="button"
+              tabIndex={0}
               className={`item-card${selectedId === item.id ? " selected" : ""}`}
               onClick={() => onSelect(item.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") onSelect(item.id);
+              }}
             >
               <span
                 className={`item-icon${icon.kind === "emoji" ? " emoji" : ""}`}
@@ -107,11 +115,6 @@ export function ItemList({
               <span className="grow" style={{ minWidth: 0 }}>
                 <span className="item-title-row">
                   <span className="item-title">{item.title || "未命名"}</span>
-                  {item.favorite && (
-                    <span className="star">
-                      <Icon name="star-filled" size={13} />
-                    </span>
-                  )}
                 </span>
                 {labels.length > 0 && (
                   <div className="item-meta">
@@ -124,7 +127,21 @@ export function ItemList({
                   </div>
                 )}
               </span>
-            </button>
+              <button
+                className="icon-btn item-fav"
+                title={item.favorite ? "取消收藏" : "收藏"}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleFavorite(item);
+                }}
+              >
+                <Icon
+                  name={item.favorite ? "star-filled" : "star"}
+                  size={16}
+                  className={item.favorite ? "star-on" : ""}
+                />
+              </button>
+            </div>
           );
         })}
       </div>

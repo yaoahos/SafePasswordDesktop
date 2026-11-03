@@ -404,8 +404,19 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
           上次备份：{formatTime(ctx.settings.lastBackupAt)}
         </div>
       )}
-      <div className="row" style={{ marginTop: 8, justifyContent: "flex-end" }}>
-        <button className="btn" disabled={busy !== null} onClick={() => void createBackup()}>
+      <div className="row" style={{ marginTop: 8, justifyContent: "flex-end", gap: 8 }}>
+        <button
+          className="btn"
+          disabled={busy !== null}
+          onClick={() => {
+            setScope("backup");
+            setMsg(null);
+            void refreshBackups();
+          }}
+        >
+          刷新
+        </button>
+        <button className="btn primary" disabled={busy !== null} onClick={() => void createBackup()}>
           {busy === "create" ? "创建中…" : "立即创建备份"}
         </button>
       </div>
@@ -490,8 +501,8 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
   const [newPw, setNewPw] = useState("");
   const [renameTo, setRenameTo] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  /** 提示显示在触发操作的分区底部（local/cloud/new） */
-  const [scope, setScope] = useState<"local" | "cloud" | "new">("local");
+  /** 提示显示在触发操作的分区底部（local/cloud/new/rename） */
+  const [scope, setScope] = useState<"local" | "cloud" | "new" | "rename">("local");
   const [busy, setBusy] = useState<string | null>(null);
   const [delId, setDelId] = useState<string | null>(null);
   const [cloud, setCloud] = useState<CloudVaultEntry[] | null>(null);
@@ -505,7 +516,7 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
   const rename = async () => {
     if (!vault) return;
     const trimmed = renameTo.trim();
-    setScope("local");
+    setScope("rename");
     if (!trimmed) {
       setMsg({ ok: false, text: "请输入新名称" });
       return;
@@ -661,7 +672,7 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
                 <button
                   className="btn sm"
                   onClick={() => {
-                    ctx.gotoSelect();
+                    ctx.gotoSelect(m.id);
                     onClose();
                   }}
                 >
@@ -810,6 +821,11 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
                 重命名
               </button>
             </div>
+            {msg && scope === "rename" && (
+              <div className={msg.ok ? "ok-text" : "err-text"} style={{ marginTop: 6 }}>
+                {msg.text}
+              </div>
+            )}
           </div>
         </>
       )}
@@ -864,6 +880,8 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  /** 提示显示在触发操作的分区底部（export / import / spv） */
+  const [tScope, setTScope] = useState<"export" | "import" | "spv">("export");
 
   const run = async (key: string, fn: () => Promise<void>) => {
     setBusy(key);
@@ -884,6 +902,9 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
 
   const doExport = (kind: "csv" | "xml" | "json") =>
     void run(`exp-${kind}`, async () => {
+      setTScope("export");
+      setErr(null);
+      setMsg(null);
       const text =
         kind === "csv" ? await exportCsv() : kind === "xml" ? await exportXml() : await exportVaultJson();
       const ext = kind === "csv" ? "csv" : kind === "xml" ? "xml" : "json";
@@ -894,6 +915,9 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
 
   const doExportSpv = () =>
     void run("exp-spv", async () => {
+      setTScope("export");
+      setErr(null);
+      setMsg(null);
       const b64 = await exportVaultSpv();
       const saved = await saveExport(exportName("spv"), b64);
       setMsg(saved ? { ok: true, text: `已保存加密备份到 ${saved}` } : { ok: true, text: "已取消保存" });
@@ -901,6 +925,9 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
 
   const importTextFile = (f: File) =>
     void run("imp-file", async () => {
+      setTScope("import");
+      setErr(null);
+      setMsg(null);
       const text = await f.text();
       const ext = (f.name.split(".").pop() ?? "").toLowerCase();
       if (ext === "csv") {
@@ -924,6 +951,9 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
 
   const importSpv = (f: File) =>
     void run("imp-spv", async () => {
+      setTScope("spv");
+      setErr(null);
+      setMsg(null);
       if (!sicvName.trim()) throw new Error("请先填写库名称");
       if (!sicvPw) throw new Error("请先填写主密码");
       const buf = await f.arrayBuffer();
@@ -959,6 +989,9 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
         </button>
       </div>
 
+      {msg && tScope === "export" && <div className="ok-text">{msg.text}</div>}
+      {err && tScope === "export" && <div className="err-text">{err}</div>}
+
       <div className="hr" />
       <div className="section-cap">导入条目（CSV / XML / JSON）</div>
       <FilePicker
@@ -970,6 +1003,8 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
       <div className="setting-sub" style={{ marginTop: 6 }}>
         导入的条目会添加到当前密码库。
       </div>
+      {msg && tScope === "import" && <div className="ok-text">{msg.text}</div>}
+      {err && tScope === "import" && <div className="err-text">{err}</div>}
 
       <div className="hr" />
       <div className="section-cap">导入加密备份（.spv）</div>
@@ -995,15 +1030,17 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
       <FilePicker
         label="选择加密备份文件…"
         accept=".spv,.sicv"
-        disabled={busy !== null || !spvReady}
+        disabled={busy !== null}
+        blocked={!spvReady}
+        onBlocked={() => setErr("请先填写库名称与主密码，再选择备份文件")}
         onFile={importSpv}
       />
       <div className="setting-sub" style={{ marginTop: 6 }}>
         {spvReady ? "选择备份文件后将导入并切换到该密码库。" : "请先填写库名称与主密码，再选择备份文件。"}
       </div>
 
-      {msg && <div className="ok-text">{msg.text}</div>}
-      {err && <div className="err-text">{err}</div>}
+      {msg && tScope === "spv" && <div className="ok-text">{msg.text}</div>}
+      {err && tScope === "spv" && <div className="err-text">{err}</div>}
     </>
   );
 }
@@ -1011,15 +1048,29 @@ function FilePicker({
   label,
   accept,
   disabled,
+  blocked,
+  onBlocked,
   onFile,
 }: {
   label: string;
   accept: string;
   disabled: boolean;
+  /** 条件未满足时点击：给出提示而不是毫无反应 */
+  blocked?: boolean;
+  onBlocked?: () => void;
   onFile: (f: File) => void;
 }) {
   return (
-    <label className="btn sm" style={{ display: "inline-block", cursor: "pointer" }}>
+    <label
+      className="btn sm"
+      style={{ display: "inline-block", cursor: "pointer" }}
+      onClick={(e) => {
+        if (blocked) {
+          e.preventDefault();
+          onBlocked?.();
+        }
+      }}
+    >
       {label}
       <input
         type="file"
