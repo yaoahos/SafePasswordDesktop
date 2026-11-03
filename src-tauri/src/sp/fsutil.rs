@@ -2,7 +2,7 @@
 //! 写 tmp → rename（最多 3 次，间隔 30ms*(n+1)）→ 退化 copy+delete 兜底。
 
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
@@ -20,7 +20,12 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> io::Result<()> {
         }
     }
     let tmp = tmp_path(path);
-    fs::write(&tmp, data)?;
+    {
+        // 先写 tmp 并落盘，再 rename：断电/崩溃时不会留下半截库文件
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(data)?;
+        f.sync_all()?;
+    }
 
     let mut rename_err = None;
     for attempt in 0..3 {

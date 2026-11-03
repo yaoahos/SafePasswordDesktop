@@ -11,44 +11,57 @@ pub struct MergeResult {
 }
 
 pub fn merge(local: &Vault, remote: &Vault, last_synced_at: i64) -> MergeResult {
+    use std::collections::{HashMap, HashSet};
+
     // 墓碑取并集（LinkedHashMap 语义：先插入者占位，值保留更晚的删除时间）。
-    let mut tombstones: Vec<Tombstone> = Vec::new();
+    // 用 id → 下标取代原先的线性 find，库条目多时避免 O(n²)。
+    let mut tombstones: Vec<Tombstone> =
+        Vec::with_capacity(local.tombstones.len() + remote.tombstones.len());
+    let mut tomb_idx: HashMap<&str, usize> = HashMap::new();
     for t in local.tombstones.iter().chain(remote.tombstones.iter()) {
-        match tombstones.iter_mut().find(|x| x.id == t.id) {
-            Some(existing) => {
-                if t.deleted_at > existing.deleted_at {
-                    *existing = t.clone();
+        match tomb_idx.get(t.id.as_str()) {
+            Some(&i) => {
+                if t.deleted_at > tombstones[i].deleted_at {
+                    tombstones[i] = t.clone();
                 }
             }
-            None => tombstones.push(t.clone()),
+            None => {
+                tomb_idx.insert(t.id.as_str(), tombstones.len());
+                tombstones.push(t.clone());
+            }
         }
     }
 
-    let mut merged: Vec<VaultItem> = Vec::new();
+    let local_by_id: HashMap<&str, &VaultItem> =
+        local.items.iter().map(|i| (i.id.as_str(), i)).collect();
+    let remote_by_id: HashMap<&str, &VaultItem> =
+        remote.items.iter().map(|i| (i.id.as_str(), i)).collect();
+
+    let mut merged: Vec<VaultItem> = Vec::with_capacity(local.items.len() + remote.items.len());
     let mut conflicts = 0usize;
 
     // 遍历顺序：本地顺序优先，再补远端新增（对应 localMap.keys + remoteMap.keys）。
-    let mut order: Vec<&str> = Vec::new();
-    for item in &local.items {
-        order.push(item.id.as_str());
-    }
+    let mut order: Vec<&str> = Vec::with_capacity(local.items.len() + remote.items.len());
+    order.extend(local.items.iter().map(|i| i.id.as_str()));
     for item in &remote.items {
-        if !local.items.iter().any(|l| l.id == item.id) {
+        if !local_by_id.contains_key(item.id.as_str()) {
             order.push(item.id.as_str());
         }
     }
 
+    // 被"复活"的墓碑最后统一剔除，保持剩余顺序与逐条 remove 一致
+    let mut revived: HashSet<&str> = HashSet::new();
     for id in order {
-        let l = local.items.iter().find(|i| i.id == id);
-        let r = remote.items.iter().find(|i| i.id == id);
-        if let Some(tp) = tombstones.iter().position(|t| t.id == id) {
+        let l = local_by_id.get(id).copied();
+        let r = remote_by_id.get(id).copied();
+        if let Some(&tp) = tomb_idx.get(id) {
             let deleted_at = tombstones[tp].deleted_at;
             let local_gone = l.is_none_or(|li| deleted_at >= li.updated_at);
             let remote_gone = r.is_none_or(|ri| deleted_at >= ri.updated_at);
             if local_gone && remote_gone {
                 continue;
             }
-            tombstones.remove(tp);
+            revived.insert(id);
         }
         match (l, r) {
             (None, Some(ri)) => merged.push(ri.clone()),
@@ -78,17 +91,23 @@ pub fn merge(local: &Vault, remote: &Vault, last_synced_at: i64) -> MergeResult 
             (None, None) => {}
         }
     }
+    tombstones.retain(|t| !revived.contains(t.id.as_str()));
 
     // 标签：本地顺序优先，同 id 本地值获胜。
-    let mut labels: Vec<Label> = Vec::new();
+    let mut labels: Vec<Label> = Vec::with_capacity(local.labels.len() + remote.labels.len());
+    let mut label_idx: HashMap<&str, usize> = HashMap::new();
     for l in &local.labels {
-        match labels.iter_mut().find(|x| x.id == l.id) {
-            Some(existing) => *existing = l.clone(),
-            None => labels.push(l.clone()),
+        match label_idx.get(l.id.as_str()) {
+            Some(&i) => labels[i] = l.clone(),
+            None => {
+                label_idx.insert(l.id.as_str(), labels.len());
+                labels.push(l.clone());
+            }
         }
     }
     for l in &remote.labels {
-        if !labels.iter().any(|x| x.id == l.id) {
+        if let std::collections::hash_map::Entry::Vacant(e) = label_idx.entry(l.id.as_str()) {
+            e.insert(labels.len());
             labels.push(l.clone());
         }
     }

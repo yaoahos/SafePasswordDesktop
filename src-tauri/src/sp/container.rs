@@ -6,8 +6,8 @@
 //! 主密码只用于派生 KEK；真正加密数据的是随机 DEK。修改主密码只需重新包裹 DEK。
 
 use crate::sp::crypto::{
-    decrypt, derive_key, encrypt, random_bytes, to_base64, unwrap_dek, wrap_dek, PBKDF2_ITERATIONS,
-    KEY_BYTES,
+    ct_eq, decrypt, derive_key, encrypt, random_bytes, to_base64, unwrap_dek, wipe, wrap_dek,
+    PBKDF2_ITERATIONS, KEY_BYTES,
 };
 use crate::sp::fsutil::write_atomic;
 use crate::sp::model::Vault;
@@ -123,11 +123,13 @@ fn ensure_content_key(vault: &mut Vault) {
 impl VaultContainer {
     pub fn create(mut vault: Vault, password: &str) -> Self {
         let salt = random_bytes(SALT_BYTES);
-        let kek = derive_key(password, &salt, PBKDF2_ITERATIONS);
+        let mut kek = derive_key(password, &salt, PBKDF2_ITERATIONS);
         let dek = random_bytes(KEY_BYTES);
         let mut dek_arr = [0u8; KEY_BYTES];
         dek_arr.copy_from_slice(&dek);
         let wrapped = wrap_dek(&kek, &dek_arr).expect("AES-GCM wrap 不会失败");
+        // KEK 只在包裹 DEK 时用一次，用完立刻擦掉，避免长期驻留内存
+        wipe(&mut kek);
         ensure_content_key(&mut vault);
         VaultContainer {
             vault,
@@ -141,14 +143,20 @@ impl VaultContainer {
     pub fn open(bytes: &[u8], password: &str) -> Result<Self, ContainerError> {
         let header = read_header(bytes)
             .map_err(|e| ContainerError::Format(format!("无法读取数据库文件：{e}")))?;
-        let kek = derive_key(password, &header.salt, header.iterations);
+        let mut kek = derive_key(password, &header.salt, header.iterations);
         let dek = unwrap_dek(&kek, &header.wrapped).map_err(|_| ContainerError::WrongPassword)?;
-        let plain =
+        wipe(&mut kek);
+        let mut plain =
             decrypt(&dek, &header.payload, PAYLOAD_AAD).map_err(|_| ContainerError::WrongPassword)?;
         // Kotlin: plain.toString(Charsets.UTF_8) 再解析 —— 非法 UTF-8 会替换成 U+FFFD
-        let text = String::from_utf8_lossy(&plain);
-        let mut vault: Vault = serde_json::from_str(&text)
-            .map_err(|e| ContainerError::Format(format!("数据库内容无法解析：{e}")))?;
+        let parsed = {
+            let text = String::from_utf8_lossy(&plain);
+            serde_json::from_str::<Vault>(&text)
+        };
+        // 明文 JSON 里全是条目内容，解析完立即擦除
+        wipe(&mut plain);
+        let mut vault =
+            parsed.map_err(|e| ContainerError::Format(format!("数据库内容无法解析：{e}")))?;
         ensure_content_key(&mut vault);
         Ok(VaultContainer {
             vault,
@@ -186,8 +194,9 @@ impl VaultContainer {
     /// 修改主密码：生成新 salt，用当前迭代次数重新包裹同一个 DEK（payload 不动）。
     pub fn change_password(&self, new_password: &str) -> Self {
         let salt = random_bytes(SALT_BYTES);
-        let kek = derive_key(new_password, &salt, self.iterations);
+        let mut kek = derive_key(new_password, &salt, self.iterations);
         let wrapped = wrap_dek(&kek, &self.dek).expect("AES-GCM wrap 不会失败");
+        wipe(&mut kek);
         VaultContainer {
             vault: self.vault.clone(),
             dek: self.dek,
@@ -212,14 +221,31 @@ impl VaultContainer {
     }
 
     pub fn password_correct(&self, password: &str) -> bool {
-        let kek = derive_key(password, &self.salt, self.iterations);
-        matches!(unwrap_dek(&kek, &self.wrapped_dek), Ok(d) if d == self.dek)
+        let mut kek = derive_key(password, &self.salt, self.iterations);
+        let ok = match unwrap_dek(&kek, &self.wrapped_dek) {
+            // 常数时间比较，避免比较过程泄露 DEK 前缀信息
+            Ok(mut d) => {
+                let same = ct_eq(&d, &self.dek);
+                wipe(&mut d);
+                same
+            }
+            Err(_) => false,
+        };
+        wipe(&mut kek);
+        ok
     }
 
     /// 附件等内容密钥（base64 32 字节），contentKey 为空时先生成。
     pub fn content_key(&mut self) -> Result<Vec<u8>, String> {
         ensure_content_key(&mut self.vault);
         crate::sp::crypto::from_base64(&self.vault.content_key)
+    }
+}
+
+impl Drop for VaultContainer {
+    fn drop(&mut self) {
+        // 关闭/切换库时擦掉 DEK：这把钥匙能解开该库的全部密文，不该长期留在进程堆里
+        wipe(&mut self.dek);
     }
 }
 

@@ -80,12 +80,36 @@ pub fn from_base64(text: &str) -> Result<Vec<u8>, String> {
 }
 
 /// 大写 hex，对应 Kotlin `Crypto.toHex`（%02X）。
+/// 用查表替代 `format!`：密钥/散列有多处按字节输出，逐字节格式化会额外堆分配。
 pub fn to_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        s.push_str(&format!("{b:02X}"));
+    for &b in bytes {
+        s.push(HEX[(b >> 4) as usize] as char);
+        s.push(HEX[(b & 0x0f) as usize] as char);
     }
     s
+}
+
+/// 尽力擦除内存中的密钥/明文：`write_volatile` 阻止优化器把清零当成死代码消掉。
+/// 只能覆盖本进程这块缓冲，不能保证被换页到磁盘的内容，但能显著缩小密钥驻留窗口。
+pub fn wipe(buf: &mut [u8]) {
+    for b in buf.iter_mut() {
+        unsafe { std::ptr::write_volatile(b, 0) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}
+
+/// 常数时间比较（不因首字节不同提前返回），用于核对主密码解开出的 DEK。
+pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 #[cfg(test)]

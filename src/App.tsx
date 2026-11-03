@@ -620,6 +620,22 @@ export default function App() {
   /** 新建草稿直接丢弃（未落库） */
   const discardDraft = useCallback(() => setDraftNew(null), []);
 
+  // 列表/详情组件是 memo 的，传给它们的回调必须是稳定引用，否则每次渲染都会重建
+  const selectItem = useCallback((id: string) => {
+    setDraftNew(null);
+    setSelectItemId(id);
+  }, []);
+  const createNewLogin = useCallback(() => createFromTemplate("login"), [createFromTemplate]);
+  const toggleFavItem = useCallback((it: VaultItem) => void toggleFavorite(it), [toggleFavorite]);
+  const saveAndCreate = useCallback(() => void createFromTemplate("login"), [createFromTemplate]);
+  const detailDelete = useCallback(async () => {
+    if (draftNew) {
+      discardDraft();
+      return;
+    }
+    await trashSelected();
+  }, [draftNew, discardDraft, trashSelected]);
+
   // ------------------------------------------------------------ 过滤 / 选中
 
   const items = vault?.items ?? [];
@@ -754,12 +770,9 @@ export default function App() {
             sortAsc={sortAsc}
             onChangeSort={changeSort}
             selectedId={selectItemId}
-            onSelect={(id) => {
-              setDraftNew(null);
-              setSelectItemId(id);
-            }}
-            onNew={() => createFromTemplate("login")}
-            onToggleFavorite={(it) => void toggleFavorite(it)}
+            onSelect={selectItem}
+            onNew={createNewLogin}
+            onToggleFavorite={toggleFavItem}
             syncText={syncState?.text ?? null}
           />
           <div className="col-divider" />
@@ -769,14 +782,12 @@ export default function App() {
               labels={vault.labels}
               onSave={saveItem}
               onDuplicate={duplicateSelected}
-              onDelete={draftNew ? async () => discardDraft() : trashSelected}
+              onDelete={detailDelete}
               onRestore={restoreSelected}
               onPurge={purgeSelected}
               notify={notify}
               isNew={!!draftNew}
-              onSaveAndCreate={() => {
-                void createFromTemplate("login");
-              }}
+              onSaveAndCreate={saveAndCreate}
             />
           ) : (
             <div className="detail">

@@ -46,6 +46,14 @@ pub struct CurrentVault {
     pub password: String,
 }
 
+/// 把当前库从内存里摘下来，并顺手把主密码缓冲擦零（DEK 由 VaultContainer::drop 擦）。
+pub fn drop_current(inner: &mut AppStateInner) {
+    if let Some(mut cur) = inner.current.take() {
+        unsafe { crate::sp::crypto::wipe(cur.password.as_bytes_mut()) };
+        cur.password.clear();
+    }
+}
+
 pub struct AppStateInner {
     pub data_root: PathBuf,
     pub store: VaultStore,
@@ -264,7 +272,7 @@ pub fn open_vault(state: State<AppState>, id: String, password: String) -> CmdRe
 #[tauri::command]
 pub fn close_vault(state: State<AppState>) -> CmdResult<()> {
     if let Ok(mut inner) = state.inner.lock() {
-        inner.current = None;
+        drop_current(&mut inner);
     }
     Ok(())
 }
@@ -287,7 +295,7 @@ pub async fn delete_vault(state: State<'_, AppState>, id: String) -> CmdResult<(
             .map(|c| c.container.vault.content_key.clone())
             .filter(|k| !k.trim().is_empty());
         if inner.current.as_ref().is_some_and(|c| c.meta.id == id) {
-            inner.current = None;
+            drop_current(&mut inner);
         }
         let cfg = inner.settings.webdav.clone();
         let found = inner
@@ -781,7 +789,7 @@ pub fn backup_list(state: State<AppState>) -> CmdResult<Vec<BackupInfo>> {
             }
         }
     }
-    all.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    all.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     Ok(all)
 }
 
@@ -994,7 +1002,7 @@ async fn run_sync(
                         password,
                     });
                 }
-                Err(_) => inner.current = None,
+                Err(_) => drop_current(&mut inner),
             }
             Err(e.to_string())
         }
@@ -1061,7 +1069,7 @@ pub async fn webdav_restore_to_cloud(
                         password,
                     });
                 }
-                Err(_) => inner.current = None,
+                Err(_) => drop_current(&mut inner),
             }
             Err(e.to_string())
         }
@@ -1243,6 +1251,17 @@ pub async fn update_download_and_install(asset_url: String) -> CmdResult<String>
     if !asset_url.starts_with("https://") {
         return Err("安装包地址无效".to_string());
     }
+    // 只允许从 GitHub 的域名取安装包（重定向到 objects.githubusercontent.com 由 reqwest 跟随）
+    let host = asset_url["https://".len()..]
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or("");
+    let host_ok = host.eq_ignore_ascii_case("github.com")
+        || host.eq_ignore_ascii_case("objects.githubusercontent.com")
+        || host.eq_ignore_ascii_case("github-releases.githubusercontent.com");
+    if !host_ok {
+        return Err("安装包地址无效".to_string());
+    }
     let client = reqwest::Client::builder()
         .user_agent("SafePassword-Desktop")
         .timeout(std::time::Duration::from_secs(300))
@@ -1262,10 +1281,28 @@ pub async fn update_download_and_install(asset_url: String) -> CmdResult<String>
         .map_err(|e| format!("读取安装包失败：{e}"))?;
     let dir = std::env::temp_dir().join("SafePassword-update");
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建临时目录失败：{e}"))?;
-    let name = asset_url
+    let raw_name = asset_url
         .rsplit('/')
         .next()
         .unwrap_or("SafePassword-setup.exe");
+    // 文件名白名单：只留安全字符并强制 exe/msi 后缀，避免 ".."、分隔符之类造成路径穿越
+    let name: String = raw_name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        .collect();
+    let lower = name.to_ascii_lowercase();
+    if !(lower.ends_with(".exe") || lower.ends_with(".msi")) {
+        return Err("安装包格式不支持".to_string());
+    }
+    // 校验文件头，避免把一个错误页 / 被替换的内容当安装包执行
+    let magic_ok = if lower.ends_with(".exe") {
+        bytes.starts_with(b"MZ")
+    } else {
+        bytes.starts_with(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1])
+    };
+    if !magic_ok || bytes.len() < 512 * 1024 {
+        return Err("安装包内容异常，已取消安装".to_string());
+    }
     let path = dir.join(name);
     std::fs::write(&path, &bytes).map_err(|e| format!("写入安装包失败：{e}"))?;
     std::process::Command::new(&path)

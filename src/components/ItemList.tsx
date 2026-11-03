@@ -1,23 +1,9 @@
+import { memo, useMemo } from "react";
 import type { Label, SortMode, VaultItem } from "../types";
 import { iconBg, itemIcon, itemMatches, labelColorCss } from "../utils";
 import { Icon } from "./icons";
 
-export function ItemList({
-  items,
-  allLabels,
-  sectionTitle,
-  query,
-  onQuery,
-  searchPasswords,
-  selectedId,
-  onSelect,
-  onNew,
-  sortMode,
-  sortAsc,
-  onChangeSort,
-  syncText,
-  onToggleFavorite,
-}: {
+type Props = {
   items: VaultItem[];
   allLabels: Label[];
   sectionTitle: string;
@@ -34,8 +20,33 @@ export function ItemList({
   onChangeSort: (m: SortMode) => void;
   /** 同步瞬时状态（对齐手机端 3 秒状态文本，显示在分类标题右侧） */
   syncText?: string | null;
-}) {
-  const visible = items.filter((i) => itemMatches(i, query, searchPasswords));
+};
+
+function ItemListInner({
+  items,
+  allLabels,
+  sectionTitle,
+  query,
+  onQuery,
+  searchPasswords,
+  selectedId,
+  onSelect,
+  onNew,
+  sortMode,
+  sortAsc,
+  onChangeSort,
+  syncText,
+  onToggleFavorite,
+}: Props) {
+  // 标签查找从 O(条目×标签) 的 find 换成 O(1) 查表
+  const labelById = useMemo(
+    () => new Map(allLabels.map((l) => [l.id, l] as const)),
+    [allLabels],
+  );
+  const visible = useMemo(
+    () => items.filter((i) => itemMatches(i, query, searchPasswords)),
+    [items, query, searchPasswords],
+  );
 
   return (
     <div className="item-list">
@@ -87,7 +98,7 @@ export function ItemList({
         {visible.map((item) => {
           const icon = itemIcon(item);
           const labels = item.labelIds
-            .map((id) => allLabels.find((l) => l.id === id))
+            .map((id) => labelById.get(id))
             .filter((l): l is Label => Boolean(l));
           return (
             <div
@@ -148,3 +159,6 @@ export function ItemList({
     </div>
   );
 }
+
+/** 列表在同步提示、Toast 等无关状态变化时不必重渲染 */
+export const ItemList = memo(ItemListInner);
