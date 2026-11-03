@@ -1849,9 +1849,7 @@ input[type="password"]::-ms-clear {
 /* 同步状态：列表头下方整行显示（空间足够放完整文案） */
 .list-sync {
   margin-top: 2px;
-  padding: 5px 10px;
-  border-radius: 8px;
-  background: var(--primary-soft);
+  padding: 2px 0;
   color: var(--primary);
   font-size: 12.5px;
   font-weight: 500;
