@@ -297,6 +297,13 @@ export default function App() {
       kind === "working" ? null : window.setTimeout(() => setSyncState(null), 3000);
   }, []);
 
+  /** 立刻清掉同步提示（静默场景用：例如用户选过"稍后处理"的云端删除） */
+  const clearSync = useCallback(() => {
+    if (syncStateTimer.current !== null) window.clearTimeout(syncStateTimer.current);
+    syncStateTimer.current = null;
+    setSyncState(null);
+  }, []);
+
   /** 同步结果落地：云端已删除 → 弹窗让用户选择；手动同步时才强制弹窗 */
   const applySync = useCallback(
     async (r: SyncSummary, vaultId: string | null, manual = false) => {
@@ -305,7 +312,10 @@ export default function App() {
         const id = vaultId ?? vault?.id ?? null;
         const name = (id && vaults.find((v) => v.id === id)?.name) || vault?.name || "";
         // 用户选过"稍后处理"的库：自动同步时静默跳过，只有手动同步才再弹
-        if (id && !manual && remoteGoneSnoozed.has(id)) return;
+        if (id && !manual && remoteGoneSnoozed.has(id)) {
+          clearSync();
+          return;
+        }
         if (id) setRemoteGone({ id, name, pending: r.message.includes("未同步") });
         flashSync("err", r.message || "云端已删除该密码库，请选择处理方式");
         return;
@@ -313,7 +323,7 @@ export default function App() {
       await refreshFromBackend();
       flashSync("ok", r.message || "已同步");
     },
-    [refreshFromBackend, flashSync, vault?.name, vault?.id, vaults, remoteGoneSnoozed],
+    [refreshFromBackend, flashSync, clearSync, vault?.name, vault?.id, vaults, remoteGoneSnoozed],
   );
 
   const gotoSelect = useCallback((vaultId?: string) => {
@@ -344,10 +354,10 @@ export default function App() {
           if (!cfg.enabled || !/^https?:\/\//i.test(cfg.baseUrl)) return;
           try {
             flashSync("working", "正在同步…");
-            const r = await webdavSync(cfg, "MERGE");
+            const r = await withSyncTimeout(webdavSync(cfg, "MERGE"));
             await applySync(r, v.id);
           } catch (e) {
-            flashSync("err", String(e));
+            flashSync("err", syncErrorText("", e));
           }
         })();
         return null;
