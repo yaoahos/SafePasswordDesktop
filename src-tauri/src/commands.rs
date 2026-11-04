@@ -1392,16 +1392,45 @@ fn format_unix_local(ts: i64) -> String {
 /// 桌面版 Release 仓库（推送后即可用；未发布时返回可读错误）
 const UPDATE_REPO: &str = "yaoahos/SafePasswordDesktop";
 
+/// 检查更新失败的原因。所有面向用户的文案都从这里出：
+/// 将来换更新源（GitHub → 自建地址 / 对象存储）时只改这个类型，前端不用动。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UpdateFailure {
+    /// 被更新服务限流；能拿到重置时间时告诉用户几点之后可以再试
+    RateLimited(Option<i64>),
+    Connect,
+    Timeout,
+    Unavailable,
+    BadPayload,
+    NoRelease,
+}
+
+impl UpdateFailure {
+    fn text(self) -> String {
+        match self {
+            UpdateFailure::RateLimited(Some(ts)) => {
+                format!("更新检查已被限制，请在 {} 后再试", format_unix_local(ts))
+            }
+            UpdateFailure::RateLimited(None) => "更新检查已被限制，请稍后再试".to_string(),
+            UpdateFailure::Connect => "连接不上更新服务，请检查网络或代理".to_string(),
+            UpdateFailure::Timeout => "更新服务响应太慢，请检查网络或代理".to_string(),
+            UpdateFailure::Unavailable => "更新服务暂时不可用，请稍后再试".to_string(),
+            UpdateFailure::BadPayload => "更新服务返回内容异常，请稍后再试".to_string(),
+            UpdateFailure::NoRelease => "还没有可更新的版本".to_string(),
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn check_update(app_version: String) -> CmdResult<UpdateInfo> {
     let client = reqwest::Client::builder()
         .user_agent("SafePassword-Desktop")
         .timeout(std::time::Duration::from_secs(20))
         .build()
-        .map_err(|e| format!("无法初始化网络：{e}"))?;
+        .map_err(|e| format!("初始化网络失败：{e}"))?;
     let url = format!("https://api.github.com/repos/{UPDATE_REPO}/releases/latest");
-    // 网络抖动重试两次（限流与 4xx/5xx 不重试，避免白白消耗配额）
-    let mut last_err = String::new();
+    // 网络抖动重试两次；限流与 4xx/5xx 不重试，避免白白消耗配额
+    let mut last_err = UpdateFailure::Connect;
     let mut resp = None;
     for attempt in 1..=3u32 {
         match client.get(&url).send().await {
@@ -1411,9 +1440,9 @@ pub async fn check_update(app_version: String) -> CmdResult<UpdateInfo> {
             }
             Err(e) => {
                 last_err = if e.is_timeout() {
-                    "GitHub 响应太慢，请检查网络或代理".to_string()
+                    UpdateFailure::Timeout
                 } else {
-                    "连不上 GitHub，请检查网络或代理".to_string()
+                    UpdateFailure::Connect
                 };
                 if attempt < 3 {
                     tokio::time::sleep(std::time::Duration::from_millis(700 * attempt as u64)).await;
@@ -1423,13 +1452,13 @@ pub async fn check_update(app_version: String) -> CmdResult<UpdateInfo> {
     }
     let resp = match resp {
         Some(r) => r,
-        None => return Err(last_err),
+        None => return Err(last_err.text()),
     };
     let status = resp.status();
     if status == reqwest::StatusCode::NOT_FOUND {
-        return Err("还没有可更新的版本".to_string());
+        return Err(UpdateFailure::NoRelease.text());
     }
-    // GitHub 匿名接口每小时 60 次；403/429 基本就是被限流，给一句人话而不是裸 HTTP 码
+    // 403/429 是限流，不是用户网络问题；有重置时间就说清楚几点能再试
     if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::TOO_MANY_REQUESTS
     {
         let reset = resp
@@ -1437,23 +1466,19 @@ pub async fn check_update(app_version: String) -> CmdResult<UpdateInfo> {
             .get("x-ratelimit-reset")
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.trim().parse::<i64>().ok());
-        return Err(match reset {
-            Some(ts) => format!("更新检查次数用完了，请在 {} 后再试", format_unix_local(ts)),
-            None => "更新检查次数用完了，请过一会儿再试".to_string(),
-        });
+        return Err(UpdateFailure::RateLimited(reset).text());
     }
     if !status.is_success() {
-        let code = status.as_u16();
-        // 响应体只写日志，不贴给用户：多半是 JSON，读了也没用
+        // 响应体只写日志，不贴给用户
         if let Ok(detail) = resp.text().await {
-            eprintln!("check_update: GitHub 返回 HTTP {code}：{detail}");
+            eprintln!("check_update: 更新服务返回 {status}：{detail}");
         }
-        return Err(format!("GitHub 暂时不可用（{code}），请稍后再试"));
+        return Err(UpdateFailure::Unavailable.text());
     }
     let body: serde_json::Value = resp
         .json()
         .await
-        .map_err(|_| "GitHub 返回内容异常，请稍后再试".to_string())?;
+        .map_err(|_| UpdateFailure::BadPayload.text())?;
     let tag = body
         .get("tag_name")
         .and_then(|v| v.as_str())
