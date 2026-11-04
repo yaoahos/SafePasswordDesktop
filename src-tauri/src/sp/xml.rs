@@ -6,13 +6,13 @@
 
 use std::collections::HashMap;
 
-use crate::sp::model::{Field, FieldType, ItemStatus, Vault, VaultItem, now_ms};
+use crate::sp::model::{LabelSpec, Field, FieldType, ItemStatus, Vault, VaultItem, now_ms};
 use crate::sp::model::TemplateIds;
 
 #[derive(Debug)]
 pub struct XmlCard {
     pub item: VaultItem,
-    pub label_names: Vec<String>,
+    pub labels: Vec<LabelSpec>,
 }
 
 /// 与 Kotlin 一致的最小 DOM 节点。
@@ -70,14 +70,21 @@ pub fn parse(text: &str) -> Result<Vec<XmlCard>, String> {
     if !root.name.eq_ignore_ascii_case("database") {
         return Err("不是有效的 XML 导出文件（根节点应为 database）".to_string());
     }
-    let mut labels: HashMap<String, String> = HashMap::new();
+    let mut labels: HashMap<String, LabelSpec> = HashMap::new();
     for label in root.child_els("label") {
         let id = label.attr("id").trim().to_string();
         let name = label.attr("name").trim().to_string();
         if id.is_empty() || name.is_empty() {
             continue;
         }
-        labels.insert(id, name);
+        labels.insert(
+            id,
+            LabelSpec {
+                name,
+                color: LabelSpec::parse_color(&label.attr("color")),
+                sort_order: label.attr("order").trim().parse::<i32>().ok(),
+            },
+        );
     }
     let mut cards = Vec::new();
     for card in root.child_els("card") {
@@ -216,7 +223,7 @@ fn unescape_xml(raw: &str) -> String {
     out
 }
 
-fn parse_card(card: &XmlEl, labels: &HashMap<String, String>) -> Option<XmlCard> {
+fn parse_card(card: &XmlEl, labels: &HashMap<String, LabelSpec>) -> Option<XmlCard> {
     if is_true(&card.attr("template")) || is_true(&card.attr("deleted")) {
         return None;
     }
@@ -272,15 +279,18 @@ fn parse_card(card: &XmlEl, labels: &HashMap<String, String>) -> Option<XmlCard>
         note_parts.insert(0, notes_from_element.clone());
     }
 
-    let mut label_names: Vec<String> = Vec::new();
+    let mut card_labels: Vec<LabelSpec> = Vec::new();
     for element in card.child_els("label_id") {
         let id = element.text.trim().to_string();
         if id.is_empty() {
             continue;
         }
-        let name = labels.get(&id).cloned().unwrap_or_else(|| format!("标签 {id}"));
-        if !label_names.contains(&name) {
-            label_names.push(name);
+        let spec = labels
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| LabelSpec::named(format!("标签 {id}")));
+        if !card_labels.iter().any(|l| l.name == spec.name) {
+            card_labels.push(spec);
         }
     }
 
@@ -341,7 +351,10 @@ fn parse_card(card: &XmlEl, labels: &HashMap<String, String>) -> Option<XmlCard>
         icon_data: image,
         ..Default::default()
     };
-    Some(XmlCard { item, label_names })
+    Some(XmlCard {
+        item,
+        labels: card_labels,
+    })
 }
 
 /// Kotlin: substringAfter("base64,", rawImage).filterNot { it.isWhitespace() }
@@ -511,9 +524,11 @@ pub fn export(vault: &Vault) -> String {
     for (index, label) in vault.labels.iter().enumerate() {
         let numeric = (index + 1).to_string();
         out.push_str(&format!(
-            "  <label id=\"{}\" name=\"{}\"/>\n",
+            "  <label id=\"{}\" name=\"{}\" color=\"{}\" order=\"{}\"/>\n",
             numeric,
-            escape_attr(&label.name)
+            escape_attr(&label.name),
+            LabelSpec::color_hex(label.color),
+            label.sort_order
         ));
         label_ids.insert(label.id.as_str(), numeric);
     }
@@ -662,7 +677,7 @@ mod tests {
         assert_eq!(gh.item.template_id, TemplateIds::LOGIN);
         assert_eq!(gh.item.notes, "开发账号");
         assert_eq!(gh.item.url, "https://github.com");
-        assert_eq!(gh.label_names, vec!["工作"]);
+        assert_eq!(gh.labels.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), vec!["工作"]);
         assert_eq!(gh.item.fields.len(), 3);
         assert_eq!(gh.item.fields[0].r#type, FieldType::Text); // login 且名字不含 email → TEXT
         assert_eq!(gh.item.fields[1].r#type, FieldType::Password);
@@ -672,7 +687,7 @@ mod tests {
         let bank = &cards[1];
         assert_eq!(bank.item.template_id, TemplateIds::BANK_CARD);
         // label 9 不存在 → "标签 9"
-        assert_eq!(bank.label_names, vec!["银行", "标签 9"]);
+        assert_eq!(bank.labels.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), vec!["银行", "标签 9"]);
         assert_eq!(bank.item.fields[2].label, "CVV");
         assert_eq!(bank.item.fields[2].r#type, FieldType::Password); // cvv → PASSWORD
 
@@ -803,7 +818,7 @@ mod tests {
         assert_eq!(back.item.notes, "备注1\n\n备注2");
         assert_eq!(back.item.url, "https://example.com/?a=1&b=2");
         assert!(back.item.favorite);
-        assert_eq!(back.label_names, vec!["银行&<测试>"]);
+        assert_eq!(back.labels.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), vec!["银行&<测试>"]);
         assert_eq!(back.item.updated_at, 1_700_000_123_000);
         // 字段：用户名 + 密码 + 追加的 website（item.url 无对应字段时 Kotlin 也会追加）
         assert_eq!(back.item.fields.len(), 3);
@@ -843,5 +858,46 @@ mod tests {
         assert_eq!(unescape_xml("a&amp;b&lt;c&gt;d&quot;e&apos;f"), "a&b<c>d\"e'f");
         assert_eq!(unescape_xml("&#65;&#x42;"), "AB");
         assert_eq!(unescape_xml("not an entity & here"), "not an entity & here");
+    }
+
+    #[test]
+    fn label_color_and_order_survive_roundtrip() {
+        let mut vault = Vault::default();
+        let color: i32 = 0xFF33_66CCu32 as i32;
+        vault.labels.push(Label {
+            id: "lbl-1".to_string(),
+            name: "工作".to_string(),
+            color,
+            sort_order: 4,
+        });
+        let mut item = VaultItem {
+            title: "站点".to_string(),
+            label_ids: vec!["lbl-1".to_string()],
+            ..Default::default()
+        };
+        item.status = ItemStatus::Active;
+        item.fields.push(Field {
+            label: "秘密".to_string(),
+            value: "s3cr3t".to_string(),
+            r#type: FieldType::Secret,
+            sensitive: true,
+            ..Default::default()
+        });
+        vault.items.push(item);
+
+        let xml = export(&vault);
+        assert!(xml.contains("color=\"#FF3366CC\""), "xml={xml}");
+        assert!(xml.contains("order=\"4\""));
+        let cards = parse(&xml).unwrap();
+        assert_eq!(cards[0].labels.len(), 1);
+        assert_eq!(cards[0].labels[0].name, "工作");
+        assert_eq!(cards[0].labels[0].color, Some(color));
+        assert_eq!(cards[0].labels[0].sort_order, Some(4));
+        // 字段类型仍然带回来
+        assert!(cards[0]
+            .item
+            .fields
+            .iter()
+            .any(|f| f.r#type == FieldType::Secret));
     }
 }

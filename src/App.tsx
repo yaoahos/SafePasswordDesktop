@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./styles.css";
 import {
+  checkUpdate,
   closeVault,
   createVault,
   deleteItem,
@@ -31,6 +32,7 @@ import { SecurityDialog } from "./dialogs/SecurityDialog";
 import { SettingsDialog } from "./dialogs/SettingsDialog";
 import { ThemeDialog } from "./dialogs/ThemeDialog";
 import { duplicateItem, itemMatches, newItemFromTemplate } from "./utils";
+import { APP_VERSION } from "./version";
 
 type DialogKind = TopAction | "LABELS" | null;
 
@@ -47,6 +49,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   searchPasswords: false,
   defaultLabelId: null,
   lastVaultId: null,
+  checkUpdatesOnLaunch: true,
 };
 
 /** 同步请求上限：超时给出明确提示，避免界面一直停在"同步中…" */
@@ -174,6 +177,27 @@ export default function App() {
   const notify = useCallback((msg: string, kind: ToastKind = "info") => {
     setToast({ id: Date.now(), msg, kind });
   }, []);
+
+  // ------------------------------------------------------------ 启动时检查更新（可在「关于」里关闭）
+
+  const autoUpdateChecked = useRef(false);
+  useEffect(() => {
+    if (!booted || autoUpdateChecked.current || !settings.checkUpdatesOnLaunch) return;
+    autoUpdateChecked.current = true;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const r = await checkUpdate(APP_VERSION);
+          if (r.hasUpdate) {
+            notify(`发现新版本 ${r.latest}，可在「关于 SafePassword」中更新`, "success");
+          }
+        } catch {
+          // 启动检查静默失败：离线或网络受限时不该打扰用户
+        }
+      })();
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [booted, settings.checkUpdatesOnLaunch, notify]);
 
   useEffect(() => {
     if (!toast) return;

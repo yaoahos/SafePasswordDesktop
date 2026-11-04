@@ -1,5 +1,6 @@
 import { Icon, type IconName } from "./icons";
 import { WindowControls } from "./WindowControls";
+import { APP_VERSION } from "../version";
 
 export type TopAction =
   | "GENERATOR"
@@ -10,7 +11,7 @@ export type TopAction =
   | "SYNC"
   | "LOCK";
 
-export const APP_VERSION = "1.0.0";
+export { APP_VERSION };
 
 /** 顶部动作：线性图标、放大加深；WebDAV 与导入入口已移除（改由设置页承载） */
 export const TOP_ACTIONS: { key: TopAction; label: string; icon: IconName; color: string }[] = [

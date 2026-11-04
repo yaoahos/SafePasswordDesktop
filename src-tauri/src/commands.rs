@@ -22,7 +22,8 @@ use crate::sp::fsutil::write_atomic;
 use crate::sp::generator::{self, GeneratorOptions};
 use crate::sp::hibp::HibpClient;
 use crate::sp::model::{
-    new_id, now_ms, FieldHistoryEntry, FieldType, Label, Vault, VaultItem, VaultMeta,
+    default_label_color, new_id, now_ms, FieldHistoryEntry, FieldType, Label, LabelSpec, Vault,
+    VaultItem, VaultMeta,
 };
 use crate::sp::xml;
 use crate::sp::security::{self, SecurityReport};
@@ -101,6 +102,13 @@ pub struct AppSettings {
     pub default_label_id: Option<String>,
     /// 最近打开的密码库（对齐手机端 lastVaultId）
     pub last_vault_id: Option<String>,
+    /// 启动时自动检查更新（新版本只提示，不自动下载）
+    #[serde(default = "default_true")]
+    pub check_updates_on_launch: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for AppSettings {
@@ -118,6 +126,7 @@ impl Default for AppSettings {
             search_passwords: false,
             default_label_id: None,
             last_vault_id: None,
+            check_updates_on_launch: true,
         }
     }
 }
@@ -588,26 +597,27 @@ pub fn import_json_items(state: State<AppState>, json: String) -> CmdResult<u32>
     if vault.items.is_empty() {
         return Err("JSON 里没有可导入的条目".to_string());
     }
-    let labels: Vec<(String, String)> = vault
-        .labels
-        .iter()
-        .map(|l| (l.id.clone(), l.name.clone()))
-        .collect();
-    let pairs: Vec<(VaultItem, Vec<String>)> = vault
+    let mut by_id: HashMap<String, LabelSpec> = HashMap::new();
+    for label in &vault.labels {
+        by_id.insert(
+            label.id.clone(),
+            LabelSpec {
+                name: label.name.clone(),
+                color: Some(label.color),
+                sort_order: Some(label.sort_order),
+            },
+        );
+    }
+    let pairs: Vec<(VaultItem, Vec<LabelSpec>)> = vault
         .items
         .into_iter()
         .map(|it| {
-            let names = it
+            let specs = it
                 .label_ids
                 .iter()
-                .filter_map(|id| {
-                    labels
-                        .iter()
-                        .find(|(lid, _)| lid == id)
-                        .map(|(_, name)| name.clone())
-                })
+                .filter_map(|id| by_id.get(id).cloned())
                 .collect::<Vec<_>>();
-            (it, names)
+            (it, specs)
         })
         .collect();
     let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
@@ -692,21 +702,47 @@ pub async fn check_email_breaches(state: State<'_, AppState>, email: String) -> 
 // ---------------------------------------------------------------- 导入 / 导出
 
 /// 给导入的条目解析标签：按名字找已有标签，找不到就建一个。
-fn resolve_labels(vault: &mut Vault, names: Vec<String>) -> Vec<String> {
+///
+/// 导入文件里带的颜色/排序只在"新建标签"时生效；同名标签已存在时沿用库里
+/// 的样式，只有当库里还是默认颜色时才补上（避免导入把用户调过的样式覆盖掉）。
+fn resolve_labels(vault: &mut Vault, specs: Vec<LabelSpec>) -> Vec<String> {
     let mut ids = Vec::new();
-    for name in names {
-        let name = name.trim().to_string();
+    for spec in specs {
+        let name = spec.name.trim().to_string();
         if name.is_empty() {
             continue;
         }
-        let existing = vault.labels.iter().find(|l| l.name == name);
+        let existing = vault.labels.iter().position(|l| l.name == name);
         let id = match existing {
-            Some(l) => l.id.clone(),
+            Some(index) => {
+                let label = &mut vault.labels[index];
+                if label.color == default_label_color() {
+                    if let Some(color) = spec.color {
+                        label.color = color;
+                    }
+                }
+                if label.sort_order == 0 {
+                    if let Some(order) = spec.sort_order {
+                        label.sort_order = order;
+                    }
+                }
+                label.id.clone()
+            }
             None => {
+                let sort_order = spec.sort_order.unwrap_or_else(|| {
+                    vault
+                        .labels
+                        .iter()
+                        .map(|l| l.sort_order)
+                        .max()
+                        .unwrap_or(-1)
+                        + 1
+                });
                 let label = Label {
                     id: new_id(),
                     name: name.clone(),
-                    ..Default::default()
+                    color: spec.color.unwrap_or_else(default_label_color),
+                    sort_order,
                 };
                 let id = label.id.clone();
                 vault.labels.push(label);
@@ -720,11 +756,14 @@ fn resolve_labels(vault: &mut Vault, names: Vec<String>) -> Vec<String> {
     ids
 }
 
-fn append_items(inner: &mut AppStateInner, pairs: Vec<(VaultItem, Vec<String>)>) -> CmdResult<u32> {
+fn append_items(
+    inner: &mut AppStateInner,
+    pairs: Vec<(VaultItem, Vec<LabelSpec>)>,
+) -> CmdResult<u32> {
     let cur = inner.current.as_mut().ok_or(NO_OPEN_VAULT)?;
     let mut count = 0u32;
-    for (mut item, names) in pairs {
-        item.label_ids = resolve_labels(&mut cur.container.vault, names);
+    for (mut item, specs) in pairs {
+        item.label_ids = resolve_labels(&mut cur.container.vault, specs);
         cur.container.vault.items.push(item);
         count += 1;
     }
@@ -756,11 +795,10 @@ pub fn export_vault_json(state: State<AppState>) -> CmdResult<String> {
 
 #[tauri::command]
 pub fn import_csv(state: State<AppState>, text: String) -> CmdResult<u32> {
-    let items = codec::items_from_csv(&text);
-    if items.is_empty() {
+    let pairs = codec::items_from_csv(&text);
+    if pairs.is_empty() {
         return Err("没有解析到可导入的条目（需要标题/用户名/密码列）".to_string());
     }
-    let pairs: Vec<(VaultItem, Vec<String>)> = items.into_iter().map(|i| (i, Vec::new())).collect();
     let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
     append_items(&mut inner, pairs)
 }
@@ -771,10 +809,8 @@ pub fn import_xml(state: State<AppState>, text: String) -> CmdResult<u32> {
     if cards.is_empty() {
         return Err("XML 里没有可导入的条目".to_string());
     }
-    let pairs: Vec<(VaultItem, Vec<String>)> = cards
-        .into_iter()
-        .map(|c| (c.item, c.label_names))
-        .collect();
+    let pairs: Vec<(VaultItem, Vec<LabelSpec>)> =
+        cards.into_iter().map(|c| (c.item, c.labels)).collect();
     let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
     append_items(&mut inner, pairs)
 }
@@ -1500,5 +1536,29 @@ mod tests {
         let mut new2 = new.clone();
         record_field_history(&old2, &mut new2);
         assert_eq!(new2.fields[0].history.len(), HISTORY_LIMIT);
+    }
+
+    #[test]
+    fn imported_labels_keep_color_and_order() {
+        let mut vault = Vault::default();
+        let color: i32 = 0xFF33_66CCu32 as i32;
+        // 新标签：颜色/排序按文件里的来
+        let ids = resolve_labels(
+            &mut vault,
+            vec![LabelSpec {
+                name: "工作".to_string(),
+                color: Some(color),
+                sort_order: Some(3),
+            }],
+        );
+        assert_eq!(ids.len(), 1);
+        let created = vault.labels.iter().find(|l| l.name == "工作").unwrap();
+        assert_eq!(created.color, color);
+        assert_eq!(created.sort_order, 3);
+
+        // 同名标签已存在：沿用库里的 id，不重复创建
+        let ids2 = resolve_labels(&mut vault, vec![LabelSpec::named("工作")]);
+        assert_eq!(ids2, ids);
+        assert_eq!(vault.labels.len(), 1);
     }
 }
