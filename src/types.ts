@@ -127,6 +127,7 @@ export interface UpdateInfo {
   hasUpdate: boolean;
   url: string;
   assetUrl: string;
+  assetSize: number;
   notes: string;
 }
 
