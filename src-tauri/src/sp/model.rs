@@ -563,6 +563,10 @@ pub struct VaultMeta {
     pub last_opened_at: i64,
     #[serde(default)]
     pub last_synced_at: i64,
+    /// 云端文件名键（由内容密钥派生）：用于判断"云端某个库是不是本机这个库"。
+    /// 同名但键不同的，是另一个库，不能算"已在本机"。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cloud_key: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

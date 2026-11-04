@@ -290,6 +290,13 @@ pub fn open_vault(state: State<AppState>, id: String, password: String) -> CmdRe
     let container = inner.store.open(&meta, &password).map_err(err)?;
     let vault = container.vault.clone();
     let meta_id = meta.id.clone();
+    // 记下这个库的云端键：设置页判"已在本机"要看键，不能只看名字
+    let mut meta = meta;
+    let key = cloud_cache_key(&vault);
+    if !key.is_empty() && meta.cloud_key != key {
+        meta.cloud_key = key;
+        let _ = inner.store.update_meta(&meta);
+    }
     inner.current = Some(CurrentVault {
         container,
         meta,
@@ -1153,6 +1160,12 @@ async fn run_sync(
                 engine.cache_entry(),
             );
             inner.persist_sync_cache();
+            // 记下云端键：以后判断"云端这个库是不是本机这个库"只看键，不看名字
+            let key = cloud_cache_key(&restored.container.vault);
+            if !key.is_empty() && restored.meta.cloud_key != key {
+                restored.meta.cloud_key = key;
+                let _ = inner.store.update_meta(&restored.meta);
+            }
             inner.current = Some(restored);
             Ok(summary)
         }
@@ -1226,6 +1239,12 @@ pub async fn webdav_restore_to_cloud(
                 engine.cache_entry(),
             );
             inner.persist_sync_cache();
+            // 记下云端键：以后判断"云端这个库是不是本机这个库"只看键，不看名字
+            let key = cloud_cache_key(&restored.container.vault);
+            if !key.is_empty() && restored.meta.cloud_key != key {
+                restored.meta.cloud_key = key;
+                let _ = inner.store.update_meta(&restored.meta);
+            }
             inner.current = Some(restored);
             Ok(summary)
         }

@@ -93,6 +93,7 @@ impl VaultStore {
                 created_at,
                 last_opened_at: 0,
                 last_synced_at: 0,
+                cloud_key: String::new(),
             });
             changed = true;
         }
@@ -131,6 +132,8 @@ impl VaultStore {
             created_at: now_ms(),
             last_opened_at: now_ms(),
             last_synced_at: 0,
+            cloud_key: crate::sp::cloud::key_for_content(&container.vault.content_key)
+                .unwrap_or_default(),
         };
         container.save_to(&self.vault_file(&meta))?;
         let mut index = self.read_index();
