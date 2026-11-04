@@ -7,6 +7,8 @@ export interface VaultMeta {
   createdAt: number;
   lastOpenedAt: number;
   lastSyncedAt: number;
+  /** 云端文件名键（由内容密钥派生）：判断"云端某个库是不是本机的库"只看它，不看名字 */
+  cloudKey?: string;
 }
 
 /** 云端密码库清单条目（对应 sp/cloud.rs CloudVaultEntry） */

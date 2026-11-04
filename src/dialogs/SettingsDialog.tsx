@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog } from "../components/Dialog";
 import { Icon } from "../components/icons";
 import {
@@ -512,7 +512,26 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
   const [dlKey, setDlKey] = useState<string | null>(null);
   const [dlPw, setDlPw] = useState("");
 
-  const localNames = ctx.vaults.map((v) => v.name);
+  // 云端某个库是不是"本机的库"要看键（内容密钥派生），同名不同键是另一个库
+  const [curCloudKey, setCurCloudKey] = useState<string>("");
+  useEffect(() => {
+    let alive = true;
+    if (!vault) {
+      setCurCloudKey("");
+      return;
+    }
+    void cloudKey(vault.name)
+      .then((k) => {
+        if (alive) setCurCloudKey(k ?? "");
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [vault?.name, vault]);
+  const localKeys = new Set(
+    [...ctx.vaults.map((v) => v.cloudKey ?? ""), curCloudKey].filter(Boolean),
+  );
 
   const rename = async () => {
     if (!vault) return;
@@ -749,7 +768,7 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
         )}
         {cloud?.length === 0 && <div className="muted small">云端还没有密码库。</div>}
         {cloud?.map((c) => {
-          const local = localNames.includes(c.name);
+          const local = localKeys.has(c.key);
           return (
             <div className="vault-row" key={c.key}>
               <div className="grow">
