@@ -12,6 +12,7 @@ import {
   setSettings as setSettingsApi,
   currentVault,
   importVaultBytes,
+  renameVault,
   webdavSync,
   webdavPullIfChanged,
   webdavRestoreToCloud,
@@ -28,6 +29,7 @@ import { Dialog } from "./components/Dialog";
 import { AboutDialog } from "./dialogs/AboutDialog";
 import { GeneratorDialog } from "./dialogs/GeneratorDialog";
 import { LabelManagerDialog } from "./dialogs/LabelManagerDialog";
+import { NameConflictDialog } from "./dialogs/NameConflictDialog";
 import { SecurityDialog } from "./dialogs/SecurityDialog";
 import { SettingsDialog } from "./dialogs/SettingsDialog";
 import { ThemeDialog } from "./dialogs/ThemeDialog";
@@ -95,6 +97,13 @@ export default function App() {
     name: string;
     pending: boolean;
   } | null>(null);
+  /** 同步时云端已有同名密码库：让用户先给本地这个库改名，再继续同步 */
+  const [nameConflict, setNameConflict] = useState<{
+    id: string;
+    name: string;
+    message: string;
+  } | null>(null);
+  const [renamingConflict, setRenamingConflict] = useState(false);
   /** 用户选过「稍后处理」的库 id：自动同步不再弹窗，只在手动同步时提示（持久化到 localStorage） */
   const [remoteGoneSnoozed, setRemoteGoneSnoozed] = useState<Set<string>>(() => {
     try {
@@ -341,6 +350,15 @@ export default function App() {
   /** 同步结果落地：云端已删除 → 弹窗让用户选择；手动同步时才强制弹窗 */
   const applySync = useCallback(
     async (r: SyncSummary, vaultId: string | null, manual = false) => {
+      if (r.direction === "NAME_CONFLICT") {
+        // 云端已有同名库，这次没有写任何东西：让用户改名后再同步
+        const id = vaultId ?? vault?.id ?? null;
+        const name = (id && vaults.find((v) => v.id === id)?.name) || vault?.name || "";
+        if (id) setNameConflict({ id, name, message: r.message });
+        flashSync("err", r.message || "云端已有同名密码库，请改名后再同步");
+        clearSync();
+        return;
+      }
       if (r.direction === "REMOTE_DELETED") {
         // 不自动删除：弹窗让用户选择（删除本地 / 恢复到云端）
         const id = vaultId ?? vault?.id ?? null;
@@ -570,6 +588,29 @@ export default function App() {
       flashSync("err", syncErrorText("", e));
     }
   }, [settings.webdav, vault?.id, notify, applySync, flashSync]);
+
+  /** 同名冲突弹窗里确认改名：改完名字立刻再同步一次 */
+  const resolveNameConflict = useCallback(
+    async (newName: string) => {
+      if (!nameConflict || renamingConflict) return;
+      setRenamingConflict(true);
+      try {
+        await renameVault(nameConflict.id, newName);
+        setNameConflict(null);
+        await refreshFromBackend();
+        const cfg = settings.webdav;
+        if (!cfg.enabled || !/^https?:\/\//i.test(cfg.baseUrl)) return;
+        flashSync("working", "同步中…");
+        const r = await withSyncTimeout(webdavSync(cfg, "MERGE"));
+        await applySync(r, nameConflict.id, true);
+      } catch (e) {
+        flashSync("err", `改名失败：${String(e)}`);
+      } finally {
+        setRenamingConflict(false);
+      }
+    },
+    [nameConflict, renamingConflict, refreshFromBackend, settings.webdav, applySync, flashSync],
+  );
 
   // ------------------------------------------------------------ 条目操作
 
@@ -929,6 +970,16 @@ export default function App() {
             </button>
           </div>
         </Dialog>
+      )}
+
+      {nameConflict && (
+        <NameConflictDialog
+          currentName={nameConflict.name}
+          message={nameConflict.message}
+          busy={renamingConflict}
+          onCancel={() => setNameConflict(null)}
+          onRename={(name) => void resolveNameConflict(name)}
+        />
       )}
 
       {toast && <div className={`toast ${toast.kind}`}>{toast.msg}</div>}

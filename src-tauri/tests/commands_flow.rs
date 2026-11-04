@@ -125,6 +125,7 @@ fn ui_full_flow_roundtrip() {
         spv,
         "pw-主密码123🚀".into(),
         "导入副本".into(),
+        None,
     )
     .unwrap();
     let v3 = c::current_vault(app2.state::<AppState>()).unwrap().unwrap();

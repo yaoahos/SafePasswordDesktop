@@ -88,6 +88,23 @@ pub enum SyncDirection {
     Conflict,
     /// 云端已删除该密码库（别处删除），调用方应删除本地库并回到解锁 / 初始界面
     RemoteDeleted,
+    /// 云端已有同名但不同内容的密码库：本次不上传，调用方应提示用户改名后再同步
+    NameConflict,
+}
+
+/// 上传结果：同名冲突时不上传，把云端那一端的库名回给调用方提示用户改名。
+enum UploadOutcome {
+    Uploaded,
+    NameTaken(String),
+}
+
+fn name_conflict_result(local: VaultContainer, other_name: String) -> SyncResult {
+    SyncResult {
+        container: local,
+        direction: SyncDirection::NameConflict,
+        conflicts: 0,
+        message: format!("云端已有同名密码库「{other_name}」，请改名后再同步"),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -252,9 +269,15 @@ impl SyncEngine {
                         });
                     }
                     local.ensure_content_key();
+                    let prev_synced = local.vault.last_synced_at;
                     local.vault.last_synced_at = local.vault.updated_at.max(now_ms());
                     let stable_key = self.remote_key.clone();
-                    self.upload(&remote_path, &mut local, &stable_key).await?;
+                    if let UploadOutcome::NameTaken(other) =
+                        self.upload(&remote_path, &mut local, &stable_key).await?
+                    {
+                        local.vault.last_synced_at = prev_synced;
+                        return Ok(name_conflict_result(local, other));
+                    }
                     return Ok(SyncResult {
                         container: local,
                         direction: SyncDirection::Uploaded,
@@ -380,8 +403,15 @@ impl SyncEngine {
             local.ensure_content_key();
             local.vault.touch();
             // 不变式：lastSyncedAt >= updatedAt（"本地是否有未同步修改"的判定依赖它）
+            let prev_synced = local.vault.last_synced_at;
             local.vault.last_synced_at = local.vault.updated_at;
-            self.upload(&remote_path, &mut local, &remote_key).await?;
+            if let UploadOutcome::NameTaken(other) = self
+                .upload(&remote_path, &mut local, &remote_key)
+                .await?
+            {
+                local.vault.last_synced_at = prev_synced;
+                return Ok(name_conflict_result(local, other));
+            }
             return Ok(SyncResult {
                 container: local,
                 direction: SyncDirection::Uploaded,
@@ -443,8 +473,15 @@ impl SyncEngine {
 
         let result = match conflict_strategy {
             ConflictStrategy::KeepLocal if local_changed => {
+                let prev_synced = local.vault.last_synced_at;
                 local.vault.last_synced_at = local.vault.updated_at.max(now_ms());
-                self.upload(&remote_path, &mut local, &remote_key).await?;
+                if let UploadOutcome::NameTaken(other) = self
+                    .upload(&remote_path, &mut local, &remote_key)
+                    .await?
+                {
+                    local.vault.last_synced_at = prev_synced;
+                    return Ok(name_conflict_result(local, other));
+                }
                 Ok(SyncResult {
                     container: local,
                     direction: SyncDirection::Uploaded,
@@ -498,7 +535,12 @@ impl SyncEngine {
                         },
                     });
                 }
-                self.upload(&remote_path, &mut updated, &remote_key).await?;
+                if let UploadOutcome::NameTaken(other) = self
+                    .upload(&remote_path, &mut updated, &remote_key)
+                    .await?
+                {
+                    return Ok(name_conflict_result(updated, other));
+                }
                 // 合并结果与本机一致 → 云端没带来新内容，这次只是本机改动，记为 Uploaded；
                 // 否则说明真的合并了两边的改动。
                 let only_local = content_hash(&updated.vault) == local_hash;
@@ -558,7 +600,11 @@ impl SyncEngine {
         local.ensure_content_key();
         local.vault.touch();
         local.vault.last_synced_at = local.vault.updated_at;
-        self.upload(&remote_path, &mut local, &stable_key).await?;
+        if let UploadOutcome::NameTaken(other) =
+            self.upload(&remote_path, &mut local, &stable_key).await?
+        {
+            return Ok(name_conflict_result(local, other));
+        }
         Ok(SyncResult {
             container: local,
             direction: SyncDirection::Uploaded,
@@ -568,12 +614,31 @@ impl SyncEngine {
     }
 
     /// 上传密码库本体，并顺带维护云端清单（清单失败不影响整次同步）。
+    ///
+    /// 写库之前先读清单：云端若已有**同名但不同 key** 的密码库，直接返回 `NameTaken`
+    /// 不再写入，避免云端出现两个同名库（key 不同、用户无从分辨）。
     async fn upload(
         &mut self,
         remote_path: &str,
         container: &mut VaultContainer,
         remote_key: &str,
-    ) -> Result<(), SyncError> {
+    ) -> Result<UploadOutcome, SyncError> {
+        let manifest_text = self
+            .webdav
+            .get(&self.config.manifest_path())
+            .await
+            .ok()
+            .flatten()
+            .and_then(|b| String::from_utf8(b).ok());
+        let mut manifest = CloudManifest::parse(manifest_text.as_deref());
+        let want = container.vault.name.trim().to_lowercase();
+        if let Some(other) = manifest
+            .vaults
+            .iter()
+            .find(|e| e.key != remote_key && e.name.trim().to_lowercase() == want)
+        {
+            return Ok(UploadOutcome::NameTaken(other.name.clone()));
+        }
         let bytes = container.to_bytes();
         self.webdav.put(remote_path, &bytes).await.map_err(dav_err)?;
         // 记下新的版本指纹：下一次同步用 HEAD 比对即可，不必再下载整包。
@@ -586,16 +651,9 @@ impl SyncEngine {
             .flatten()
             .map(|s| RemoteRev::from_stat(&s));
         self.cache.content_hash = content_hash(&container.vault);
-        let manifest_text = self
-            .webdav
-            .get(&self.config.manifest_path())
-            .await
-            .ok()
-            .flatten()
-            .and_then(|b| String::from_utf8(b).ok());
-        let mut manifest = CloudManifest::parse(manifest_text.as_deref());
         manifest.upsert(
-            remote_key,            &container.vault.name,
+            remote_key,
+            &container.vault.name,
             container.vault.updated_at,
             bytes.len() as i64,
         );
@@ -603,7 +661,7 @@ impl SyncEngine {
             .webdav
             .put(&self.config.manifest_path(), manifest.to_json().as_bytes())
             .await;
-        Ok(())
+        Ok(UploadOutcome::Uploaded)
     }
 }
 
