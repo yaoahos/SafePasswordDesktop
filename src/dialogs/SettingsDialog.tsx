@@ -525,22 +525,49 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
     setBusy("rename");
     try {
       const oldKey = await cloudKey(vault.name);
+      // 云端已有同名、但不是同一个库 → 直接拒绝改名（否则本地改完、云端传不上去，
+      // 下次同步又弹同名冲突，用户看到的是一连串莫名其妙的报错）。
+      if (cfg.baseUrl.trim() && cfg.enabled) {
+        try {
+          const list = await webdavListCloud(cfg);
+          const clash = list.find(
+            (e) =>
+              e.name.trim().toLowerCase() === trimmed.toLowerCase() &&
+              !(oldKey && e.key === oldKey),
+          );
+          if (clash) {
+            setMsg({ ok: false, text: `云端已有同名密码库「${clash.name}」，请换一个名字` });
+            return;
+          }
+        } catch {
+          /* 云端清单读不到时不拦，交给同步阶段提示 */
+        }
+      }
       await renameVault(vault.id, trimmed);
       // 云端文件名由内容密钥派生：改名**不换文件**，只需把清单里的库名更新成新名字。
       // 只有在旧版按键名派生（键真的变了）时才需要清掉旧键文件。
       let cloudSynced = false;
+      let conflictMsg = "";
       if (cfg.baseUrl.trim() && cfg.enabled) {
         try {
-          await webdavRestoreToCloud(cfg);
-          const newKey = await cloudKey(trimmed);
-          if (oldKey && newKey && newKey !== oldKey) await webdavDeleteCloud(cfg, oldKey);
-          cloudSynced = true;
+          const r = await webdavRestoreToCloud(cfg);
+          if (r.direction === "NAME_CONFLICT") {
+            conflictMsg = r.message || "云端已有同名密码库，请换一个名字";
+          } else {
+            const newKey = await cloudKey(trimmed);
+            if (oldKey && newKey && newKey !== oldKey) await webdavDeleteCloud(cfg, oldKey);
+            cloudSynced = true;
+          }
         } catch {
           /* 云端清理失败不影响本地改名 */
         }
       }
       await ctx.refreshFromBackend();
       setRenameTo("");
+      if (conflictMsg) {
+        setMsg({ ok: false, text: conflictMsg });
+        return;
+      }
       setMsg({ ok: true, text: cloudSynced ? "密码库已改名，云端库名已同步" : "密码库已改名" });
     } catch (e) {
       setMsg({ ok: false, text: String(e) });

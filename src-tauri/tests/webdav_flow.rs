@@ -437,6 +437,95 @@ async fn sync_reports_name_conflict_instead_of_uploading_duplicate() {
     let _ = std::fs::remove_dir_all(&root_b);
 }
 
+/// 本库的云端文件丢了、而云端恰好有同名库时，不能认领别人的文件，
+/// 更不能把它当成本库的旧文件迁移删掉——只能提示改名。
+#[tokio::test(flavor = "multi_thread")]
+async fn rename_does_not_hijack_another_vault_with_the_same_name() {
+    let (files, port) = start_server();
+    let base = format!("http://127.0.0.1:{port}/dav/");
+    let cfg = || WebDavConfig {
+        base_url: base.clone(),
+        username: "user".into(),
+        password: "app-password".into(),
+        remote_dir: "SafePassword".into(),
+        enabled: true,
+    };
+
+    let root = tmp_root("nc-hijack");
+    let app = mock_app(&root);
+
+    // 库一：占用「甲库」这个名字
+    c::create_vault(app.state::<AppState>(), "甲库".into(), "pw-hijack1".into()).unwrap();
+    let s = c::webdav_sync(app.state::<AppState>(), cfg(), None)
+        .await
+        .unwrap();
+    assert_eq!(s.direction, "UPLOADED", "库一首传失败：{s:?}");
+    let first_files: Vec<String> = {
+        let guard = files.lock().unwrap();
+        guard
+            .keys()
+            .filter(|k| k.ends_with(".spv"))
+            .cloned()
+            .collect()
+    };
+
+    // 库二：上传后把它在云端的文件删掉（模拟云端文件丢失）
+    c::create_vault(app.state::<AppState>(), "乙库".into(), "pw-hijack2".into()).unwrap();
+    let s = c::webdav_sync(app.state::<AppState>(), cfg(), None)
+        .await
+        .unwrap();
+    assert_eq!(s.direction, "UPLOADED", "库二首传失败：{s:?}");
+    let mine: Vec<String> = {
+        let guard = files.lock().unwrap();
+        guard
+            .keys()
+            .filter(|k| k.ends_with(".spv") && !first_files.contains(k))
+            .cloned()
+            .collect()
+    };
+    assert_eq!(mine.len(), 1, "应当只多出一个库文件：{mine:?}");
+    files.lock().unwrap().remove(&mine[0]);
+
+    // 把本地库二改名成「甲库」（与云端库一同名）再同步
+    let id = c::current_vault(app.state::<AppState>())
+        .unwrap()
+        .unwrap()
+        .id;
+    c::rename_vault(app.state::<AppState>(), id, "甲库".into()).unwrap();
+    let s = c::webdav_sync(app.state::<AppState>(), cfg(), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        s.direction, "NAME_CONFLICT",
+        "同名只该是冲突，不能认领云端另一个同名的库：{s:?}"
+    );
+
+    // 云端库一必须原封不动：文件还在、清单条目还在
+    {
+        let guard = files.lock().unwrap();
+        assert!(
+            guard.contains_key(&first_files[0]),
+            "不能删掉别的库的文件：{:?}",
+            guard.keys().collect::<Vec<_>>()
+        );
+        let idx_key = guard
+            .keys()
+            .find(|k| k.ends_with("/SafePassword-index.json"))
+            .cloned()
+            .expect("云端应有清单");
+        let manifest: serde_json::Value = serde_json::from_slice(&guard[&idx_key].0).unwrap();
+        let names: Vec<&str> = manifest["vaults"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v["name"].as_str())
+            .collect();
+        assert!(names.contains(&"甲库"), "清单里库一不能消失：{names:?}");
+    }
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 // ---------------------------------------------------------------- 多库清单
 
 /// 同一台设备上再建一个库并同步，云端清单必须保留原有的库（不能只剩新建的那个）。
