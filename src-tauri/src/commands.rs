@@ -1380,6 +1380,15 @@ fn version_tuple(v: &str) -> (u32, u32, u32) {
     )
 }
 
+/// 把 Unix 时间戳格式成本地的「月-日 时:分」，用于限流提示里的重试时间
+fn format_unix_local(ts: i64) -> String {
+    use chrono::{Local, TimeZone};
+    match Local.timestamp_opt(ts, 0).single() {
+        Some(t) => t.format("%m-%d %H:%M").to_string(),
+        None => "稍后".to_string(),
+    }
+}
+
 /// 桌面版 Release 仓库（推送后即可用；未发布时返回可读错误）
 const UPDATE_REPO: &str = "yaoahos/SafePasswordDesktop";
 
@@ -1391,21 +1400,77 @@ pub async fn check_update(app_version: String) -> CmdResult<UpdateInfo> {
         .build()
         .map_err(|e| format!("无法初始化网络：{e}"))?;
     let url = format!("https://api.github.com/repos/{UPDATE_REPO}/releases/latest");
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("无法连接 GitHub：{e}"))?;
-    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+    // 网络抖动重试两次（限流与 4xx/5xx 不重试，避免白白消耗配额）
+    let mut last_err = String::new();
+    let mut resp = None;
+    for attempt in 1..=3u32 {
+        match client.get(&url).send().await {
+            Ok(r) => {
+                resp = Some(r);
+                break;
+            }
+            Err(e) => {
+                last_err = if e.is_timeout() {
+                    "连接 GitHub 超时，请检查网络或代理设置".to_string()
+                } else if e.is_connect() {
+                    "无法连接 GitHub，请检查网络或代理设置".to_string()
+                } else {
+                    format!("无法连接 GitHub：{e}")
+                };
+                if attempt < 3 {
+                    tokio::time::sleep(std::time::Duration::from_millis(700 * attempt as u64)).await;
+                }
+            }
+        }
+    }
+    let resp = match resp {
+        Some(r) => r,
+        None => return Err(last_err),
+    };
+    let status = resp.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
         return Err("GitHub 上还没有桌面版 Release，暂时无法检查更新".to_string());
     }
-    if !resp.status().is_success() {
-        return Err(format!("检查更新失败（HTTP {}）", resp.status().as_u16()));
+    // GitHub 匿名接口每小时 60 次；403/429 基本就是被限流，给一句人话而不是裸 HTTP 码
+    if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+    {
+        let remaining = resp
+            .headers()
+            .get("x-ratelimit-remaining")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<i64>().ok());
+        let reset = resp
+            .headers()
+            .get("x-ratelimit-reset")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<i64>().ok());
+        let mut msg = String::from("GitHub 接口调用过于频繁，暂时无法检查更新");
+        if let Some(n) = remaining {
+            msg.push_str(&format!("（今日剩余 {n} 次）"));
+        }
+        if let Some(ts) = reset {
+            msg.push_str(&format!("，请在 {} 之后再试", format_unix_local(ts)));
+        }
+        if remaining.is_none() && reset.is_none() {
+            msg.push_str("，请稍后再试");
+        }
+        return Err(msg);
+    }
+    if !status.is_success() {
+        let code = status.as_u16();
+        let detail = resp.text().await.unwrap_or_default();
+        let detail = detail.trim();
+        let snippet: String = detail.chars().take(160).collect();
+        return Err(if snippet.is_empty() {
+            format!("GitHub 返回 HTTP {code}，请稍后再试")
+        } else {
+            format!("GitHub 返回 HTTP {code}：{snippet}")
+        });
     }
     let body: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| format!("解析更新信息失败：{e}"))?;
+        .map_err(|_| "GitHub 返回的数据无法解析，请稍后再试".to_string())?;
     let tag = body
         .get("tag_name")
         .and_then(|v| v.as_str())
