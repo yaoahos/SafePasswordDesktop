@@ -21,16 +21,16 @@ const LINKS: { name: string; url: string }[] = [
 export function AboutDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
   const [checking, setChecking] = useState(false);
   const [info, setInfo] = useState<UpdateInfo | null>(null);
-  const [status, setStatus] = useState<string>("从 GitHub Releases 获取最新版本");
+  const [status, setStatus] = useState<string>("从 GitHub 获取最新版本");
   const [installing, setInstalling] = useState(false);
 
   const open = (url: string) => {
-    void openUrl(url).catch(() => ctx.notify("无法打开链接", "error"));
+    void openUrl(url).catch(() => ctx.notify("打不开链接，请稍后重试", "error"));
   };
 
   const check = async () => {
     setChecking(true);
-    setStatus("正在检查…");
+    setStatus("正在检查更新…");
     try {
       const r = await checkUpdate(APP_VERSION);
       setInfo(r);
@@ -47,14 +47,15 @@ export function AboutDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void
     if (!info?.hasUpdate) return;
     if (!info.assetUrl) {
       open(info.url || RELEASES_URL);
+      ctx.notify("这个版本没有安装包，已打开下载页", "success");
       return;
     }
     setInstalling(true);
     try {
       await updateDownloadAndInstall(info.assetUrl);
-      ctx.notify("安装包已下载并启动，请按安装向导完成更新（建议先关闭本应用）", "success");
-    } catch (e) {
-      ctx.notify(String(e), "error");
+      ctx.notify("安装包已启动，请按向导完成安装", "success");
+    } catch {
+      ctx.notify("下载安装包失败，请检查网络后重试", "error");
     } finally {
       setInstalling(false);
     }

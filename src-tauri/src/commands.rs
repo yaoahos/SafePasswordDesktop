@@ -1411,11 +1411,9 @@ pub async fn check_update(app_version: String) -> CmdResult<UpdateInfo> {
             }
             Err(e) => {
                 last_err = if e.is_timeout() {
-                    "连接 GitHub 超时，请检查网络或代理设置".to_string()
-                } else if e.is_connect() {
-                    "无法连接 GitHub，请检查网络或代理设置".to_string()
+                    "GitHub 响应太慢，请检查网络或代理".to_string()
                 } else {
-                    format!("无法连接 GitHub：{e}")
+                    "连不上 GitHub，请检查网络或代理".to_string()
                 };
                 if attempt < 3 {
                     tokio::time::sleep(std::time::Duration::from_millis(700 * attempt as u64)).await;
@@ -1429,48 +1427,33 @@ pub async fn check_update(app_version: String) -> CmdResult<UpdateInfo> {
     };
     let status = resp.status();
     if status == reqwest::StatusCode::NOT_FOUND {
-        return Err("GitHub 上还没有桌面版 Release，暂时无法检查更新".to_string());
+        return Err("还没有可更新的版本".to_string());
     }
     // GitHub 匿名接口每小时 60 次；403/429 基本就是被限流，给一句人话而不是裸 HTTP 码
     if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::TOO_MANY_REQUESTS
     {
-        let remaining = resp
-            .headers()
-            .get("x-ratelimit-remaining")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.trim().parse::<i64>().ok());
         let reset = resp
             .headers()
             .get("x-ratelimit-reset")
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.trim().parse::<i64>().ok());
-        let mut msg = String::from("GitHub 接口调用过于频繁，暂时无法检查更新");
-        if let Some(n) = remaining {
-            msg.push_str(&format!("（今日剩余 {n} 次）"));
-        }
-        if let Some(ts) = reset {
-            msg.push_str(&format!("，请在 {} 之后再试", format_unix_local(ts)));
-        }
-        if remaining.is_none() && reset.is_none() {
-            msg.push_str("，请稍后再试");
-        }
-        return Err(msg);
+        return Err(match reset {
+            Some(ts) => format!("更新检查次数用完了，请在 {} 后再试", format_unix_local(ts)),
+            None => "更新检查次数用完了，请过一会儿再试".to_string(),
+        });
     }
     if !status.is_success() {
         let code = status.as_u16();
-        let detail = resp.text().await.unwrap_or_default();
-        let detail = detail.trim();
-        let snippet: String = detail.chars().take(160).collect();
-        return Err(if snippet.is_empty() {
-            format!("GitHub 返回 HTTP {code}，请稍后再试")
-        } else {
-            format!("GitHub 返回 HTTP {code}：{snippet}")
-        });
+        // 响应体只写日志，不贴给用户：多半是 JSON，读了也没用
+        if let Ok(detail) = resp.text().await {
+            eprintln!("check_update: GitHub 返回 HTTP {code}：{detail}");
+        }
+        return Err(format!("GitHub 暂时不可用（{code}），请稍后再试"));
     }
     let body: serde_json::Value = resp
         .json()
         .await
-        .map_err(|_| "GitHub 返回的数据无法解析，请稍后再试".to_string())?;
+        .map_err(|_| "GitHub 返回内容异常，请稍后再试".to_string())?;
     let tag = body
         .get("tag_name")
         .and_then(|v| v.as_str())

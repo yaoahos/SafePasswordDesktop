@@ -30,8 +30,8 @@ export function UpdateDialog({
       // 没有可下载的安装包（比如只有源码包）：退回浏览器下载页
       try {
         await openUrl(info.url || "https://github.com/yaoahos/SafePasswordDesktop/releases");
-      } catch (e) {
-        setError(String(e));
+      } catch {
+        setError("打不开下载页，请稍后重试");
         return;
       }
       onClose();
@@ -41,17 +41,17 @@ export function UpdateDialog({
     try {
       await updateDownloadAndInstall(info.assetUrl);
       onFinished();
-    } catch (e) {
-      setError(String(e));
+    } catch {
+      setError("下载安装包失败，请检查网络后重试");
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <Dialog title={`发现新版本 v${info.latest}`} onClose={onClose} width={460}>
+    <Dialog title={`发现新版本 ${info.latest}`} onClose={onClose} width={460}>
       <div className="muted small" style={{ marginBottom: 10 }}>
-        当前版本 v{info.current}
+        当前 {info.current}
         {sizeMb ? ` · 安装包 ${sizeMb} MB` : ""}
       </div>
       <div className="update-notes">

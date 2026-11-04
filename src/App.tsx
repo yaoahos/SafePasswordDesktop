@@ -791,7 +791,7 @@ export default function App() {
       onClose={() => setUpdatePrompt(null)}
       onFinished={() => {
         setUpdatePrompt(null);
-        notify("安装包已下载并启动，请按安装向导完成更新", "success");
+        notify("安装包已启动，请按向导完成安装", "success");
       }}
     />
   ) : null;
