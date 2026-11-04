@@ -1,6 +1,6 @@
 [package]
 name = "safepassword"
-version = "1.0.0"
+version = "1.0.1"
 description = "SafePassword 桌面端"
 authors = ["yaoahos"]
 edition = "2021"
