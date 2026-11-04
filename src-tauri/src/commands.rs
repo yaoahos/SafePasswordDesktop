@@ -1366,6 +1366,7 @@ pub struct UpdateInfo {
     pub has_update: bool,
     pub url: String,
     pub asset_url: String,
+    pub asset_size: u64,
     pub notes: String,
 }
 
@@ -1420,20 +1421,23 @@ pub async fn check_update(app_version: String) -> CmdResult<UpdateInfo> {
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let asset_url = body
+    let (asset_url, asset_size) = body
         .get("assets")
         .and_then(|v| v.as_array())
         .and_then(|arr| {
             arr.iter()
                 .map(|a| {
-                    a.get("browser_download_url")
-                        .and_then(|u| u.as_str())
-                        .unwrap_or("")
+                    (
+                        a.get("browser_download_url")
+                            .and_then(|u| u.as_str())
+                            .unwrap_or(""),
+                        a.get("size").and_then(|s| s.as_u64()).unwrap_or(0),
+                    )
                 })
-                .find(|u| u.ends_with(".exe") || u.ends_with(".msi"))
+                .find(|(u, _)| u.ends_with(".exe") || u.ends_with(".msi"))
         })
-        .unwrap_or("")
-        .to_string();
+        .map(|(u, s)| (u.to_string(), s))
+        .unwrap_or_default();
     let latest = tag.trim_start_matches(['v', 'V']).to_string();
     let has_update = version_tuple(&latest) > version_tuple(&app_version);
     Ok(UpdateInfo {
@@ -1442,6 +1446,7 @@ pub async fn check_update(app_version: String) -> CmdResult<UpdateInfo> {
         has_update,
         url: html_url,
         asset_url,
+        asset_size,
         notes,
     })
 }

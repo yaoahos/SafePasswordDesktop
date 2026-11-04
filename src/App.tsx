@@ -18,7 +18,7 @@ import {
   webdavRestoreToCloud,
   deleteVault,
 } from "./api";
-import type { AppSettings, SortMode, SyncSummary, Vault, VaultItem, VaultMeta } from "./types";
+import type { AppSettings, SortMode, SyncSummary, UpdateInfo, Vault, VaultItem, VaultMeta } from "./types";
 import type { AppCtx, SectionFilter, ToastKind } from "./app-context";
 import { AuthScreens } from "./components/AuthScreens";
 import { ItemDetail } from "./components/ItemDetail";
@@ -33,6 +33,7 @@ import { NameConflictDialog } from "./dialogs/NameConflictDialog";
 import { SecurityDialog } from "./dialogs/SecurityDialog";
 import { SettingsDialog } from "./dialogs/SettingsDialog";
 import { ThemeDialog } from "./dialogs/ThemeDialog";
+import { UpdateDialog } from "./dialogs/UpdateDialog";
 import { duplicateItem, itemMatches, newItemFromTemplate } from "./utils";
 import { APP_VERSION } from "./version";
 
@@ -149,6 +150,8 @@ export default function App() {
   /** 从设置页「切换」进入解锁页时要预选密码库 */
   const [preselectVaultId, setPreselectVaultId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ id: number; msg: string; kind: ToastKind } | null>(null);
+  /** 启动检查到新版本时弹出的更新窗口（含更新内容与本机/云端版本） */
+  const [updatePrompt, setUpdatePrompt] = useState<UpdateInfo | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("CREATED");
   const [sortAsc, setSortAsc] = useState(false);
 
@@ -197,16 +200,15 @@ export default function App() {
       void (async () => {
         try {
           const r = await checkUpdate(APP_VERSION);
-          if (r.hasUpdate) {
-            notify(`发现新版本 ${r.latest}，可在「关于 SafePassword」中更新`, "success");
-          }
+          // 发现新版本时弹出带更新内容的窗口，而不是一闪而过的提示条
+          if (r.hasUpdate) setUpdatePrompt(r);
         } catch {
           // 启动检查静默失败：离线或网络受限时不该打扰用户
         }
       })();
     }, 1500);
     return () => clearTimeout(timer);
-  }, [booted, settings.checkUpdatesOnLaunch, notify]);
+  }, [booted, settings.checkUpdatesOnLaunch]);
 
   useEffect(() => {
     if (!toast) return;
@@ -781,6 +783,18 @@ export default function App() {
 
   // ------------------------------------------------------------ 渲染
 
+  // 更新提示要在解锁页也能看到：启动时用户还停在解锁页，不能等到解锁后才弹
+  const updateOverlay = updatePrompt ? (
+    <UpdateDialog
+      info={updatePrompt}
+      onClose={() => setUpdatePrompt(null)}
+      onFinished={() => {
+        setUpdatePrompt(null);
+        notify("安装包已下载并启动，请按安装向导完成更新", "success");
+      }}
+    />
+  ) : null;
+
   if (!booted) {
     return (
       <div className="loading-wrap">
@@ -792,16 +806,19 @@ export default function App() {
 
   if (!vault) {
     return (
-      <AuthScreens
-        vaults={vaults}
-        defaultVaultId={preselectVaultId ?? settings.lastVaultId}
-        onUnlock={handleUnlock}
-        onCreate={handleCreate}
-        onRestoreLocal={handleRestoreLocal}
-        webdav={settings.webdav}
-        onCloudRestored={refreshFromBackend}
-        onSaveWebdav={(cfg) => applySettings({ ...settings, webdav: cfg })}
-      />
+      <>
+        <AuthScreens
+          vaults={vaults}
+          defaultVaultId={preselectVaultId ?? settings.lastVaultId}
+          onUnlock={handleUnlock}
+          onCreate={handleCreate}
+          onRestoreLocal={handleRestoreLocal}
+          webdav={settings.webdav}
+          onCloudRestored={refreshFromBackend}
+          onSaveWebdav={(cfg) => applySettings({ ...settings, webdav: cfg })}
+        />
+        {updateOverlay}
+      </>
     );
   }
 
@@ -981,6 +998,8 @@ export default function App() {
           onRename={(name) => void resolveNameConflict(name)}
         />
       )}
+
+      {updateOverlay}
 
       {toast && <div className={`toast ${toast.kind}`}>{toast.msg}</div>}
     </div>

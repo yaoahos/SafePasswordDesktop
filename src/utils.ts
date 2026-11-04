@@ -359,3 +359,57 @@ export function duplicateItem(item: VaultItem): VaultItem {
     fields: item.fields.map((f) => ({ ...f, id: newId() })),
   };
 }
+
+/** 发布说明里不属于「更新内容」的杂项（安装包信息、签名、系统要求等） */
+const NOTES_NOISE = [
+  "包名",
+  "versionCode",
+  "versionName",
+  "版本号",
+  "系统要求",
+  "适用系统",
+  "适用版本",
+  "安装说明",
+  "安装包",
+  "下载地址",
+  "文件大小",
+  "SHA",
+  "MD5",
+  "签名",
+  "校验值",
+  "更新于",
+];
+
+const DATE_LINE = /^\d{4}[/-]\d{1,2}[/-]\d{1,2}$/;
+const HEADING_LINE = /^\d{4}[/-]\d{1,2}[/-]\d{1,2}\s*[·\-—]?\s*v?\d+(?:\.\d+)*$/;
+
+/**
+ * 把 GitHub 发布说明压成「更新内容」条目：去掉日期/版本标题、图片、表格，
+ * 以及安装包体积、校验值这类发布信息，只留用户关心的变更。
+ */
+export function releaseNotes(raw: string, limit = 8): string[] {
+  return (raw || "")
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^[-*+•]\s*/, "")
+        .replace(/\*\*|`/g, "")
+        .trim()
+    )
+    .filter((line) => line !== "")
+    .filter((line) => !NOTES_NOISE.some((noise) => line.includes(noise)))
+    .filter(
+      (line) =>
+        !line.startsWith("#") &&
+        !line.startsWith(">") &&
+        !line.startsWith("|") &&
+        !line.startsWith("![") &&
+        !line.startsWith("---") &&
+        !DATE_LINE.test(line) &&
+        !HEADING_LINE.test(line)
+    )
+    .slice(0, limit)
+    .map((line) => (line.length > 90 ? `${line.slice(0, 88).trimEnd()}…` : line));
+}
+
