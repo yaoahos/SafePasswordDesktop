@@ -52,8 +52,8 @@ export function AuthScreens({
   const [cloudKey, setCloudKey] = useState("");
   const [cloudPw, setCloudPw] = useState("");
   const [cloudCfg, setCloudCfg] = useState<WebDavConfig | null>(null);
-  /** 云端恢复页默认只显示"用哪个服务器"，需要换账号时才展开表单 */
-  const [showCfg, setShowCfg] = useState(false);
+  // 默认展开：填完服务器地址 / 用户名后不要自己收起来，用户点了「收起」才折叠
+  const [cfgCollapsed, setCfgCollapsed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -238,7 +238,7 @@ export function AuthScreens({
     try {
       const b64 = await webdavGetVault(cloudCfg, cloudKey);
       if (!b64) throw new Error("云端没有找到该密码库文件");
-      await importVaultBytes(b64, cloudPw, entry?.name ?? "");
+      await importVaultBytes(b64, cloudPw, entry?.name ?? "", true);
       await onCloudRestored?.();
       setCloudPw("");
     } catch (e) {
@@ -521,12 +521,15 @@ export function AuthScreens({
               <div className="restore-server-line">
                 <Icon name="cloud" size={14} />
                 <span className="restore-server-text">{davLabel(cloudCfg)}</span>
-                <button className="link-btn" onClick={() => setShowCfg((v) => !v)}>
-                  {showCfg ? "收起" : "更换"}
+                <button
+                  className="link-btn"
+                  onClick={() => setCfgCollapsed((v) => !v)}
+                >
+                  {cfgCollapsed ? "展开" : "收起"}
                 </button>
               </div>
             )}
-            {cloudCfg && (!cfgReady(cloudCfg) || showCfg) && davForm}
+            {cloudCfg && (!cfgReady(cloudCfg) || !cfgCollapsed) && davForm}
 
             {cloudList !== null && (
               <div className="restore-card">

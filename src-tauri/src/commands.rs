@@ -29,7 +29,9 @@ use crate::sp::xml;
 use crate::sp::security::{self, SecurityReport};
 use crate::sp::store::VaultStore;
 use crate::sp::strength::{self, StrengthResult};
-use crate::sp::sync::{ConflictStrategy, SyncCacheEntry, SyncEngine, SyncResult};
+use crate::sp::sync::{
+    ConflictStrategy, SyncCacheEntry, SyncDirection, SyncEngine, SyncResult,
+};
 use crate::sp::webdav::{WebDavClient, WebDavConfig};
 
 type CmdResult<T> = Result<T, String>;
@@ -550,6 +552,7 @@ pub fn import_vault_bytes(
     base64_data: String,
     password: String,
     name: String,
+    from_cloud: Option<bool>,
 ) -> CmdResult<VaultMeta> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(base64_data.trim())
@@ -557,7 +560,7 @@ pub fn import_vault_bytes(
     let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
     let (container, meta) = inner
         .store
-        .import_encrypted(&bytes, &password, &name)
+        .import_encrypted(&bytes, &password, &name, from_cloud.unwrap_or(false))
         .map_err(err)?;
     inner.current = Some(CurrentVault {
         container,
@@ -1118,6 +1121,16 @@ async fn run_sync(
     match outcome {
         Ok(result) => {
             let summary = to_summary(&result);
+            // 同名冲突：云端没有写入任何东西，本地也不要保存（容器里的 lastSyncedAt
+            // 只是临时值），原样留着等用户改名后再同步。
+            if result.direction == SyncDirection::NameConflict {
+                inner.current = Some(CurrentVault {
+                    container: result.container,
+                    meta,
+                    password,
+                });
+                return Ok(summary);
+            }
             let mut restored = CurrentVault {
                 container: result.container,
                 meta,

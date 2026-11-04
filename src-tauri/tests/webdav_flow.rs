@@ -237,6 +237,7 @@ async fn two_devices_sync_through_mock_webdav() {
         export_b64,
         "pw-sync🚀".into(),
         "同步库".into(),
+        Some(true),
     )
     .unwrap();
     // 3. B 首同步：内容与云端完全一致（import 只换了本地库 id），写回抑制生效 → NONE，不上传
@@ -335,6 +336,80 @@ async fn two_devices_sync_through_mock_webdav() {
     assert_eq!(s.direction, "DOWNLOADED", "B 应拉到改名后的库：{s:?}");
     let vb = c::current_vault(app_b.state::<AppState>()).unwrap().unwrap();
     assert_eq!(vb.name, "改名后的库", "B 的库名应跟随云端");
+
+    let _ = std::fs::remove_dir_all(&root_a);
+    let _ = std::fs::remove_dir_all(&root_b);
+}
+
+// ---------------------------------------------------------------- 同名云端库
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_reports_name_conflict_instead_of_uploading_duplicate() {
+    let (files, port) = start_server();
+    let base = format!("http://127.0.0.1:{port}/dav/");
+    let cfg = || WebDavConfig {
+        base_url: base.clone(),
+        username: "user".into(),
+        password: "app-password".into(),
+        remote_dir: "SafePassword".into(),
+        enabled: true,
+    };
+
+    // 设备 A：建「测试库」并上传
+    let root_a = tmp_root("nc-a");
+    let app_a = mock_app(&root_a);
+    c::create_vault(app_a.state::<AppState>(), "测试库".into(), "pw-alpha1".into()).unwrap();
+    let s = c::webdav_sync(app_a.state::<AppState>(), cfg(), None)
+        .await
+        .unwrap();
+    assert_eq!(s.direction, "UPLOADED", "首传失败：{s:?}");
+
+    // 设备 B：另建一个同名、但内容完全不同的「测试库」
+    let root_b = tmp_root("nc-b");
+    let app_b = mock_app(&root_b);
+    c::create_vault(app_b.state::<AppState>(), "测试库".into(), "pw-bravo2".into()).unwrap();
+    let s = c::webdav_sync(app_b.state::<AppState>(), cfg(), None)
+        .await
+        .unwrap();
+    assert_eq!(s.direction, "NAME_CONFLICT", "同名库应报冲突：{s:?}");
+    assert!(
+        s.message.contains("云端已有同名密码库"),
+        "提示文案不对：{}",
+        s.message
+    );
+
+    // 云端不该多出第二个 .spv，清单也只有一条（作用域内读，避免 guard 跨 await）
+    {
+        let guard = files.lock().unwrap();
+        let spvs: Vec<&String> = guard.keys().filter(|k| k.ends_with(".spv")).collect();
+        assert_eq!(spvs.len(), 1, "同名冲突时不该写入云端：{spvs:?}");
+        let idx_key = guard
+            .keys()
+            .find(|k| k.ends_with("/SafePassword-index.json"))
+            .cloned()
+            .expect("上传后应维护清单");
+        let manifest: serde_json::Value = serde_json::from_slice(&guard[&idx_key].0).unwrap();
+        assert_eq!(
+            manifest["vaults"].as_array().map(|a| a.len()),
+            Some(1),
+            "清单应只有一条：{manifest}"
+        );
+    }
+
+    // 改名后再同步就应该成功上传
+    c::rename_vault(
+        app_b.state::<AppState>(),
+        c::current_vault(app_b.state::<AppState>())
+            .unwrap()
+            .unwrap()
+            .id,
+        "测试库 2".into(),
+    )
+    .unwrap();
+    let s = c::webdav_sync(app_b.state::<AppState>(), cfg(), None)
+        .await
+        .unwrap();
+    assert_eq!(s.direction, "UPLOADED", "改名后应能上传：{s:?}");
 
     let _ = std::fs::remove_dir_all(&root_a);
     let _ = std::fs::remove_dir_all(&root_b);

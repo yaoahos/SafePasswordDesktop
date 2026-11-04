@@ -46,8 +46,12 @@ export const deleteFieldHistory = (itemId: string, fieldId: string, index: numbe
 export const changeMasterPassword = (oldPassword: string, newPassword: string) =>
   invoke<void>("change_master_password", { oldPassword, newPassword });
 
-export const importVaultBytes = (base64Data: string, password: string, name: string) =>
-  invoke<VaultMeta>("import_vault_bytes", { base64Data, password, name });
+export const importVaultBytes = (
+  base64Data: string,
+  password: string,
+  name: string,
+  fromCloud = false,
+) => invoke<VaultMeta>("import_vault_bytes", { base64Data, password, name, fromCloud });
 
 export const importVaultJson = (json: string, password: string, name: string) =>
   invoke<VaultMeta>("import_vault_json", { json, password, name });

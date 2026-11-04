@@ -207,6 +207,7 @@ impl VaultStore {
         bytes: &[u8],
         password: &str,
         new_name: &str,
+        from_cloud: bool,
     ) -> Result<(VaultContainer, VaultMeta), StoreError> {
         let opened = VaultContainer::open(bytes, password)?;
         let mut imported = opened.vault.clone();
@@ -215,7 +216,13 @@ impl VaultStore {
         if !trimmed.is_empty() {
             imported.name = trimmed.to_string();
         }
-        imported.updated_at = now_ms();
+        if from_cloud {
+            // 这份数据刚从云端取回来，内容与云端完全一致：保留原来的 updatedAt，
+            // 并把 lastSyncedAt 对齐到它。否则会被当成"本机有未同步修改"而立刻回传整包。
+            imported.last_synced_at = imported.updated_at;
+        } else {
+            imported.updated_at = now_ms();
+        }
         self.create_from_vault(imported, password)
     }
 
@@ -362,18 +369,26 @@ mod tests {
     fn import_encrypted_assigns_new_id_and_name() {
         let dir = temp_dir("import");
         let store = VaultStore::new(&dir).unwrap();
-        let (_c, meta) = store.create("源库", "pw-src").unwrap();
+        let (c_orig, meta) = store.create("源库", "pw-src").unwrap();
         let bytes = fs::read(store.vault_file(&meta)).unwrap();
         let (c2, meta2) = store
-            .import_encrypted(&bytes, "pw-src", "导入副本")
+            .import_encrypted(&bytes, "pw-src", "导入副本", false)
             .unwrap();
         assert_ne!(meta2.id, meta.id);
         assert_eq!(meta2.name, "导入副本");
         assert_eq!(c2.vault.name, "导入副本");
         // 空名字回落到原名
-        let (_c3, meta3) = store.import_encrypted(&bytes, "pw-src", "  ").unwrap();
+        let (_c3, meta3) = store
+            .import_encrypted(&bytes, "pw-src", "  ", false)
+            .unwrap();
         assert_eq!(meta3.name, "源库");
-        assert_eq!(store.list().unwrap().len(), 3);
+        // 从云端取回：不动 updatedAt，并把 lastSyncedAt 对齐（不会被当成未同步修改）
+        let (c4, _meta4) = store
+            .import_encrypted(&bytes, "pw-src", "云端副本", true)
+            .unwrap();
+        assert_eq!(c4.vault.updated_at, c_orig.vault.updated_at);
+        assert_eq!(c4.vault.last_synced_at, c4.vault.updated_at);
+        assert_eq!(store.list().unwrap().len(), 4);
         let _ = fs::remove_dir_all(&dir);
     }
 }
