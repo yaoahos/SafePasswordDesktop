@@ -26,6 +26,13 @@ type Files = Arc<Mutex<HashMap<String, (Vec<u8>, i64)>>>;
 /// 本测试进程内所有 GET 的次数：用来断言"云端没变化时不下载整包"。
 static GETS: AtomicUsize = AtomicUsize::new(0);
 
+/// 故障注入哨兵：这个键出现在 mock 的 files 里时，清单（index.json）的 GET 返回 500。
+/// 用每条测试各自的 mock 服务器做开关，避免并行测试互相影响。
+const FAIL_FLAG: &str = "__fail_manifest_get__";
+
+/// 只有登记了这个键的 mock 服务器才给 GETS 计数，避免并行测试互相干扰。
+const COUNT_FLAG: &str = "__count_gets__";
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -96,8 +103,16 @@ fn handle(stream: TcpStream, files: &Files) {
         }
         "GET" => {
             // 只统计密码库本体（.spv）的下载：清单 GET 是上传顺带的小文件，不算整库流量
-            if target.ends_with(".spv") {
+            // （只有登记了 COUNT_FLAG 的那个 mock 服务器才计数，避免并行用例串味）
+            if target.ends_with(".spv") && files.lock().unwrap().contains_key(COUNT_FLAG) {
                 GETS.fetch_add(1, Ordering::Relaxed);
+            }
+            // 故障注入：让清单读失败，验证"读不到清单时不能把别人的条目清空"
+            if target.ends_with("/SafePassword-index.json")
+                && files.lock().unwrap().contains_key(FAIL_FLAG)
+            {
+                write_resp(&mut stream, "500 Internal Server Error", "text/plain", &[], b"boom");
+                return;
             }
             match files.lock().unwrap().get(&target) {
                 Some((data, _)) => {
@@ -173,6 +188,12 @@ fn tmp_root(tag: &str) -> PathBuf {
 #[tokio::test(flavor = "multi_thread")]
 async fn two_devices_sync_through_mock_webdav() {
     let (files, port) = start_server();
+    // 这个用例独占 GETS 计数：别的用例并发跑时不会把它顶高
+    GETS.store(0, Ordering::Relaxed);
+    files
+        .lock()
+        .unwrap()
+        .insert(COUNT_FLAG.to_string(), (Vec::new(), 0));
     let base = format!("http://127.0.0.1:{port}/dav/");
     let cfg = || WebDavConfig {
         base_url: base.clone(),
@@ -414,4 +435,126 @@ async fn sync_reports_name_conflict_instead_of_uploading_duplicate() {
 
     let _ = std::fs::remove_dir_all(&root_a);
     let _ = std::fs::remove_dir_all(&root_b);
+}
+
+// ---------------------------------------------------------------- 多库清单
+
+/// 同一台设备上再建一个库并同步，云端清单必须保留原有的库（不能只剩新建的那个）。
+#[tokio::test(flavor = "multi_thread")]
+async fn syncing_a_new_vault_keeps_other_manifest_entries() {
+    let (files, port) = start_server();
+    let base = format!("http://127.0.0.1:{port}/dav/");
+    let cfg = || WebDavConfig {
+        base_url: base.clone(),
+        username: "user".into(),
+        password: "app-password".into(),
+        remote_dir: "SafePassword".into(),
+        enabled: true,
+    };
+    let root = tmp_root("multi");
+    let app = mock_app(&root);
+
+    c::create_vault(app.state::<AppState>(), "库一".into(), "pw-first1".into()).unwrap();
+    let s = c::webdav_sync(app.state::<AppState>(), cfg(), None)
+        .await
+        .unwrap();
+    assert_eq!(s.direction, "UPLOADED", "第一个库上传失败：{s:?}");
+    assert_eq!(manifest_names(&files).len(), 1, "第一个库后清单应只有一条");
+
+    c::create_vault(app.state::<AppState>(), "库二".into(), "pw-second2".into()).unwrap();
+    let s = c::webdav_sync(app.state::<AppState>(), cfg(), None)
+        .await
+        .unwrap();
+    assert_eq!(s.direction, "UPLOADED", "第二个库上传失败：{s:?}");
+
+    let names = manifest_names(&files);
+    assert_eq!(names.len(), 2, "新建库后云端必须保留其它库：{names:?}");
+    assert!(names.contains(&"库一".to_string()), "清单丢了库一：{names:?}");
+    assert!(names.contains(&"库二".to_string()), "清单丢了库二：{names:?}");
+
+    let spvs = files
+        .lock()
+        .unwrap()
+        .keys()
+        .filter(|k| k.ends_with(".spv"))
+        .count();
+    assert_eq!(spvs, 2, "云端应有两个库文件");
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 读云端清单里的库名列表（测试专用）。
+fn manifest_names(files: &Files) -> Vec<String> {    let guard = files.lock().unwrap();
+    let Some((bytes, _)) = guard
+        .iter()
+        .find(|(k, _)| k.ends_with("/SafePassword-index.json"))
+        .map(|(_, v)| v.clone())
+    else {
+        return Vec::new();
+    };
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    json["vaults"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|e| e["name"].as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 清单读失败时只能上传库文件，绝不能把其它库的条目清空。
+#[tokio::test(flavor = "multi_thread")]
+async fn manifest_read_failure_does_not_wipe_other_entries() {
+    let (files, port) = start_server();
+    let base = format!("http://127.0.0.1:{port}/dav/");
+    let cfg = || WebDavConfig {
+        base_url: base.clone(),
+        username: "user".into(),
+        password: "app-password".into(),
+        remote_dir: "SafePassword".into(),
+        enabled: true,
+    };
+    let root = tmp_root("mf");
+    let app = mock_app(&root);
+
+    c::create_vault(app.state::<AppState>(), "库一".into(), "pw-first1".into()).unwrap();
+    c::webdav_sync(app.state::<AppState>(), cfg(), None)
+        .await
+        .unwrap();
+    assert_eq!(manifest_names(&files), vec!["库一".to_string()]);
+
+    // 注入清单读失败：新建第二个库时读不到清单
+    files
+        .lock()
+        .unwrap()
+        .insert(FAIL_FLAG.to_string(), (Vec::new(), 0));
+    c::create_vault(app.state::<AppState>(), "库二".into(), "pw-second2".into()).unwrap();
+    let s = c::webdav_sync(app.state::<AppState>(), cfg(), None)
+        .await
+        .unwrap();
+    assert_eq!(s.direction, "UPLOADED", "读不到清单也应能上传库文件：{s:?}");
+    assert_eq!(
+        manifest_names(&files),
+        vec!["库一".to_string()],
+        "读不到清单时不能重写它，否则别的库会被清空"
+    );
+    let spvs = files
+        .lock()
+        .unwrap()
+        .keys()
+        .filter(|k| k.ends_with(".spv"))
+        .count();
+    assert_eq!(spvs, 2, "两个库文件都应存在");
+
+    // 恢复正常后再同步一次：清单补齐，其它条目仍在
+    files.lock().unwrap().remove(FAIL_FLAG);
+    c::webdav_sync(app.state::<AppState>(), cfg(), None)
+        .await
+        .unwrap();
+    let mut names = manifest_names(&files);
+    names.sort();
+    assert_eq!(names, vec!["库一".to_string(), "库二".to_string()]);
+
+    let _ = std::fs::remove_dir_all(&root);
 }

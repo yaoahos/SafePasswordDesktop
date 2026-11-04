@@ -57,6 +57,9 @@ pub struct SyncCacheEntry {
     pub rev: Option<RemoteRev>,
     /// 上次成功同步时的内容指纹，用来抑制"内容没变却整包重传"
     pub content_hash: String,
+    /// 云端清单里还没登记本库（上传时读不到清单，只能先传库文件）→ 下次同步补登记
+    #[serde(default)]
+    pub manifest_dirty: bool,
 }
 
 /// 同步意义上的内容指纹：抹掉每次同步都会变、但用户不可见的字段。
@@ -238,6 +241,12 @@ impl SyncEngine {
     ) -> Result<SyncResult, SyncError> {
         let mut remote_key = self.remote_key.clone();
         let mut remote_path = self.config.remote_path(&remote_key);
+
+        // 上一次上传因为"清单读不到"而没能登记本库：这次先把清单补上，
+        // 否则云端列表里会一直缺这个库（条目少了用户就以为库丢了）。
+        if self.cache.manifest_dirty {
+            self.repair_manifest(&mut local).await;
+        }
 
         // ---- 快速判断：只有之前成功同步过（缓存里有版本指纹）才用 HEAD ----
         // 没有指纹（首次同步 / 服务器不支持 HEAD / 刚手动覆盖过）→ 走完整流程，
@@ -620,13 +629,22 @@ impl SyncEngine {
         container: &mut VaultContainer,
         remote_key: &str,
     ) -> Result<UploadOutcome, SyncError> {
-        let manifest_text = self
-            .webdav
-            .get(&self.config.manifest_path())
-            .await
-            .ok()
-            .flatten()
-            .and_then(|b| String::from_utf8(b).ok());
+        // 先读清单：既用于同名检测，也决定"写完库文件后要不要重写清单"。
+        // 注意区分「云端确实没有清单」(Ok(None)) 与「读失败」(Err)：后者绝不能
+        // 当成空清单写回去，否则会把别的库的条目全清掉（新建一个库 → 云端只剩它）。
+        let manifest_text = match self.webdav.get(&self.config.manifest_path()).await {
+            Ok(Some(bytes)) => Some(String::from_utf8_lossy(&bytes).to_string()),
+            Ok(None) => None,
+            Err(_) => {
+                // 读不到清单：只上传库文件、跳过清单重写，等下次能读到再补。
+                // 这里绝不能把"读失败"当成空清单写回去，否则会把别的库的条目全清掉。
+                let bytes = container.to_bytes();
+                self.webdav.put(remote_path, &bytes).await.map_err(dav_err)?;
+                self.refresh_rev(container, remote_path).await;
+                self.cache.manifest_dirty = true;
+                return Ok(UploadOutcome::Uploaded);
+            }
+        };
         let mut manifest = CloudManifest::parse(manifest_text.as_deref());
         let want = container.vault.name.trim().to_lowercase();
         if let Some(other) = manifest
@@ -640,14 +658,7 @@ impl SyncEngine {
         self.webdav.put(remote_path, &bytes).await.map_err(dav_err)?;
         // 记下新的版本指纹：下一次同步用 HEAD 比对即可，不必再下载整包。
         // 服务器不支持 HEAD 时留空 → 下次退回完整流程，行为安全。
-        self.cache.rev = self
-            .webdav
-            .stat(remote_path)
-            .await
-            .ok()
-            .flatten()
-            .map(|s| RemoteRev::from_stat(&s));
-        self.cache.content_hash = content_hash(&container.vault);
+        self.refresh_rev(container, remote_path).await;
         manifest.upsert(
             remote_key,
             &container.vault.name,
@@ -658,7 +669,43 @@ impl SyncEngine {
             .webdav
             .put(&self.config.manifest_path(), manifest.to_json().as_bytes())
             .await;
+        self.cache.manifest_dirty = false;
         Ok(UploadOutcome::Uploaded)
+    }
+
+    /// 补登记：把本库写进云端清单（不动库文件）。读不到清单就留着标记等下次。
+    async fn repair_manifest(&mut self, container: &mut VaultContainer) {
+        let Ok(Some(bytes)) = self.webdav.get(&self.config.manifest_path()).await else {
+            return;
+        };
+        let mut manifest = CloudManifest::parse(Some(String::from_utf8_lossy(&bytes).as_ref()));
+        let size = container.to_bytes().len() as i64;
+        manifest.upsert(
+            &self.remote_key,
+            &container.vault.name,
+            container.vault.updated_at,
+            size,
+        );
+        if self
+            .webdav
+            .put(&self.config.manifest_path(), manifest.to_json().as_bytes())
+            .await
+            .is_ok()
+        {
+            self.cache.manifest_dirty = false;
+        }
+    }
+
+    /// 上传后刷新版本指纹（下一步同步可走 HEAD 快路径）。
+    async fn refresh_rev(&mut self, container: &VaultContainer, remote_path: &str) {
+        self.cache.rev = self
+            .webdav
+            .stat(remote_path)
+            .await
+            .ok()
+            .flatten()
+            .map(|s| RemoteRev::from_stat(&s));
+        self.cache.content_hash = content_hash(&container.vault);
     }
 }
 
@@ -738,6 +785,7 @@ mod tests {
                 size: 8_870_000,
             }),
             content_hash: "AB12".to_string(),
+            manifest_dirty: false,
         };
         let text = serde_json::to_string(&entry).unwrap();
         let back: SyncCacheEntry = serde_json::from_str(&text).unwrap();
