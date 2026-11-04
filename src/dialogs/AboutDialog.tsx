@@ -21,11 +21,11 @@ const LINKS: { name: string; url: string }[] = [
 export function AboutDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
   const [checking, setChecking] = useState(false);
   const [info, setInfo] = useState<UpdateInfo | null>(null);
-  const [status, setStatus] = useState<string>("从 GitHub 获取最新版本");
+  const [status, setStatus] = useState<string>("尚未检查更新");
   const [installing, setInstalling] = useState(false);
 
   const open = (url: string) => {
-    void openUrl(url).catch(() => ctx.notify("打不开链接，请稍后重试", "error"));
+    void openUrl(url).catch(() => ctx.notify("链接打开失败，请稍后重试", "error"));
   };
 
   const check = async () => {
@@ -111,7 +111,7 @@ export function AboutDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void
         <div className="about-title">更新</div>
         <div className="row" style={{ gap: 10 }}>
           <button className="btn sm" disabled={checking || installing} onClick={() => void check()}>
-            {checking ? "正在检查…" : "检查更新"}
+            {checking ? "正在检查更新…" : "检查更新"}
           </button>
           {info?.hasUpdate && (
             <button className="btn primary sm" disabled={installing} onClick={() => void install()}>
@@ -136,7 +136,7 @@ export function AboutDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void
           启动时自动检查更新
         </label>
         <div className="setting-sub" style={{ marginTop: 4 }}>
-          开启后每次启动静默查询一次 GitHub Releases，发现新版本只提示，不会自动下载安装。
+          开启后每次启动静默查询一次，发现新版本只提示，不会自动下载安装。
         </div>
       </div>
 
