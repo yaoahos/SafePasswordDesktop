@@ -7,8 +7,8 @@ SafePassword 桌面版是一个离线优先的密码管理器。界面与数据�
 - 正式版本：`1.0.1`
 - 支持平台：Windows 10 / 11（x64，需要 WebView2 运行时）
 - 安装包：`SafePassword_1.0.1_x64-setup.exe`（NSIS）/ `SafePassword_1.0.1_x64_zh-CN.msi`
-- 安装包大小：2,392,826 字节（NSIS）/ 3,375,104 字节（MSI）
-- SHA-256：`30ED78F1F1EFCD3DE44E4A8CB665D272C787C7E2258698CD864C35D91E18A1E8`（NSIS）/ `B0B2D8B2398531496F1751ABDD22E4F137FE40DEA93B6DC7FE07E5309F7BDB09`（MSI）
+- 安装包大小：2,396,158 字节（NSIS）/ 3,379,200 字节（MSI）
+- SHA-256：`49864252B6B903C6E5891723C7D3FA2D68947E77E025CD7DBB3EF3916E54E4DF`（NSIS）/ `A785E14C1D2BFD1B4B42361999B7FF36CD293C510C15D09DBB9213947E86C13E`（MSI）
 - 发布下载：[Releases](https://github.com/yaoahos/SafePasswordDesktop/releases)
 
 > 本项目为独立实现，未使用任何第三方应用的源代码；界面与交互仅作设计参考。密码库格式与 Android 版互通。
