@@ -194,7 +194,8 @@ export default function App() {
 
   const autoUpdateChecked = useRef(false);
   useEffect(() => {
-    if (!booted || autoUpdateChecked.current || !settings.checkUpdatesOnLaunch) return;
+    // 解锁进入首页后才检查：解锁页弹出的更新提示会打断正在输主密码的人
+    if (!vault || autoUpdateChecked.current || !settings.checkUpdatesOnLaunch) return;
     autoUpdateChecked.current = true;
     const timer = setTimeout(() => {
       void (async () => {
@@ -208,7 +209,7 @@ export default function App() {
       })();
     }, 1500);
     return () => clearTimeout(timer);
-  }, [booted, settings.checkUpdatesOnLaunch]);
+  }, [vault, settings.checkUpdatesOnLaunch]);
 
   useEffect(() => {
     if (!toast) return;
@@ -783,7 +784,7 @@ export default function App() {
 
   // ------------------------------------------------------------ 渲染
 
-  // 更新提示要在解锁页也能看到：启动时用户还停在解锁页，不能等到解锁后才弹
+  // 更新提示只在解锁后的首页出现（检查本身也挂在这个条件上）
   const updateOverlay = updatePrompt ? (
     <UpdateDialog
       info={updatePrompt}
@@ -806,19 +807,16 @@ export default function App() {
 
   if (!vault) {
     return (
-      <>
-        <AuthScreens
-          vaults={vaults}
-          defaultVaultId={preselectVaultId ?? settings.lastVaultId}
-          onUnlock={handleUnlock}
-          onCreate={handleCreate}
-          onRestoreLocal={handleRestoreLocal}
-          webdav={settings.webdav}
-          onCloudRestored={refreshFromBackend}
-          onSaveWebdav={(cfg) => applySettings({ ...settings, webdav: cfg })}
-        />
-        {updateOverlay}
-      </>
+      <AuthScreens
+        vaults={vaults}
+        defaultVaultId={preselectVaultId ?? settings.lastVaultId}
+        onUnlock={handleUnlock}
+        onCreate={handleCreate}
+        onRestoreLocal={handleRestoreLocal}
+        webdav={settings.webdav}
+        onCloudRestored={refreshFromBackend}
+        onSaveWebdav={(cfg) => applySettings({ ...settings, webdav: cfg })}
+      />
     );
   }
 
