@@ -166,6 +166,8 @@ export interface AppSettings {
   defaultLabelId: string | null;
   /** 最近打开的密码库（对齐 lastVaultId） */
   lastVaultId: string | null;
+  /** 启动时自动检查更新 */
+  checkUpdatesOnLaunch: boolean;
 }
 
 export type SyncStrategy = "KEEP_LOCAL" | "MERGE";

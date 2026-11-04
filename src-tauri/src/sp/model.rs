@@ -46,7 +46,7 @@ fn default_notes_position() -> i32 {
 }
 
 /// 0xFF0F766E.toInt()
-fn default_label_color() -> i32 {
+pub fn default_label_color() -> i32 {
     -15_763_858
 }
 
@@ -198,6 +198,44 @@ impl Default for Label {
             color: default_label_color(),
             sort_order: 0,
         }
+    }
+}
+
+/// 导入时随条目带进来的标签信息：名字必有，颜色/排序可选。
+///
+/// JSON 直接带的是完整 `Label`，CSV/XML 只有名字与可选的 `color`/`sort_order`，
+/// 统一先落到这里，等写入库时再按名字去重、缺省补默认值。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LabelSpec {
+    pub name: String,
+    pub color: Option<i32>,
+    pub sort_order: Option<i32>,
+}
+
+impl LabelSpec {
+    pub fn named(name: impl Into<String>) -> Self {
+        LabelSpec {
+            name: name.into(),
+            color: None,
+            sort_order: None,
+        }
+    }
+
+    /// `#AARRGGBB` / `#RRGGBB`（大小写均可，`#` 可省）→ ARGB 整数。
+    pub fn parse_color(text: &str) -> Option<i32> {
+        let raw = text.trim().trim_start_matches('#');
+        match raw.len() {
+            8 => u32::from_str_radix(raw, 16).ok().map(|v| v as i32),
+            6 => u32::from_str_radix(raw, 16)
+                .ok()
+                .map(|v| (0xFF00_0000u32 | v) as i32),
+            _ => None,
+        }
+    }
+
+    /// ARGB 整数 → `#AARRGGBB`（导出 CSV/XML 用，必要时可无损解析回来）。
+    pub fn color_hex(color: i32) -> String {
+        format!("#{:08X}", color as u32)
     }
 }
 

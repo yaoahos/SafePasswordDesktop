@@ -4,8 +4,8 @@ import { checkUpdate, updateDownloadAndInstall } from "../api";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { UpdateInfo } from "../types";
 import type { AppCtx } from "../app-context";
+import { APP_VERSION } from "../version";
 
-const APP_VERSION = "1.0.0";
 const PROJECT_URL = "https://github.com/yaoahos/SafePasswordDesktop";
 const RELEASES_URL = "https://github.com/yaoahos/SafePasswordDesktop/releases";
 
@@ -123,6 +123,19 @@ export function AboutDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void
         </div>
         <div className="setting-sub" style={{ marginTop: 8 }}>
           {status}
+        </div>
+        <label className="check-row" style={{ marginTop: 10 }}>
+          <input
+            type="checkbox"
+            checked={ctx.settings.checkUpdatesOnLaunch}
+            onChange={(e) =>
+              void ctx.applySettings({ ...ctx.settings, checkUpdatesOnLaunch: e.target.checked })
+            }
+          />
+          启动时自动检查更新
+        </label>
+        <div className="setting-sub" style={{ marginTop: 4 }}>
+          开启后每次启动静默查询一次 GitHub Releases，发现新版本只提示，不会自动下载安装。
         </div>
       </div>
 
