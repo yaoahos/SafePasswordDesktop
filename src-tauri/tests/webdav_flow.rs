@@ -260,7 +260,8 @@ async fn two_devices_sync_through_mock_webdav() {
         .await
         .unwrap();
     assert_eq!(s.direction, "UPLOADED", "A 有本地新改动应上传：{s:?}");
-    assert_eq!(s.message, "已保留本地版本并覆盖云端");
+    // 上传的措辞不因策略而变：显式"本地优先"也只说上传
+    assert_eq!(s.message, "已上传本地更新");
     let s = c::webdav_sync(app_b.state::<AppState>(), cfg(), None)
         .await
         .unwrap();
