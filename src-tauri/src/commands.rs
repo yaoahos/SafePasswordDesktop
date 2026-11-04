@@ -358,6 +358,10 @@ pub async fn delete_vault(state: State<'_, AppState>, id: String) -> CmdResult<(
                     keys.push(k);
                 }
             }
+            // 有内容密钥就是"按 key 精确删"：只删本库的文件、只删本库的清单条目。
+            // 库名可以重复（同名库冲突），按名字清理会误删别人的条目，所以只在
+            // 拿不到内容密钥（更老的库，没有稳定键）时才退回按名字。
+            let exact = !keys.is_empty();
             let name_key = key_for(&meta.name);
             if !keys.contains(&name_key) {
                 keys.push(name_key);
@@ -369,9 +373,12 @@ pub async fn delete_vault(state: State<'_, AppState>, id: String) -> CmdResult<(
                 let text = String::from_utf8_lossy(&bytes).to_string();
                 let mut manifest = CloudManifest::parse(Some(text.as_str()));
                 let before = manifest.vaults.len();
-                manifest
-                    .vaults
-                    .retain(|e| !keys.contains(&e.key) && e.name.trim() != meta.name.trim());
+                manifest.vaults.retain(|e| {
+                    if keys.contains(&e.key) {
+                        return false;
+                    }
+                    !exact && e.name.trim() == meta.name.trim()
+                });
                 if manifest.vaults.len() != before {
                     let _ = client
                         .put(&cfg.manifest_path(), manifest.to_json().as_bytes())

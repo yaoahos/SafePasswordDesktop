@@ -282,12 +282,9 @@ impl SyncEngine {
                         container: local,
                         direction: SyncDirection::Uploaded,
                         conflicts: 0,
-                        // 显式"本地优先"（恢复到云端）走的是同一条上传路径，消息要一致
-                        message: if conflict_strategy == ConflictStrategy::KeepLocal {
-                            "已保留本地版本并覆盖云端".to_string()
-                        } else {
-                            "已上传本地更新".to_string()
-                        },
+                        // 上传就是上传，不因调用方用哪种策略而换措辞（"保留本地版本并覆盖云端"
+                        // 读起来像出了冲突，实际上只是正常上传）
+                        message: "已上传本地更新".to_string(),
                     });
                 }
                 head = Some(stat);
@@ -486,7 +483,7 @@ impl SyncEngine {
                     container: local,
                     direction: SyncDirection::Uploaded,
                     conflicts: 0,
-                    message: "已保留本地版本并覆盖云端".to_string(),
+                    message: "已上传本地更新".to_string(),
                 })
             }
             _ => {
