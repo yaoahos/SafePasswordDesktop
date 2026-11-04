@@ -339,6 +339,9 @@ impl SyncEngine {
         // - 仍找不到 → 视为"云端已删除该库"，交给调用方弹窗询问（删除本地 / 恢复到云端）。
         // 认领到的云端条目：(键, 库名, 该文件更新时间)
         let mut adopted: Option<(String, String, i64)> = None;
+        // 清单里有同名条目、但不是同一个库（内容密钥不同）：那是"别人的同名库"，
+        // 不能认领（否则会把它当成本库的旧文件迁移删掉），只能提示改名。
+        let mut name_taken: Option<String> = None;
         if remote_bytes.is_none() && local.vault.last_synced_at > 0 {
             let manifest_text = self
                 .webdav
@@ -359,10 +362,20 @@ impl SyncEngine {
                 if entry.key != remote_key {
                     let path = self.config.remote_path(&entry.key);
                     if let Some(bytes) = self.webdav.get(&path).await.map_err(dav_err)? {
-                        remote_key = entry.key.clone();
-                        remote_path = path;
-                        remote_bytes = Some(bytes);
-                        adopted = Some((entry.key.clone(), entry.name.clone(), entry.updated_at));
+                        // 同名不代表同一个库：内容密钥一致才认领（改名/重新上传过的情况），
+                        // 否则记下来，稍后按"同名冲突"提示改名，一个字节都不动云端。
+                        let same_vault = VaultContainer::open(&bytes, password)
+                            .map(|c| c.vault.content_key == local.vault.content_key)
+                            .unwrap_or(false);
+                        if same_vault {
+                            remote_key = entry.key.clone();
+                            remote_path = path;
+                            remote_bytes = Some(bytes);
+                            adopted =
+                                Some((entry.key.clone(), entry.name.clone(), entry.updated_at));
+                        } else {
+                            name_taken = Some(entry.name.clone());
+                        }
                     }
                 }
             }
@@ -390,6 +403,10 @@ impl SyncEngine {
                 }
             }
             if remote_bytes.is_none() {
+                if let Some(other) = name_taken {
+                    // 云端已有同名库、且本库文件不在云端：让用户改名后再同步
+                    return Ok(name_conflict_result(local, other));
+                }
                 // 本地若还有未同步修改，提示一并带出（删本地会丢数据）。
                 let pending = local.vault.updated_at > local.vault.last_synced_at + 3_000;
                 return Ok(SyncResult {
