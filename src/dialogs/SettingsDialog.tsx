@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Dialog } from "../components/Dialog";
 import { Icon } from "../components/icons";
+import { PasswordInput } from "../components/PasswordInput";
 import {
   backupCreate,
   backupDelete,
@@ -129,15 +130,15 @@ function SecurityTab({ ctx }: { ctx: AppCtx }) {
       <div className="section-cap">修改主密码</div>
       <div className="form-row">
         <label className="field-caption">当前主密码</label>
-        <input className="input" type="password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} />
+        <PasswordInput value={oldPw} onChange={setOldPw} />
       </div>
       <div className="form-row">
         <label className="field-caption">新主密码（至少 8 位）</label>
-        <input className="input" type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
+        <PasswordInput value={newPw} onChange={setNewPw} />
       </div>
       <div className="form-row">
         <label className="field-caption">确认新主密码</label>
-        <input className="input" type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} />
+        <PasswordInput value={confirmPw} onChange={setConfirmPw} />
       </div>
       <button className="btn primary" disabled={busy} onClick={() => void changePw()}>
         {busy ? "修改中…" : "修改主密码"}
@@ -285,12 +286,7 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
       </div>
       <div className="form-row">
         <label className="field-caption">密码 / 应用密码</label>
-        <input
-          className="input"
-          type="password"
-          value={cfg.password}
-          onChange={(e) => patch({ password: e.target.value })}
-        />
+        <PasswordInput value={cfg.password} onChange={(v) => patch({ password: v })} />
       </div>
       <div className="form-row">
         <label className="field-caption">远程目录</label>
@@ -465,13 +461,11 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
           )}
           {restoreTarget?.path === b.path && (
             <div className="row" style={{ paddingLeft: 10 }}>
-              <input
-                className="input"
-                type="password"
+              <PasswordInput
                 style={{ width: 200, height: 32 }}
                 placeholder="该备份的主密码"
                 value={restorePw}
-                onChange={(e) => setRestorePw(e.target.value)}
+                onChange={setRestorePw}
               />
               <button className="btn sm primary" disabled={busy !== null || !restorePw} onClick={() => void doRestore()}>
                 确认恢复
@@ -788,13 +782,12 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
               )}
               {dlKey === c.key && (
                 <span className="row" style={{ gap: 6 }}>
-                  <input
-                    className="input"
-                    type="password"
+                  <PasswordInput
                     style={{ width: 160, height: 32 }}
                     placeholder="该库主密码"
                     value={dlPw}
-                    onChange={(e) => setDlPw(e.target.value)}
+                    onChange={setDlPw}
+                    iconSize={15}
                   />
                   <button
                     className="btn sm primary"
@@ -843,7 +836,7 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
         </div>
         <div className="form-row">
           <label className="field-caption">主密码（至少 8 位）</label>
-          <input className="input" type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
+          <PasswordInput value={newPw} onChange={setNewPw} />
         </div>
         <button className="btn primary tall block" disabled={busy !== null} onClick={() => void create()}>
           新建并切换
@@ -1067,13 +1060,7 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
       </div>
       <div className="form-row">
         <label className="field-caption">主密码</label>
-        <input
-          className="input"
-          type="password"
-          placeholder="该备份的主密码"
-          value={spvPw}
-          onChange={(e) => setSpvPw(e.target.value)}
-        />
+        <PasswordInput value={spvPw} placeholder="该备份的主密码" onChange={setSpvPw} />
       </div>
       <FilePicker
         label="选择加密备份文件…"

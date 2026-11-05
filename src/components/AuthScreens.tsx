@@ -3,6 +3,7 @@ import type { CloudVaultEntry, VaultMeta, WebDavConfig } from "../types";
 import { evaluateStrength, importVaultBytes, webdavGetVault, webdavListCloud } from "../api";
 import { arrayBufferToBase64, formatTime } from "../utils";
 import { Icon } from "./icons";
+import { PasswordInput } from "./PasswordInput";
 import { AppTitleBar } from "./TopBar";
 
 type Mode = "empty" | "select" | "create" | "restore" | "cloud";
@@ -40,7 +41,6 @@ export function AuthScreens({
     (defaultVaultId && vaults.some((v) => v.id === defaultVaultId) ? defaultVaultId : vaults[0]?.id) ?? "",
   );
   const [password, setPassword] = useState("");
-  const [showPw, setShowPw] = useState(false);
   const [name, setName] = useState("");
   const [confirm, setConfirm] = useState("");
   const [master, setMaster] = useState("");
@@ -293,12 +293,10 @@ export function AuthScreens({
       </div>
       <div className="form-row">
         <label className="field-caption">密码 / 应用密码</label>
-        <input
-          className="input"
-          type="password"
+        <PasswordInput
           placeholder="坚果云请用应用密码"
           value={cloudCfg.password}
-          onChange={(e) => setCloudCfg({ ...cloudCfg, password: e.target.value })}
+          onChange={(v) => setCloudCfg({ ...cloudCfg, password: v })}
         />
       </div>
       <div className="form-row">
@@ -370,26 +368,13 @@ export function AuthScreens({
             </div>
             <div className="form-row">
               <label className="field-caption">主密码</label>
-              <div className="input-wrap">
-                <input
-                  className="input with-eye"
-                  type={showPw ? "text" : "password"}
-                  autoFocus
-                  value={password}
-                  placeholder="输入主密码解锁"
-                  onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void doUnlock();
-                  }}
-                />
-                <button
-                  className="icon-btn in-frame"
-                  title={showPw ? "隐藏" : "显示"}
-                  onClick={() => setShowPw((v) => !v)}
-                >
-                  <Icon name={showPw ? "eye-off" : "eye"} size={17} />
-                </button>
-              </div>
+              <PasswordInput
+                autoFocus
+                value={password}
+                placeholder="输入主密码解锁"
+                onChange={setPassword}
+                onEnter={() => void doUnlock()}
+              />
             </div>
             <button className="btn primary block tall" disabled={busy || !selected} onClick={() => void doUnlock()}>
               {busy ? "解锁中…" : "解锁"}
@@ -411,12 +396,10 @@ export function AuthScreens({
             </div>
             <div className="form-row">
               <label className="field-caption">主密码</label>
-              <input
-                className="input"
-                type="password"
+              <PasswordInput
                 value={master}
                 placeholder="主密码（至少 8 位）"
-                onChange={(e) => onMasterChange(e.target.value)}
+                onChange={onMasterChange}
               />
             </div>
             {strength && (
@@ -435,15 +418,11 @@ export function AuthScreens({
             )}
             <div className="form-row">
               <label className="field-caption">确认主密码</label>
-              <input
-                className="input"
-                type="password"
+              <PasswordInput
                 value={confirm}
                 placeholder="再次输入主密码"
-                onChange={(e) => setConfirm(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void doCreate();
-                }}
+                onChange={setConfirm}
+                onEnter={() => void doCreate()}
               />
             </div>
             {confirm && confirm !== master && <div className="setting-sub">两次输入不一致</div>}
@@ -485,15 +464,11 @@ export function AuthScreens({
             <div className="spacer-10" />
             <div className="form-row">
               <label className="field-caption">该库的主密码</label>
-              <input
-                className="input"
-                type="password"
+              <PasswordInput
                 value={restorePw}
                 placeholder="输入该备份的主密码"
-                onChange={(e) => setRestorePw(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void doRestore();
-                }}
+                onChange={setRestorePw}
+                onEnter={() => void doRestore()}
               />
             </div>
             <button className="btn primary block tall" disabled={busy} onClick={() => void doRestore()}>
@@ -568,15 +543,11 @@ export function AuthScreens({
                 {cloudKey && (
                   <div className="form-row" style={{ marginTop: 10 }}>
                     <label className="field-caption">该库的主密码</label>
-                    <input
-                      className="input"
-                      type="password"
+                    <PasswordInput
                       placeholder="输入该密码库的主密码"
                       value={cloudPw}
-                      onChange={(e) => setCloudPw(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") void doCloudRestore();
-                      }}
+                      onChange={setCloudPw}
+                      onEnter={() => void doCloudRestore()}
                     />
                   </div>
                 )}

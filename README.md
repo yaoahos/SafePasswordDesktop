@@ -7,8 +7,8 @@ SafePassword 桌面版是一个离线优先的密码管理器。界面与数据�
 - 正式版本：`1.0.3`
 - 支持平台：Windows 10 / 11（x64，需要 WebView2 运行时）
 - 安装包：`SafePassword_1.0.3_x64-setup.exe`（NSIS）/ `SafePassword_1.0.3_x64_zh-CN.msi`
-- 安装包大小：2,400,800 字节（NSIS）/ 3,383,296 字节（MSI）
-- SHA-256：`8054D933AAACA539941448B27F73A1E37FB9864017891382C63BDB91BF3D3CE6`（NSIS）/ `B93BBC2B9CEE46946B6EC879FA46022BE6D3D013674240ACAC7666560AF0A4C9`（MSI）
+- 安装包大小：2,399,309 字节（NSIS）/ 3,383,296 字节（MSI）
+- SHA-256：`A5566DBDB772651C9AE2F7EF7DBD7B11052106FD3C2AEE927C98AAEC6092EABF`（NSIS）/ `FAEAE4082E1C034A2CF6183CA48B1A9C6746F567D85A8B4E1C3BDF223E235ECB`（MSI）
 - 发布下载：[Releases](https://github.com/yaoahos/SafePasswordDesktop/releases)
 
 > 本项目为独立实现，未使用任何第三方应用的源代码；界面与交互仅作设计参考。密码库格式与 Android 版互通。
@@ -288,6 +288,7 @@ SafePasswordDesktop/
 **2026/11/05 · 1.0.3**
 - 修复：设置中指定的「默认展示」标签在解锁后未生效，进入首页仍显示全部条目
 - 优化：条目默认图标配色由 8 种增加到 17 种，并让取色分布更均匀，减少多个条目颜色相近的情况
+- 修复：密码输入框统一提供显示 / 隐藏按钮，修改主密码、WebDAV、恢复与导入等位置不再有看不到内容的输入框
 
 **2026/11/05 · 1.0.2**
 - 优化：完善检查更新失败的提示，触发频率限制时给出可重试的时间
