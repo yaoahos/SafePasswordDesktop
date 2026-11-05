@@ -1,0 +1,1010 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import "./styles.css";
+import {
+  checkUpdate,
+  closeVault,
+  createVault,
+  deleteItem,
+  getSettings,
+  listVaults,
+  openVault,
+  putItem,
+  setSettings as setSettingsApi,
+  currentVault,
+  importVaultBytes,
+  renameVault,
+  webdavSync,
+  webdavPullIfChanged,
+  webdavRestoreToCloud,
+  deleteVault,
+} from "./api";
+import type { AppSettings, SortMode, SyncSummary, UpdateInfo, Vault, VaultItem, VaultMeta } from "./types";
+import type { AppCtx, SectionFilter, ToastKind } from "./app-context";
+import { AuthScreens } from "./components/AuthScreens";
+import { ItemDetail } from "./components/ItemDetail";
+import { ItemList } from "./components/ItemList";
+import { Sidebar } from "./components/Sidebar";
+import { TopBar, type TopAction } from "./components/TopBar";
+import { Dialog } from "./components/Dialog";
+import { AboutDialog } from "./dialogs/AboutDialog";
+import { GeneratorDialog } from "./dialogs/GeneratorDialog";
+import { LabelManagerDialog } from "./dialogs/LabelManagerDialog";
+import { NameConflictDialog } from "./dialogs/NameConflictDialog";
+import { SecurityDialog } from "./dialogs/SecurityDialog";
+import { SettingsDialog } from "./dialogs/SettingsDialog";
+import { ThemeDialog } from "./dialogs/ThemeDialog";
+import { UpdateDialog } from "./dialogs/UpdateDialog";
+import { duplicateItem, itemMatches, newItemFromTemplate } from "./utils";
+import { APP_VERSION } from "./version";
+
+type DialogKind = TopAction | "LABELS" | null;
+
+const DEFAULT_SETTINGS: AppSettings = {
+  theme: "system",
+  accent: "#1677FF",
+  autoLockMinutes: 5,
+  hibpApiKey: "",
+  webdav: { baseUrl: "", username: "", password: "", remoteDir: "/SafePassword", enabled: false },
+  autoBackupDays: 1,
+  lastBackupAt: 0,
+  autoSync: true,
+  pullIntervalSeconds: 60,
+  searchPasswords: false,
+  defaultLabelId: null,
+  lastVaultId: null,
+  checkUpdatesOnLaunch: true,
+};
+
+/** 同步请求上限：超时给出明确提示，避免界面一直停在"同步中…" */
+const SYNC_TIMEOUT_MS = 30_000;
+
+function withSyncTimeout<T>(p: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("同步超时")), SYNC_TIMEOUT_MS);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
+/** 同步失败文案：超时单独提示 */
+function syncErrorText(prefix: string, e: unknown): string {
+  const msg = String(e);
+  return msg.includes("同步超时") ? `${prefix}同步超时，请检查网络或 WebDAV 设置` : `${prefix}${msg}`;
+}
+
+const SECTION_TITLES: Record<SectionFilter, string> = {
+  ALL: "全部",
+  FAVORITES: "收藏",
+  TRASH: "回收站",
+};
+
+export default function App() {
+  const [booted, setBooted] = useState(false);
+  const [vaults, setVaults] = useState<VaultMeta[]>([]);
+  const [vault, setVault] = useState<Vault | null>(null);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [dialog, setDialog] = useState<DialogKind>(null);
+  /** 同步时发现云端已删除：等用户在弹窗里选「删除本地」或「恢复到云端」 */
+  const [remoteGone, setRemoteGone] = useState<{
+    id: string;
+    name: string;
+    pending: boolean;
+  } | null>(null);
+  /** 同步时云端已有同名密码库：让用户先给本地这个库改名，再继续同步 */
+  const [nameConflict, setNameConflict] = useState<{
+    id: string;
+    name: string;
+    message: string;
+  } | null>(null);
+  const [renamingConflict, setRenamingConflict] = useState(false);
+  /** 用户选过「稍后处理」的库 id：自动同步不再弹窗，只在手动同步时提示（持久化到 localStorage） */
+  const [remoteGoneSnoozed, setRemoteGoneSnoozed] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem("sp.remoteGoneSnoozed");
+      return new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      return new Set<string>();
+    }
+  });
+
+  const snoozeRemoteGone = useCallback((id: string) => {
+    setRemoteGoneSnoozed((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      try {
+        localStorage.setItem("sp.remoteGoneSnoozed", JSON.stringify([...next]));
+      } catch {
+        /* 忽略 */
+      }
+      return next;
+    });
+  }, []);
+
+  const forgetRemoteGone = useCallback((id: string) => {
+    setRemoteGoneSnoozed((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      try {
+        localStorage.setItem("sp.remoteGoneSnoozed", JSON.stringify([...next]));
+      } catch {
+        /* 忽略 */
+      }
+      return next;
+    });
+  }, []);
+  const [section, setSection] = useState<SectionFilter>("ALL");
+  const [labelFilter, setLabelFilter] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [selectItemId, setSelectItemId] = useState<string | null>(null);
+  /** 新建条目草稿：不落库，手动保存才写入（v1 项 6） */
+  const [draftNew, setDraftNew] = useState<VaultItem | null>(null);
+  /** 从设置页「切换」进入解锁页时要预选密码库 */
+  const [preselectVaultId, setPreselectVaultId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ id: number; msg: string; kind: ToastKind } | null>(null);
+  /** 启动检查到新版本时弹出的更新窗口（含更新内容与本机/云端版本） */
+  const [updatePrompt, setUpdatePrompt] = useState<UpdateInfo | null>(null);
+  const [sortMode, setSortMode] = useState<SortMode>("CREATED");
+  const [sortAsc, setSortAsc] = useState(false);
+
+  // ------------------------------------------------------------ 基础加载
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const s = await getSettings();
+        if (!cancelled && s) setSettings({ ...DEFAULT_SETTINGS, ...s, webdav: { ...DEFAULT_SETTINGS.webdav, ...s.webdav } });
+      } catch {
+        // 没有已保存设置时后端可能报错，使用默认值
+      }
+      try {
+        const [lv, cv] = await Promise.all([listVaults(), currentVault()]);
+        if (!cancelled) {
+          setVaults(lv);
+          setVault(cv);
+        }
+      } catch (e) {
+        if (!cancelled) notify(String(e), "error");
+      } finally {
+        if (!cancelled) setBooted(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ------------------------------------------------------------ toast
+
+  const notify = useCallback((msg: string, kind: ToastKind = "info") => {
+    setToast({ id: Date.now(), msg, kind });
+  }, []);
+
+  // ------------------------------------------------------------ 启动时检查更新（可在「关于」里关闭）
+
+  const autoUpdateChecked = useRef(false);
+  useEffect(() => {
+    // 解锁进入首页后才检查：解锁页弹出的更新提示会打断正在输主密码的人
+    if (!vault || autoUpdateChecked.current || !settings.checkUpdatesOnLaunch) return;
+    autoUpdateChecked.current = true;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const r = await checkUpdate(APP_VERSION);
+          // 发现新版本时弹出带更新内容的窗口，而不是一闪而过的提示条
+          if (r.hasUpdate) setUpdatePrompt(r);
+        } catch {
+          // 启动检查静默失败：离线或网络受限时不该打扰用户
+        }
+      })();
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [vault, settings.checkUpdatesOnLaunch]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 3500);
+    return () => window.clearTimeout(t);
+  }, [toast]);
+
+  // 去掉网页感右键菜单（刷新/打印/另存为…）；输入框内保留系统菜单以便粘贴（v1 项 0）
+  useEffect(() => {
+    const onCtx = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+      e.preventDefault();
+    };
+    document.addEventListener("contextmenu", onCtx);
+    return () => document.removeEventListener("contextmenu", onCtx);
+  }, []);
+
+  // ------------------------------------------------------------ 主题
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const dark = settings.theme === "dark" || (settings.theme === "system" && mq.matches);
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+      // 强调色（对齐手机端 ThemeScreen：预设/自定义色覆盖 --primary）
+      const accent = /^#[0-9a-fA-F]{6}$/.test(settings.accent || "") ? settings.accent : "#1677FF";
+      const root = document.documentElement.style;
+      root.setProperty("--primary", accent);
+      root.setProperty("--primary-soft", `${accent}1F`);
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [settings.theme, settings.accent]);
+
+  const applySettings = useCallback(async (next: AppSettings) => {
+    setSettings(next);
+    try {
+      await setSettingsApi(next);
+    } catch (e) {
+      notify(`保存设置失败：${String(e)}`, "error");
+    }
+  }, [notify]);
+
+  const setSearchPasswords = useCallback(
+    (v: boolean) => {
+      void applySettings({ ...settings, searchPasswords: v });
+    },
+    [applySettings, settings],
+  );
+
+  /** 对齐手机端 setSortMode：同模式翻转方向；切模式则标题升序、时间类降序（不持久化） */
+  const changeSort = useCallback(
+    (m: SortMode) => {
+      if (m === sortMode) setSortAsc(!sortAsc);
+      else {
+        setSortMode(m);
+        setSortAsc(m === "TITLE");
+      }
+    },
+    [sortMode, sortAsc],
+  );
+
+  // 换库（解锁 / 恢复 / 切换）时收回所有弹窗：恢复完应该就是首页，
+  // 不能把上一个库残留的设置弹窗带出来
+  useEffect(() => {
+    setDialog(null);
+  }, [vault?.id]);
+
+  // 设置里改“默认展示”时立即应用（对齐手机端 setDefaultLabel）
+  useEffect(() => {
+    if (!vault) return;
+    const d = settings.defaultLabelId;
+    if (d && !vault.labels.some((l) => l.id === d)) return; // 失效 id 忽略
+    setLabelFilter(d);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.defaultLabelId]);
+
+  // ------------------------------------------------------------ 流程
+
+  const refreshVaults = useCallback(async () => {
+    try {
+      setVaults(await listVaults());
+    } catch (e) {
+      notify(String(e), "error");
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const refreshFromBackend = useCallback(async () => {
+    try {
+      const [cv, lv, st] = await Promise.all([currentVault(), listVaults(), getSettings()]);
+      setVault(cv);
+      setVaults(lv);
+      // 设置也一起刷新：恢复/导入会改写 lastVaultId，前端设置不同步就会拿着
+      // 一个不存在的旧 id 去解锁（表现为"找不到该密码库"）
+      if (st) {
+        setSettings({ ...DEFAULT_SETTINGS, ...st, webdav: { ...DEFAULT_SETTINGS.webdav, ...st.webdav } });
+      }
+    } catch (e) {
+      notify(String(e), "error");
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const lockNow = useCallback(() => {
+    setVault(null);
+    setSelectItemId(null);
+    setDialog(null);
+    setPreselectVaultId(null);
+    void closeVault().catch(() => undefined);
+  }, []);
+
+  // ------------------------------------------------------------ 同步状态文本（对齐手机端 3 秒状态）
+
+  const [syncState, setSyncState] = useState<{ kind: "working" | "ok" | "err"; text: string } | null>(null);
+  const syncStateTimer = useRef<number | null>(null);
+
+  const flashSync = useCallback((kind: "working" | "ok" | "err", text: string) => {
+    setSyncState({ kind, text });
+    if (syncStateTimer.current !== null) window.clearTimeout(syncStateTimer.current);
+    // 对齐手机端：状态文本 3 秒后自动消失
+    syncStateTimer.current =
+      kind === "working" ? null : window.setTimeout(() => setSyncState(null), 3000);
+  }, []);
+
+  /** 立刻清掉同步提示（静默场景用：例如用户选过"稍后处理"的云端删除） */
+  const clearSync = useCallback(() => {
+    if (syncStateTimer.current !== null) window.clearTimeout(syncStateTimer.current);
+    syncStateTimer.current = null;
+    setSyncState(null);
+  }, []);
+
+  /** 同步结果落地：云端已删除 → 弹窗让用户选择；手动同步时才强制弹窗 */
+  const applySync = useCallback(
+    async (r: SyncSummary, vaultId: string | null, manual = false) => {
+      if (r.direction === "NAME_CONFLICT") {
+        // 云端已有同名库，这次没有写任何东西：让用户改名后再同步
+        const id = vaultId ?? vault?.id ?? null;
+        const name = (id && vaults.find((v) => v.id === id)?.name) || vault?.name || "";
+        if (id) setNameConflict({ id, name, message: r.message });
+        flashSync("err", r.message || "云端已有同名密码库，请改名后再同步");
+        clearSync();
+        return;
+      }
+      if (r.direction === "REMOTE_DELETED") {
+        // 不自动删除：弹窗让用户选择（删除本地 / 恢复到云端）
+        const id = vaultId ?? vault?.id ?? null;
+        const name = (id && vaults.find((v) => v.id === id)?.name) || vault?.name || "";
+        // 用户选过"稍后处理"的库：自动同步时静默跳过，只有手动同步才再弹
+        if (id && !manual && remoteGoneSnoozed.has(id)) {
+          clearSync();
+          return;
+        }
+        if (id) setRemoteGone({ id, name, pending: r.message.includes("未同步") });
+        flashSync("err", r.message || "云端已删除该密码库，请选择处理方式");
+        return;
+      }
+      await refreshFromBackend();
+      // 定时/自动同步已是最新时不要打扰用户；手动同步才提示
+      if (r.direction === "NONE" && !manual) {
+        clearSync();
+        return;
+      }
+      flashSync("ok", r.message || "已同步");
+    },
+    [refreshFromBackend, flashSync, clearSync, vault?.name, vault?.id, vaults, remoteGoneSnoozed],
+  );
+
+  const gotoSelect = useCallback((vaultId?: string) => {
+    setPreselectVaultId(vaultId ?? null);
+    setVault(null);
+    setSelectItemId(null);
+    setDialog(null);
+    void closeVault().catch(() => undefined);
+    void listVaults()
+      .then(setVaults)
+      .catch(() => undefined);
+  }, []);
+
+  const handleUnlock = useCallback(
+    async (id: string, password: string): Promise<string | null> => {
+      try {
+        const v = await openVault(id, password);
+        setVault(v);
+        setPreselectVaultId(null);
+        // 解锁后清掉可能残留的弹窗状态（例如恢复密码库后旧 dialog 又冒出来）
+        setDialog(null);
+        setSelectItemId(v.items.find((i) => i.status !== "TRASHED")?.id ?? null);
+        setSection("ALL");
+        // 直接按设置套用默认标签：不依赖副作用时序，开库那一刻就定好
+        setLabelFilter(
+          settings.defaultLabelId && v.labels.some((l) => l.id === settings.defaultLabelId)
+            ? settings.defaultLabelId
+            : null
+        );
+        setQuery("");
+        void listVaults().then(setVaults).catch(() => undefined);
+        // 解锁后做一次完整同步（合并双端，避免云端与本地不一致）
+        void (async () => {
+          const cfg = settings.webdav;
+          if (!cfg.enabled || !/^https?:\/\//i.test(cfg.baseUrl)) return;
+          try {
+            flashSync("working", "正在同步…");
+            const r = await withSyncTimeout(webdavSync(cfg, "MERGE"));
+            await applySync(r, v.id);
+          } catch (e) {
+            flashSync("err", syncErrorText("", e));
+          }
+        })();
+        return null;
+      } catch (e) {
+        return String(e);
+      }
+    },
+    [settings.webdav, refreshFromBackend, flashSync, applySync],
+  );
+
+  const handleCreate = useCallback(
+    async (name: string, password: string): Promise<string | null> => {
+      try {
+        await createVault(name, password);
+        await refreshFromBackend();
+        // 新建（含空库）后立即同步，避免一端有库、另一端没有
+        if (settings.webdav.enabled && settings.webdav.baseUrl.trim()) {
+          try {
+            const r = await webdavSync(settings.webdav, "MERGE");
+            await applySync(r, null);
+          } catch (e) {
+            flashSync("err", `同步失败：${String(e)}`);
+          }
+        }
+        // create_vault 已切换 current，这里再把条目选中状态理顺
+        setSelectItemId(null);
+        setSection("ALL");
+        setLabelFilter(null);
+        setQuery("");
+        return null;
+      } catch (e) {
+        return String(e);
+      }
+    },
+    [refreshFromBackend, settings.webdav, applySync, flashSync],
+  );
+
+  // ------------------------------------------------------------ 从本地恢复（对齐手机端 UnlockScreen）
+
+  const handleRestoreLocal = useCallback(
+    async (fileName: string, base64Data: string, password: string): Promise<string | null> => {
+      try {
+        const base = fileName.replace(/\.spv$/i, "");
+        await importVaultBytes(base64Data, password, base || "恢复的密码库");
+        await refreshFromBackend();
+        setSelectItemId(null);
+        setSection("ALL");
+        setLabelFilter(null);
+        setQuery("");
+        return null;
+      } catch (e) {
+        return String(e);
+      }
+    },
+    [refreshFromBackend],
+  );
+
+  // ------------------------------------------------------------ 自动锁定（闲置计时）
+
+  const idleRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!vault || settings.autoLockMinutes <= 0) return;
+    const ms = settings.autoLockMinutes * 60_000;
+    const reset = () => {
+      if (idleRef.current !== null) window.clearTimeout(idleRef.current);
+      idleRef.current = window.setTimeout(() => {
+        lockNow();
+        notify("已根据闲置时间自动锁定", "info");
+      }, ms);
+    };
+    reset();
+    const events: (keyof WindowEventMap)[] = ["mousemove", "mousedown", "keydown", "wheel", "touchstart"];
+    for (const ev of events) window.addEventListener(ev, reset, { passive: true });
+    return () => {
+      if (idleRef.current !== null) window.clearTimeout(idleRef.current);
+      for (const ev of events) window.removeEventListener(ev, reset);
+    };
+  }, [vault, settings.autoLockMinutes, lockNow, notify]);
+
+  // ------------------------------------------------------------ 自动同步（保存后延迟上传，对齐手机端 scheduleSync）
+
+  const syncSigRef = useRef<string>("");
+  useEffect(() => {
+    if (!vault) {
+      syncSigRef.current = "";
+      return;
+    }
+    const sig = `${vault.updatedAt}:${vault.revision}`;
+    const prev = syncSigRef.current;
+    syncSigRef.current = sig;
+    if (!prev || prev === sig) return; // 首次装载或无变化：不触发
+    const cfg = settings.webdav;
+    if (!settings.autoSync || !cfg.enabled || !/^https?:\/\//i.test(cfg.baseUrl)) return;
+    const t = window.setTimeout(() => {
+      void (async () => {
+        try {
+          flashSync("working", "正在同步…");
+          const r = await withSyncTimeout(webdavSync(cfg, "MERGE")); // 合并优先：本地空库不会覆盖云端新增条目
+          await applySync(r, vault.id);
+        } catch (e) {
+          flashSync("err", syncErrorText("自动同步失败：", e));
+        }
+      })();
+    }, 1500); // 对齐手机端 scheduleSync 的 1500ms 防抖
+    return () => window.clearTimeout(t);
+  }, [vault, settings.autoSync, settings.webdav, applySync, flashSync]);
+
+  // ------------------------------------------------------------ 自动拉取（HEAD 判定 + 按库大小自适应间隔）
+
+  useEffect(() => {
+    const secs = settings.pullIntervalSeconds;
+    const cfg = settings.webdav;
+    if (!vault || secs <= 0 || !cfg.enabled || !/^https?:\/\//i.test(cfg.baseUrl)) return;
+    let stopped = false;
+    const check = async () => {
+      if (stopped || document.hidden) return; // 窗口不可见时不发请求：省请求数，也省电量
+      try {
+        const r = await withSyncTimeout(webdavPullIfChanged(cfg));
+        if (r) await applySync(r, vault.id); // 有更新才刷新（对齐手机端 silent pull）
+      } catch (e) {
+        // 对齐手机端 runCatching：拉取失败不打扰用户
+        console.warn("自动拉取失败", e);
+      }
+    };
+    // 30 秒心跳，真正的频率由后端按库大小限流（小库 60 秒，8.9 MB 的库约 4.5 分钟，最长 15 分钟）
+    const iv = window.setInterval(() => void check(), Math.min(secs, 30) * 1000);
+    // 回到窗口立即检查一次（后端仍会限流，不会因此多打请求）
+    const onActive = () => {
+      if (!document.hidden) void check();
+    };
+    window.addEventListener("focus", onActive);
+    document.addEventListener("visibilitychange", onActive);
+    return () => {
+      stopped = true;
+      window.clearInterval(iv);
+      window.removeEventListener("focus", onActive);
+      document.removeEventListener("visibilitychange", onActive);
+    };
+  }, [vault, settings.pullIntervalSeconds, settings.webdav, applySync]);
+
+  // ------------------------------------------------------------ 切换密码库后回到「全部」视图（含云端下载切换）
+
+  // 换库/开库时套用「默认展示」标签：这里必须由这个 effect 负责，
+  // 因为它在 unlock/create/恢复之后都会跑，且晚于 handleUnlock 里的同步赋值
+  // （1.0.2 的 bug 就是本 effect 无条件把 labelFilter 清成 null，把默认标签冲掉了）。
+  const vaultIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = vault?.id ?? null;
+    if (vaultIdRef.current === id) return;
+    vaultIdRef.current = id;
+    if (!id || !vault) return;
+    setSection("ALL");
+    const d = settings.defaultLabelId;
+    setLabelFilter(d && vault.labels.some((l) => l.id === d) ? d : null);
+    setQuery("");
+    setDraftNew(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vault?.id]);
+
+  // ------------------------------------------------------------ 手动同步（顶栏"同步"直接执行，对齐手机端 doSync）
+
+  const runSync = useCallback(async () => {
+    const cfg = settings.webdav;
+    if (!cfg.enabled || !/^https?:\/\//i.test(cfg.baseUrl)) {
+      notify("请先在设置 → 同步与备份中配置 WebDAV", "error");
+      return;
+    }
+    flashSync("working", "同步中…");
+    try {
+      // 与手机端一致：直接同步、本地优先，无需弹窗确认
+      const r = await withSyncTimeout(webdavSync(cfg, "MERGE"));
+      await applySync(r, vault?.id ?? null, true);
+    } catch (e) {
+      flashSync("err", syncErrorText("", e));
+    }
+  }, [settings.webdav, vault?.id, notify, applySync, flashSync]);
+
+  /** 同名冲突弹窗里确认改名：改完名字立刻再同步一次 */
+  const resolveNameConflict = useCallback(
+    async (newName: string) => {
+      if (!nameConflict || renamingConflict) return;
+      setRenamingConflict(true);
+      try {
+        await renameVault(nameConflict.id, newName);
+        setNameConflict(null);
+        await refreshFromBackend();
+        const cfg = settings.webdav;
+        if (!cfg.enabled || !/^https?:\/\//i.test(cfg.baseUrl)) return;
+        flashSync("working", "同步中…");
+        const r = await withSyncTimeout(webdavSync(cfg, "MERGE"));
+        await applySync(r, nameConflict.id, true);
+      } catch (e) {
+        flashSync("err", `改名失败：${String(e)}`);
+      } finally {
+        setRenamingConflict(false);
+      }
+    },
+    [nameConflict, renamingConflict, refreshFromBackend, settings.webdav, applySync, flashSync],
+  );
+
+  // ------------------------------------------------------------ 条目操作
+
+  const saveItem = useCallback(
+    async (next: VaultItem) => {
+      const v = await putItem(next);
+      setVault(v);
+      // 首次保存后草稿转为正式条目（对齐手机端保存后 existing!=null）
+      setDraftNew((d) => (d && d.id === next.id ? null : d));
+      setSelectItemId(next.id);
+    },
+    [],
+  );
+
+  /** 列表行内收藏：点击即生效（对齐手机端，不走草稿保存） */
+  const toggleFavorite = useCallback(
+    async (item: VaultItem) => {
+      try {
+        const v = await putItem({ ...item, favorite: !item.favorite, updatedAt: Date.now() });
+        setVault(v);
+      } catch (e) {
+        notify(String(e), "error");
+      }
+    },
+    [notify],
+  );
+
+  const duplicateSelected = useCallback(async () => {
+    if (!vault || !selectItemId) return;
+    const item = vault.items.find((i) => i.id === selectItemId);
+    if (!item) return;
+    const copy = duplicateItem(item);
+    const v = await putItem(copy);
+    setVault(v);
+    setSelectItemId(copy.id);
+    notify("已创建副本", "success");
+  }, [vault, selectItemId, notify]);
+
+  /** 非回收站条目 → 移回收站（后端 delete_item 是永久删除，软删需自己置状态） */
+  const trashSelected = useCallback(async () => {
+    if (!vault || !selectItemId) return;
+    const item = vault.items.find((i) => i.id === selectItemId);
+    if (!item) return;
+    const v = await putItem({ ...item, status: "TRASHED", deletedAt: Date.now(), updatedAt: Date.now() });
+    setVault(v);
+    setSelectItemId(null);
+    notify("已移入回收站", "success");
+  }, [vault, selectItemId, notify]);
+
+  const restoreSelected = useCallback(async () => {
+    if (!vault || !selectItemId) return;
+    const item = vault.items.find((i) => i.id === selectItemId);
+    if (!item) return;
+    const v = await putItem({ ...item, status: "ACTIVE", deletedAt: null, updatedAt: Date.now() });
+    setVault(v);
+    notify("已恢复", "success");
+  }, [vault, selectItemId, notify]);
+
+  const purgeSelected = useCallback(async () => {
+    if (!vault || !selectItemId) return;
+    const v = await deleteItem(selectItemId);
+    setVault(v);
+    setSelectItemId(null);
+    notify("已彻底删除", "success");
+  }, [vault, selectItemId, notify]);
+
+  const createFromTemplate = useCallback(
+    (templateId: string) => {
+      if (!vault) return;
+      // 只建草稿：不落库、不预填标题、不带备注（v1 项 6，对齐手机端"未保存的新建"）
+      const item = newItemFromTemplate(templateId);
+      item.title = "";
+      item.notes = "";
+      setDraftNew(item);
+      setSelectItemId(null);
+      setSection("ALL");
+      setLabelFilter(null);
+      setQuery("");
+      setDialog(null);
+    },
+    [vault],
+  );
+
+  /** 新建草稿直接丢弃（未落库） */
+  const discardDraft = useCallback(() => setDraftNew(null), []);
+
+  // 列表/详情组件是 memo 的，传给它们的回调必须是稳定引用，否则每次渲染都会重建
+  const selectItem = useCallback((id: string) => {
+    setDraftNew(null);
+    setSelectItemId(id);
+  }, []);
+  const createNewLogin = useCallback(() => createFromTemplate("login"), [createFromTemplate]);
+  const toggleFavItem = useCallback((it: VaultItem) => void toggleFavorite(it), [toggleFavorite]);
+  const saveAndCreate = useCallback(() => void createFromTemplate("login"), [createFromTemplate]);
+  const detailDelete = useCallback(async () => {
+    if (draftNew) {
+      discardDraft();
+      return;
+    }
+    await trashSelected();
+  }, [draftNew, discardDraft, trashSelected]);
+
+  // ------------------------------------------------------------ 过滤 / 选中
+
+  const items = vault?.items ?? [];
+  const filtered = useMemo(() => {
+    const q = query.trim();
+    const arr = items.filter((i) => {
+      if (labelFilter) {
+        if (i.status === "TRASHED") return false;
+        if (!i.labelIds.includes(labelFilter)) return false;
+      } else if (section === "TRASH") {
+        if (i.status !== "TRASHED") return false;
+      } else if (section === "FAVORITES") {
+        if (i.status === "TRASHED" || !i.favorite) return false;
+      } else if (i.status === "TRASHED") {
+        return false;
+      }
+      return itemMatches(i, q, settings.searchPasswords);
+    });
+    // 排序（对齐手机端 SortMode：标题拼音升序 / 最近更新 / 最近创建，时间类默认降序）
+    if (sortMode === "TITLE") arr.sort((a, b) => a.title.localeCompare(b.title, "zh-Hans-CN"));
+    else if (sortMode === "UPDATED") arr.sort((a, b) => a.updatedAt - b.updatedAt);
+    else arr.sort((a, b) => a.createdAt - b.createdAt);
+    if (!sortAsc) arr.reverse();
+    // 收藏置顶（对齐手机端：收藏条目始终排最前，组内保持所选排序）
+    arr.sort((a, b) => (a.favorite === b.favorite ? 0 : a.favorite ? -1 : 1));
+    return arr;
+  }, [items, section, labelFilter, query, settings.searchPasswords, sortMode, sortAsc]);
+
+  // 选中项不在可见列表时，自动落到第一个（新建草稿不受影响）
+  useEffect(() => {
+    if (draftNew) return;
+    if (filtered.length === 0) {
+      if (selectItemId !== null) setSelectItemId(null);
+      return;
+    }
+    if (!filtered.some((i) => i.id === selectItemId)) setSelectItemId(filtered[0].id);
+  }, [filtered, selectItemId, draftNew]);
+
+  const selected = useMemo(
+    () => draftNew ?? filtered.find((i) => i.id === selectItemId) ?? null,
+    [draftNew, filtered, selectItemId],
+  );
+
+  const sectionTitle = labelFilter
+    ? (vault?.labels.find((l) => l.id === labelFilter)?.name ?? "")
+    : SECTION_TITLES[section];
+
+  // ------------------------------------------------------------ 上下文
+
+  const ctx: AppCtx = {
+    vault,
+    vaults,
+    settings,
+    notify,
+    applySettings,
+    setVault,
+    refreshVaults,
+    refreshFromBackend,
+    lockNow,
+    gotoSelect,
+    selectItemId,
+    setSelectItemId,
+    searchPasswords: settings.searchPasswords,
+    setSearchPasswords,
+  };
+
+  // ------------------------------------------------------------ 渲染
+
+  // 更新提示只在解锁后的首页出现（检查本身也挂在这个条件上）
+  const updateOverlay = updatePrompt ? (
+    <UpdateDialog
+      info={updatePrompt}
+      onClose={() => {
+        // 记住这一版已被「稍后」忽略，缓存有效期内不再重复弹
+          setUpdatePrompt(null);
+      }}
+      onFinished={() => {
+        setUpdatePrompt(null);
+        notify("安装包已启动，请按向导完成安装", "success");
+      }}
+    />
+  ) : null;
+
+  if (!booted) {
+    return (
+      <div className="loading-wrap">
+        <div className="spinner" />
+        <div>正在加载…</div>
+      </div>
+    );
+  }
+
+  if (!vault) {
+    return (
+      <AuthScreens
+        vaults={vaults}
+        defaultVaultId={preselectVaultId ?? settings.lastVaultId}
+        onUnlock={handleUnlock}
+        onCreate={handleCreate}
+        onRestoreLocal={handleRestoreLocal}
+        webdav={settings.webdav}
+        onCloudRestored={refreshFromBackend}
+        onSaveWebdav={(cfg) => applySettings({ ...settings, webdav: cfg })}
+      />
+    );
+  }
+
+  const closeDialog = () => setDialog(null);
+
+  return (
+    <div className="app-root">
+      <TopBar
+        onAction={(a) => {
+          if (a === "SYNC") {
+            void runSync();
+            return;
+          }
+          if (a === "LOCK") {
+            // 锁定不需要二次确认：点一下立即锁库并回到解锁页
+            lockNow();
+            return;
+          }
+          setDialog(a);
+        }}
+      />
+      <div className="main-row">
+          <Sidebar
+            vault={vaults.find((v) => v.id === vault.id) ?? { id: vault.id, name: vault.name, fileName: "", createdAt: vault.createdAt, lastOpenedAt: 0, lastSyncedAt: vault.lastSyncedAt }}
+            itemCount={vault.items.filter((i) => i.status !== "TRASHED").length}
+            labels={vault.labels}
+            section={section}
+            labelFilter={labelFilter}
+            onSection={(s) => {
+              setSection(s);
+              setLabelFilter(null);
+            }}
+            onLabelFilter={(id) => {
+              setLabelFilter(id);
+              if (id) setSection("ALL");
+            }}
+            onManageLabels={() => setDialog("LABELS")}
+          />
+          <div className="col-divider" />
+          <ItemList
+            items={filtered}
+            allLabels={vault.labels}
+            sectionTitle={sectionTitle}
+            query={query}
+            onQuery={setQuery}
+            searchPasswords={settings.searchPasswords}
+            sortMode={sortMode}
+            sortAsc={sortAsc}
+            onChangeSort={changeSort}
+            selectedId={selectItemId}
+            onSelect={selectItem}
+            onNew={createNewLogin}
+            onToggleFavorite={toggleFavItem}
+            syncText={syncState?.text ?? null}
+          />
+          <div className="col-divider" />
+          {selected ? (
+            <ItemDetail
+              item={selected}
+              labels={vault.labels}
+              onSave={saveItem}
+              onDuplicate={duplicateSelected}
+              onDelete={detailDelete}
+              onRestore={restoreSelected}
+              onPurge={purgeSelected}
+              notify={notify}
+              isNew={!!draftNew}
+              onSaveAndCreate={saveAndCreate}
+            />
+          ) : (
+            <div className="detail">
+              <div className="empty-hint" style={{ paddingTop: 120 }}>
+                选择左侧条目查看详情，或点击“＋ 新建”创建
+              </div>
+            </div>
+          )}
+        </div>
+
+      {dialog === "GENERATOR" && <GeneratorDialog notify={ctx.notify} onClose={closeDialog} />}
+      {dialog === "SECURITY" && <SecurityDialog ctx={ctx} onClose={closeDialog} />}
+      {dialog === "THEME" && <ThemeDialog ctx={ctx} onClose={closeDialog} />}
+      {dialog === "SETTINGS" && <SettingsDialog ctx={ctx} onClose={closeDialog} />}
+      {dialog === "ABOUT" && <AboutDialog ctx={ctx} onClose={closeDialog} />}
+      {dialog === "LABELS" && <LabelManagerDialog ctx={ctx} onClose={closeDialog} />}
+
+      {remoteGone && (
+        <Dialog
+          title="云端已删除该密码库"
+          onClose={() => setRemoteGone(null)}
+          width={440}
+        >
+          <div className="muted small" style={{ lineHeight: 1.8 }}>
+            「{remoteGone.name || "当前密码库"}」在云端已被删除（可能是在其它设备删除的）。
+            你可以删除本机的这份，或把它重新上传到云端。
+          </div>
+          {remoteGone.pending && (
+            <div className="err-text" style={{ marginTop: 8 }}>
+              注意：本地还有未同步的修改，选「删除本地密码库」会一并丢失。
+            </div>
+          )}
+          <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+            <button
+              className="btn"
+              onClick={() => {
+                snoozeRemoteGone(remoteGone.id);
+                setRemoteGone(null);
+              }}
+            >
+              稍后处理
+            </button>
+            <button
+              className="btn danger"
+              onClick={() => {
+                const id = remoteGone.id;
+                const name = remoteGone.name;
+                forgetRemoteGone(id);
+                setRemoteGone(null);
+                void (async () => {
+                  try {
+                    await deleteVault(id);
+                  } catch (e) {
+                    flashSync("err", `删除失败：${String(e)}`);
+                    return;
+                  }
+                  // 复核：确认本地真的没有这个库了，再回到解锁界面
+                  const left = await listVaults().catch(() => vaults);
+                  if (left.some((v) => v.id === id)) {
+                    flashSync("err", `删除失败：「${name || "该密码库"}」仍在本地`);
+                    return;
+                  }
+                  try {
+                    await refreshFromBackend();
+                  } catch {
+                    /* 刷新失败也继续收起界面 */
+                  }
+                  setVaults(left);
+                  setVault(null);
+                  setSelectItemId(null);
+                  setDialog(null);
+                  if (settings.lastVaultId === id) {
+                    await applySettings({ ...settings, lastVaultId: null }).catch(() => undefined);
+                  }
+                  flashSync("ok", `已删除本地密码库「${name || "该密码库"}」`);
+                })();
+              }}
+            >
+              删除本地密码库
+            </button>
+            <button
+              className="btn primary"
+              onClick={() => {
+                forgetRemoteGone(remoteGone.id);
+                setRemoteGone(null);
+                void (async () => {
+                  try {
+                    const r = await webdavRestoreToCloud(settings.webdav);
+                    await refreshFromBackend();
+                    flashSync("ok", r.message);
+                  } catch (e) {
+                    flashSync("err", `恢复到云端失败：${String(e)}`);
+                  }
+                })();
+              }}
+            >
+              恢复到云端
+            </button>
+          </div>
+        </Dialog>
+      )}
+
+      {nameConflict && (
+        <NameConflictDialog
+          currentName={nameConflict.name}
+          message={nameConflict.message}
+          busy={renamingConflict}
+          onCancel={() => setNameConflict(null)}
+          onRename={(name) => void resolveNameConflict(name)}
+        />
+      )}
+
+      {updateOverlay}
+
+      {toast && <div className={`toast ${toast.kind}`}>{toast.msg}</div>}
+    </div>
+  );
+}
