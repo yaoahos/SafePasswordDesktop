@@ -4,11 +4,11 @@ SafePassword 桌面版是一个离线优先的密码管理器。界面与数据�
 
 - 项目名：`SafePassword Desktop`
 - 应用标识：`com.yaoahos.safepassword.desktop`
-- 正式版本：`1.0.2`
+- 正式版本：`1.0.3`
 - 支持平台：Windows 10 / 11（x64，需要 WebView2 运行时）
-- 安装包：`SafePassword_1.0.2_x64-setup.exe`（NSIS）/ `SafePassword_1.0.2_x64_zh-CN.msi`
-- 安装包大小：2,398,511 字节（NSIS）/ 3,383,296 字节（MSI）
-- SHA-256：`86115D9A9DB54F2B1335C30A852540D316D9D46BFEA83805DAF0BA10E7C838CE`（NSIS）/ `F235771A8BE325F8CDC78BD59EAC55C4EA58EF4135E4AFF655EEAB57B5A08CD1`（MSI）
+- 安装包：`SafePassword_1.0.3_x64-setup.exe`（NSIS）/ `SafePassword_1.0.3_x64_zh-CN.msi`
+- 安装包大小：2,400,800 字节（NSIS）/ 3,383,296 字节（MSI）
+- SHA-256：`8054D933AAACA539941448B27F73A1E37FB9864017891382C63BDB91BF3D3CE6`（NSIS）/ `B93BBC2B9CEE46946B6EC879FA46022BE6D3D013674240ACAC7666560AF0A4C9`（MSI）
 - 发布下载：[Releases](https://github.com/yaoahos/SafePasswordDesktop/releases)
 
 > 本项目为独立实现，未使用任何第三方应用的源代码；界面与交互仅作设计参考。密码库格式与 Android 版互通。
@@ -162,8 +162,8 @@ npx tauri build
 产物：
 
 ```text
-src-tauri/target/release/bundle/nsis/SafePassword_1.0.2_x64-setup.exe
-src-tauri/target/release/bundle/msi/SafePassword_1.0.2_x64_zh-CN.msi
+src-tauri/target/release/bundle/nsis/SafePassword_1.0.3_x64-setup.exe
+src-tauri/target/release/bundle/msi/SafePassword_1.0.3_x64_zh-CN.msi
 ```
 
 首次打包若卡在 NSIS 工具下载，可先设置本机代理再重试（地址与端口按自己的代理软件改）：
@@ -284,6 +284,10 @@ SafePasswordDesktop/
 ---
 
 ## 十、版本记录
+
+**2026/11/05 · 1.0.3**
+- 修复：设置中指定的「默认展示」标签在解锁后未生效，进入首页仍显示全部条目
+- 优化：条目默认图标配色由 8 种增加到 17 种，并让取色分布更均匀，减少多个条目颜色相近的情况
 
 **2026/11/05 · 1.0.2**
 - 优化：完善检查更新失败的提示，触发频率限制时给出可重试的时间

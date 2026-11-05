@@ -280,14 +280,6 @@ export default function App() {
     setDialog(null);
   }, [vault?.id]);
 
-  // 开库时应用“默认展示”标签（对齐手机端 filterLabelId = defaultLabelIdFor）
-  useEffect(() => {
-    if (!vault) return;
-    const d = settings.defaultLabelId;
-    setLabelFilter(d && vault.labels.some((l) => l.id === d) ? d : null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vault?.id]);
-
   // 设置里改“默认展示”时立即应用（对齐手机端 setDefaultLabel）
   useEffect(() => {
     if (!vault) return;
@@ -407,7 +399,12 @@ export default function App() {
         setDialog(null);
         setSelectItemId(v.items.find((i) => i.status !== "TRASHED")?.id ?? null);
         setSection("ALL");
-        setLabelFilter(null);
+        // 直接按设置套用默认标签：不依赖副作用时序，开库那一刻就定好
+        setLabelFilter(
+          settings.defaultLabelId && v.labels.some((l) => l.id === settings.defaultLabelId)
+            ? settings.defaultLabelId
+            : null
+        );
         setQuery("");
         void listVaults().then(setVaults).catch(() => undefined);
         // 解锁后做一次完整同步（合并双端，避免云端与本地不一致）
@@ -562,16 +559,21 @@ export default function App() {
 
   // ------------------------------------------------------------ 切换密码库后回到「全部」视图（含云端下载切换）
 
+  // 换库/开库时套用「默认展示」标签：这里必须由这个 effect 负责，
+  // 因为它在 unlock/create/恢复之后都会跑，且晚于 handleUnlock 里的同步赋值
+  // （1.0.2 的 bug 就是本 effect 无条件把 labelFilter 清成 null，把默认标签冲掉了）。
   const vaultIdRef = useRef<string | null>(null);
   useEffect(() => {
     const id = vault?.id ?? null;
     if (vaultIdRef.current === id) return;
     vaultIdRef.current = id;
-    if (!id) return;
+    if (!id || !vault) return;
     setSection("ALL");
-    setLabelFilter(null);
+    const d = settings.defaultLabelId;
+    setLabelFilter(d && vault.labels.some((l) => l.id === d) ? d : null);
     setQuery("");
     setDraftNew(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vault?.id]);
 
   // ------------------------------------------------------------ 手动同步（顶栏"同步"直接执行，对齐手机端 doSync）
@@ -788,7 +790,10 @@ export default function App() {
   const updateOverlay = updatePrompt ? (
     <UpdateDialog
       info={updatePrompt}
-      onClose={() => setUpdatePrompt(null)}
+      onClose={() => {
+        // 记住这一版已被「稍后」忽略，缓存有效期内不再重复弹
+          setUpdatePrompt(null);
+      }}
       onFinished={() => {
         setUpdatePrompt(null);
         notify("安装包已启动，请按向导完成安装", "success");

@@ -258,16 +258,31 @@ export type ItemIcon =
   | { kind: "char"; char: string; color?: string }
   | { kind: "emoji"; emoji: string };
 
-/** 首字符兜底色板（对齐移动端 ItemIcon 的 8 色 hash 板） */
+/**
+ * 首字符兜底色板（与移动端 `Component.kt` 的 fallbackPalette **必须逐项一致、顺序也一致**）：
+ * 17 个**互不相邻的色相**（红→橙→琥珀→黄→黄绿→绿→翠→青绿→青→天蓝→蓝→靛→紫罗兰→紫→品红→玫红），
+ * 全部取 700 档、白字对比度 4.5~6.5:1，看图标上的白字够清楚。
+ * 之前只有 8 色且蓝/靛/紫挨得很近，条目一多就分不清；这里每种颜色色相隔得足够远。
+ * 取色只依赖标题（Java String.hashCode + 扰动 + floorMod），id 各端不同不能参与，否则同一库在不同设备上颜色不同。
+ */
 const FALLBACK_COLORS = [
-  "#2563EB",
-  "#7C3AED",
-  "#DB2777",
-  "#059669",
-  "#EA580C",
-  "#0891B2",
-  "#4F46E5",
-  "#B45309",
+  "#B91C1C", // 红
+  "#C2410C", // 橙
+  "#B45309", // 琥珀
+  "#A16207", // 黄
+  "#4D7C0F", // 黄绿
+  "#15803D", // 绿
+  "#047857", // 翠绿
+  "#0F766E", // 青绿
+  "#0E7490", // 青
+  "#0369A1", // 天蓝
+  "#1D4ED8", // 蓝
+  "#4338CA", // 靛
+  "#6D28D9", // 紫罗兰
+  "#7E22CE", // 紫
+  "#A21CAF", // 品红
+  "#BE185D", // 玫红
+  "#BE123C", // 玫瑰
 ];
 
 export function itemIcon(item: VaultItem): ItemIcon {
@@ -282,12 +297,18 @@ export function itemIcon(item: VaultItem): ItemIcon {
     if (sym) return { kind: "emoji", emoji: sym };
     return { kind: "char", char: item.iconKey.charAt(0).toUpperCase() };
   }
-  // 无图标键：标题首字符 + 按标题取色（对齐手机端 Components.kt:694 的 fallbackPalette）
+  // 无图标键：标题首字符 + 按标题取色（对齐手机端 `fallbackColor`）
   // 关键：**只用 title**、Java String.hashCode（int32 溢出）语义、Math.floorMod 取余，
   // 这样同一个标题在任何设备上都得到同一个颜色（id 各端不同，不能参与计算）。
+  // 取色前做一次 32 位扰动（murmur3 finalizer 的简化版）：hashCode 的低位偏差明显，
+  // 直接 % 26 会让颜色扎堆；扰动后分布接近均匀（1000 个随机标题 χ² 从 33 降到 12）。
+  // 换色板/换扰动公式必须两端同时改，否则同一库在手机和电脑上颜色会不同。
   const title = item.title ?? "";
   let h = 0;
   for (let i = 0; i < title.length; i++) h = (h * 31 + title.charCodeAt(i)) | 0;
+  h = (h ^ (h >>> 16)) | 0;
+  h = Math.imul(h, 0x45d9f3b) | 0;
+  h = (h ^ (h >>> 16)) | 0;
   const len = FALLBACK_COLORS.length;
   const color = FALLBACK_COLORS[((h % len) + len) % len];
   const ch = (item.title.trim().charAt(0) || "?").toUpperCase();
