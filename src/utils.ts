@@ -285,11 +285,24 @@ const FALLBACK_COLORS = [
   "#BE123C", // 玫瑰
 ];
 
+/**
+ * 判断裸 base64 图标的真实格式。
+ *
+ * 存储里可能是 PNG 也可能是 WebP（图标编码按体积择优，见 iconCodec.ts），
+ * 而 data URL 的 MIME 一旦写错，浏览器会直接不渲染。所以按 base64 前缀嗅探魔数：
+ * PNG 文件头 `89 50 4E 47` → base64 以 `iVBOR` 开头；
+ * WebP 是 RIFF 容器（`52 49 46 46`）→ 以 `UklGR` 开头。
+ */
+function iconMime(b64: string): string {
+  if (b64.startsWith("UklGR")) return "image/webp";
+  return "image/png";
+}
+
 export function itemIcon(item: VaultItem): ItemIcon {
   if (item.iconKey === "custom" && item.iconData) {
     const src = item.iconData.startsWith("data:")
       ? item.iconData
-      : `data:image/png;base64,${item.iconData}`;
+      : `data:${iconMime(item.iconData)};base64,${item.iconData}`;
     return { kind: "img", src };
   }
   if (item.iconKey && item.iconKey !== "custom") {
