@@ -1651,6 +1651,11 @@ select.input {
 .preview-notes-text { white-space: pre-wrap; font-size: 13.5px; line-height: 1.65; color: var(--text-2); }
 .preview-meta { margin-top: 12px; font-size: 11px; color: var(--text-3); text-align: center; }
 
+/* TOTP 动态码 */
+.totp-code { display: inline-flex; align-items: baseline; gap: 8px; font-variant-numeric: tabular-nums; letter-spacing: 0.06em; }
+.totp-remain { font-size: 11px; color: var(--text-3); letter-spacing: normal; }
+.totp-bad { color: var(--danger, #d3455b); font-size: 13px; }
+
 /* 彩色行内图标（条目/字段操作） */
 .icon-btn[title="复制"] { color: #2563eb; }
 .icon-btn[title="打开链接"] { color: #0ea5e9; }

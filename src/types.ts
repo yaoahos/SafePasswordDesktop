@@ -38,7 +38,7 @@ export interface Vault {
 
 export type ItemStatus = "ACTIVE" | "ARCHIVED" | "TRASHED";
 
-export type FieldType = "TEXT" | "PASSWORD" | "SECRET" | "URL" | "EMAIL" | "PHONE" | "MULTILINE" | "FILE";
+export type FieldType = "TEXT" | "PASSWORD" | "SECRET" | "TOTP" | "URL" | "EMAIL" | "PHONE" | "MULTILINE" | "FILE";
 
 export interface FieldHistoryEntry {
   value: string;

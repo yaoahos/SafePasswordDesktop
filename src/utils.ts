@@ -347,7 +347,7 @@ const ICON_SYMBOLS: Record<string, string> = {
 export const MASK = "••••••••••••";
 
 export function isMaskedField(type: FieldType, sensitive: boolean): boolean {
-  return sensitive || type === "PASSWORD" || type === "SECRET";
+  return sensitive || type === "PASSWORD" || type === "SECRET" || type === "TOTP";
 }
 
 /** 搜索：title / 字段值 / 备注，大小写不敏感 */
