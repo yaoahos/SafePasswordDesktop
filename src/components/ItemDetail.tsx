@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import type { FieldType, Label, VaultItem } from "../types";
+import type { Field, FieldType, Label, VaultItem } from "../types";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Dialog } from "./Dialog";
 import { Icon } from "./icons";
@@ -19,9 +19,9 @@ import {
   newId,
 } from "../utils";
 
-const FIELD_TYPES: FieldType[] = ["TEXT", "PASSWORD", "SECRET", "URL", "EMAIL", "PHONE", "MULTILINE"];
+const FIELD_TYPES: FieldType[] = ["TEXT", "PASSWORD", "SECRET", "URL", "EMAIL", "PHONE", "MULTILINE", "FILE"];
 
-/** 对齐手机端 ItemEditScreen.kt:901-908 typeLabel */
+/** 对齐手机端 ItemEditScreen.kt typeLabel */
 function typeLabel(t: FieldType): string {
   switch (t) {
     case "TEXT":
@@ -38,7 +38,15 @@ function typeLabel(t: FieldType): string {
       return "电话";
     case "MULTILINE":
       return "多行文本";
+    case "FILE":
+      return "文件";
   }
+}
+
+/** FILE 字段：value 是 base64，只展示文件名，内容在手机端维护。 */
+function fieldValueText(f: Field): string {
+  if (f.type === "FILE") return f.fileName ? `（文件）${f.fileName}` : "（文件，暂未选择）";
+  return f.value;
 }
 
 function ItemDetailInner({
@@ -355,7 +363,7 @@ function ItemDetailInner({
                 <div className="preview-field" key={f.id}>
                   <div className="preview-field-label">{f.label}</div>
                   <div className="preview-field-value">
-                    {f.value ? (masked ? MASK : f.value) : ""}
+                    {f.type === "FILE" ? fieldValueText(f) : f.value ? (masked ? MASK : f.value) : ""}
                   </div>
                   <div className="preview-field-actions">
                     {f.type === "URL" && f.value.trim() && (
@@ -583,7 +591,7 @@ function ItemDetailInner({
                 {f.label}
               </div>
               {trashed ? (
-                <div className="field-value">{f.value ? (masked ? MASK : f.value) : ""}</div>
+                <div className="field-value">{f.type === "FILE" ? fieldValueText(f) : f.value ? (masked ? MASK : f.value) : ""}</div>
               ) : f.type === "PASSWORD" || f.type === "SECRET" ? (
                 <>
                   <div className="input-wrap grow">
@@ -609,6 +617,10 @@ function ItemDetailInner({
                     </>
                   )}
                 </>
+              ) : f.type === "FILE" ? (
+                <div className="input field-value" title="文件内容在手机端维护">
+                  {fieldValueText(f)}
+                </div>
               ) : (
                 <input
                   className="input field-value"

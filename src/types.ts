@@ -36,7 +36,7 @@ export interface Vault {
 
 export type ItemStatus = "ACTIVE" | "ARCHIVED" | "TRASHED";
 
-export type FieldType = "TEXT" | "PASSWORD" | "SECRET" | "URL" | "EMAIL" | "PHONE" | "MULTILINE";
+export type FieldType = "TEXT" | "PASSWORD" | "SECRET" | "URL" | "EMAIL" | "PHONE" | "MULTILINE" | "FILE";
 
 export interface FieldHistoryEntry {
   value: string;
@@ -51,6 +51,9 @@ export interface Field {
   sensitive: boolean;
   /** 密码/秘密字段的历史值（新的在前）；无历史时后端不下发该字段 */
   history?: FieldHistoryEntry[];
+  /** FILE 字段的文件名 / MIME；空值时后端不下发 */
+  fileName?: string;
+  fileMime?: string;
 }
 
 export interface VaultItem {

@@ -1606,6 +1606,7 @@ mod tests {
                 r#type: FieldType::Password,
                 sensitive: true,
                 history: Vec::new(),
+                ..Default::default()
             }],
             ..VaultItem::default()
         }
