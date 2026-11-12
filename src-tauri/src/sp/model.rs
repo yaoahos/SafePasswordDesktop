@@ -475,6 +475,10 @@ pub struct Vault {
     pub device_id: String,
     #[serde(default)]
     pub content_key: String,
+    /// 云端文件名用的稳定键：与库名解耦，改名不会换云端文件。空表示尚未分配。
+    /// 空值不写进 JSON，与 Kotlin `@EncodeDefault(NEVER)` 保持字节一致。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cloud_key: String,
     #[serde(default)]
     pub tombstones: Vec<Tombstone>,
 }
@@ -493,6 +497,7 @@ impl Default for Vault {
             last_synced_at: 0,
             device_id: new_id(),
             content_key: String::new(),
+            cloud_key: String::new(),
             tombstones: Vec::new(),
         }
     }
@@ -693,6 +698,27 @@ mod tests {
         let back = serde_json::to_string(&with_file).unwrap();
         assert!(back.contains(r#""fileName":"hi.txt""#), "{back}");
         assert!(back.contains(r#""fileMime":"text/plain""#), "{back}");
+    }
+
+    #[test]
+    fn cloud_key_roundtrip_and_omitted_when_empty() {
+        // 空值不写键，与 Kotlin @EncodeDefault(NEVER) 一致
+        let v: Vault = serde_json::from_str(r#"{"name":"库"}"#).unwrap();
+        assert!(v.cloud_key.is_empty());
+        let json = serde_json::to_string(&v).unwrap();
+        assert!(!json.contains("cloudKey"), "{json}");
+
+        // 非空时按 camelCase 写出并可回读；键序保持 contentKey → cloudKey → tombstones
+        let with_key: Vault =
+            serde_json::from_str(r#"{"name":"库","contentKey":"abc","cloudKey":"k1122334455667788"}"#)
+                .unwrap();
+        assert_eq!(with_key.cloud_key, "k1122334455667788");
+        let back = serde_json::to_string(&with_key).unwrap();
+        assert!(back.contains(r#""cloudKey":"k1122334455667788""#), "{back}");
+        let c = back.find("\"contentKey\"").unwrap();
+        let k = back.find("\"cloudKey\"").unwrap();
+        let t = back.find("\"tombstones\"").unwrap();
+        assert!(c < k && k < t, "键序应为 contentKey → cloudKey → tombstones：{back}");
     }
 
     #[test]

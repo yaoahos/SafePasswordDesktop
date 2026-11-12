@@ -31,6 +31,8 @@ export interface Vault {
   lastSyncedAt: number;
   deviceId: string;
   contentKey: string;
+  /** 云端文件名用的稳定键（由内容密钥派生）；空串表示尚未分配，JSON 中省略 */
+  cloudKey?: string;
   tombstones: Tombstone[];
 }
 
