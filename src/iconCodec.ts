@@ -2,8 +2,8 @@
  * 条目图标归一化：与手机端 IconCodec.kt 完全同规则。
  *
  * 规则（对齐 core/.../icon/IconPlan.kt）：
- * - 宽高比在 3:4 ~ 4:3 之间：居中裁成正方形
- * - 超出这个范围：等比缩进正方形，四周留透明边（长条 logo 一裁就废）
+ * - 任意宽高比一律居中裁成正方形。1.0.11 起取消留白：画布方了但内容还是长条，
+ *   会被当成「长方形图标没转换成正方形」；极端横幅只保留中间一块（同头像裁切）
  * - 目标边长 192；原图更小则不放大
  * - 编码「PNG / WebP 取小」：图形类 PNG 更小，照片类 WebP 小 6 倍
  * - 择优后仍超 28KB 再降到 128 重编
@@ -24,41 +24,18 @@ export type IconPlan = {
   cropY: number;
   cropW: number;
   cropH: number;
-  outW: number;
-  outH: number;
-  letterbox: boolean;
+  /** 输出正方形边长，内容铺满画布。 */
   size: number;
 };
 
 export function planIcon(width: number, height: number, target = TARGET): IconPlan {
-  const ratio = width / height;
-  if (ratio >= 3 / 4 && ratio <= 4 / 3) {
-    const side = Math.min(width, height);
-    const out = Math.min(side, target);
-    return {
-      cropX: Math.floor((width - side) / 2),
-      cropY: Math.floor((height - side) / 2),
-      cropW: side,
-      cropH: side,
-      outW: out,
-      outH: out,
-      letterbox: false,
-      size: Math.max(out, 1),
-    };
-  }
-  const longSide = Math.max(width, height);
-  const scale = longSide > target ? target / longSide : 1;
-  const outW = Math.max(1, Math.round(width * scale));
-  const outH = Math.max(1, Math.round(height * scale));
+  const side = Math.min(width, height);
   return {
-    cropX: 0,
-    cropY: 0,
-    cropW: width,
-    cropH: height,
-    outW,
-    outH,
-    letterbox: true,
-    size: Math.max(outW, outH),
+    cropX: Math.floor((width - side) / 2),
+    cropY: Math.floor((height - side) / 2),
+    cropW: side,
+    cropH: side,
+    size: Math.max(Math.min(side, target), 1),
   };
 }
 
@@ -70,13 +47,7 @@ function draw(img: HTMLImageElement, plan: IconPlan): HTMLCanvasElement {
   if (!ctx) throw new Error("无法压缩图片");
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  if (plan.letterbox) {
-    const dx = (plan.size - plan.outW) / 2;
-    const dy = (plan.size - plan.outH) / 2;
-    ctx.drawImage(img, plan.cropX, plan.cropY, plan.cropW, plan.cropH, dx, dy, plan.outW, plan.outH);
-  } else {
-    ctx.drawImage(img, plan.cropX, plan.cropY, plan.cropW, plan.cropH, 0, 0, plan.outW, plan.outH);
-  }
+  ctx.drawImage(img, plan.cropX, plan.cropY, plan.cropW, plan.cropH, 0, 0, plan.size, plan.size);
   return canvas;
 }
 
@@ -120,7 +91,7 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error("无法读取图片"));
