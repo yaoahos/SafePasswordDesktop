@@ -8,6 +8,7 @@ import { LabelGlyph } from "./LabelGlyph";
 import { GeneratorDialog } from "../dialogs/GeneratorDialog";
 import { PasswordHistoryDialog } from "../dialogs/PasswordHistoryDialog";
 import { deleteFieldHistory } from "../api";
+import { normalizeIconFile } from "../iconCodec";
 import {
   MASK,
   copyText,
@@ -203,44 +204,15 @@ function ItemDetailInner({
 
   const iconRef = useRef<HTMLInputElement>(null);
 
-  /** 对齐手机端 encodeIcon（ItemEditScreen.kt:1020）：正方形、≤256×256、重编码为 PNG 裸 base64 */
-  const pickIcon = (f: File) => {
-    const url = URL.createObjectURL(f);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      const w = img.naturalWidth;
-      const h = img.naturalHeight;
-      if (!w || !h) {
-        notify("图片尺寸无效", "error");
-        return;
-      }
-      if (w !== h) {
-        notify("图片必须为正方形（宽高像素一致）", "error");
-        return;
-      }
-      if (w > 256) {
-        notify("图片尺寸不能超过 256×256 像素", "error");
-        return;
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const c2d = canvas.getContext("2d");
-      if (!c2d) {
-        notify("无法压缩图片", "error");
-        return;
-      }
-      c2d.drawImage(img, 0, 0);
-      const dataUrl = canvas.toDataURL("image/png");
-      patch({ iconKey: "custom", iconData: dataUrl.slice(dataUrl.indexOf(",") + 1) });
+  /** 对齐手机端 IconCodec：4:3 内居中裁切、超出等比留白、目标 192px、超 48KB 降 128 */
+  const pickIcon = async (f: File) => {
+    try {
+      const iconData = await normalizeIconFile(f);
+      patch({ iconKey: "custom", iconData });
       notify("已更新图标", "success");
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      notify("无法读取图片", "error");
-    };
-    img.src = url;
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "无法读取图片", "error");
+    }
   };
 
   const icon = itemIcon(draft);
@@ -567,7 +539,7 @@ function ItemDetailInner({
           style={{ display: "none" }}
           onChange={(e) => {
             const f = e.target.files?.[0];
-            if (f) pickIcon(f);
+            if (f) void pickIcon(f);
             e.target.value = "";
           }}
         />
