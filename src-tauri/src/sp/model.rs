@@ -70,6 +70,8 @@ pub enum FieldType {
     Password,
     /// 与密码一样加密、掩码显示，但不参与安全检查。
     Secret,
+    /// TOTP 认证器：value 存 Base32 密钥或 otpauth:// 链接，用于生成 6 位动态码。
+    Totp,
     Url,
     Email,
     Phone,
@@ -135,10 +137,11 @@ impl<'de> Deserialize<'de> for Field {
             file_mime: String,
         }
         let raw = Raw::deserialize(deserializer)?;
-        // Kotlin: sensitive = type == PASSWORD || type == SECRET（缺省时按 type 推导）
-        let sensitive = raw
-            .sensitive
-            .unwrap_or(matches!(raw.r#type, FieldType::Password | FieldType::Secret));
+        // Kotlin: sensitive = type == PASSWORD || type == SECRET || type == TOTP（缺省时按 type 推导）
+        let sensitive = raw.sensitive.unwrap_or(matches!(
+            raw.r#type,
+            FieldType::Password | FieldType::Secret | FieldType::Totp
+        ));
         Ok(Field {
             id: raw.id,
             label: raw.label,
@@ -671,6 +674,7 @@ mod tests {
             "\"SECRET\""
         );
         assert_eq!(serde_json::to_string(&FieldType::File).unwrap(), "\"FILE\"");
+        assert_eq!(serde_json::to_string(&FieldType::Totp).unwrap(), "\"TOTP\"");
         assert_eq!(
             serde_json::to_string(&ItemStatus::Archived).unwrap(),
             "\"ARCHIVED\""

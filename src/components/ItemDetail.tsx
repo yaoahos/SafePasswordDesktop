@@ -1,5 +1,6 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { Field, FieldType, Label, VaultItem } from "../types";
+import { generateTotp, parseTotp, totpRemainingSeconds } from "../totp";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Dialog } from "./Dialog";
 import { Icon } from "./icons";
@@ -19,7 +20,7 @@ import {
   newId,
 } from "../utils";
 
-const FIELD_TYPES: FieldType[] = ["TEXT", "PASSWORD", "SECRET", "URL", "EMAIL", "PHONE", "MULTILINE", "FILE"];
+const FIELD_TYPES: FieldType[] = ["TEXT", "PASSWORD", "SECRET", "TOTP", "URL", "EMAIL", "PHONE", "MULTILINE", "FILE"];
 
 /** 对齐手机端 ItemEditScreen.kt typeLabel */
 function typeLabel(t: FieldType): string {
@@ -30,6 +31,8 @@ function typeLabel(t: FieldType): string {
       return "密码";
     case "SECRET":
       return "秘密";
+    case "TOTP":
+      return "动态验证码";
     case "URL":
       return "网址";
     case "EMAIL":
@@ -47,6 +50,60 @@ function typeLabel(t: FieldType): string {
 function fieldValueText(f: Field): string {
   if (f.type === "FILE") return f.fileName ? `（文件）${f.fileName}` : "（文件，暂未选择）";
   return f.value;
+}
+
+/** 每秒滴答一次，驱动 TOTP 动态码刷新。 */
+function useTotpTick(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
+/** TOTP 实时 6 位码 + 剩余秒数；密钥无效时给出提示。 */
+function TotpCode({ value, now }: { value: string; now: number }) {
+  const params = useMemo(() => parseTotp(value), [value]);
+  const counter = params ? Math.floor(now / 1000 / params.period) : 0;
+  const [code, setCode] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    if (!params) {
+      setCode(null);
+      return;
+    }
+    void generateTotp(params, counter).then((c) => {
+      if (alive) setCode(c);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [params, counter]);
+  if (!params) return <span className="totp-bad">密钥无效</span>;
+  const remain = totpRemainingSeconds(now, params.period);
+  const raw = code ?? "••••••";
+  const pretty = raw.length >= 6 ? `${raw.slice(0, 3)} ${raw.slice(3)}` : raw;
+  return (
+    <span className="totp-code">
+      {pretty}
+      <span className="totp-remain">{remain}s</span>
+    </span>
+  );
+}
+
+/** 复制 TOTP 当前动态码（不是密钥本身）。 */
+async function copyTotpCode(value: string): Promise<"ok" | "bad-key" | "fail"> {
+  try {
+    const params = parseTotp(value);
+    if (!params) return "bad-key";
+    const code = await generateTotp(params, Math.floor(Date.now() / 1000 / params.period));
+    if (!code) return "bad-key";
+    await copyText(code);
+    return "ok";
+  } catch {
+    return "fail";
+  }
 }
 
 function ItemDetailInner({
@@ -92,6 +149,7 @@ function ItemDetailInner({
   const [editing, setEditing] = useState(false);
   /** 删除二次确认（v1 项 6：删除要确认提示） */
   const [confirmDel, setConfirmDel] = useState(false);
+  const now = useTotpTick();
 
   useEffect(() => {
     setDraft(item);
@@ -363,7 +421,19 @@ function ItemDetailInner({
                 <div className="preview-field" key={f.id}>
                   <div className="preview-field-label">{f.label}</div>
                   <div className="preview-field-value">
-                    {f.type === "FILE" ? fieldValueText(f) : f.value ? (masked ? MASK : f.value) : ""}
+                    {f.type === "FILE" ? (
+                      fieldValueText(f)
+                    ) : f.type === "TOTP" ? (
+                      shown[f.id] ? (
+                        f.value
+                      ) : (
+                        <TotpCode value={f.value} now={now} />
+                      )
+                    ) : f.value ? (
+                      masked ? MASK : f.value
+                    ) : (
+                      ""
+                    )}
                   </div>
                   <div className="preview-field-actions">
                     {f.type === "URL" && f.value.trim() && (
@@ -401,6 +471,14 @@ function ItemDetailInner({
                       className="icon-btn"
                       title="复制"
                       onClick={() => {
+                        if (f.type === "TOTP") {
+                          void copyTotpCode(f.value).then((r) => {
+                            if (r === "ok") notify(`已复制“${f.label}”动态码`, "success");
+                            else if (r === "bad-key") notify("密钥无效，无法生成动态码", "error");
+                            else notify("复制失败", "error");
+                          });
+                          return;
+                        }
                         void copyText(f.value).then(
                           () => notify(`已复制“${f.label}”`, "success"),
                           () => notify("复制失败", "error"),
@@ -592,7 +670,7 @@ function ItemDetailInner({
               </div>
               {trashed ? (
                 <div className="field-value">{f.type === "FILE" ? fieldValueText(f) : f.value ? (masked ? MASK : f.value) : ""}</div>
-              ) : f.type === "PASSWORD" || f.type === "SECRET" ? (
+              ) : f.type === "PASSWORD" || f.type === "SECRET" || f.type === "TOTP" ? (
                 <>
                   <div className="input-wrap grow">
                     <input
@@ -804,7 +882,7 @@ function ItemDetailInner({
               className="btn primary"
               onClick={() => {
                 const label = fLabel.trim() || "自定义字段";
-                const sensitive = fType === "PASSWORD" || fType === "SECRET";
+                const sensitive = fType === "PASSWORD" || fType === "SECRET" || fType === "TOTP";
                 if (fieldDlg.mode === "add") {
                   patch({
                     fields: [...draft.fields, { id: newId(), label, value: "", type: fType, sensitive }],
