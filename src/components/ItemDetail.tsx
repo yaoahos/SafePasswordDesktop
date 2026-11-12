@@ -20,7 +20,9 @@ import {
   newId,
 } from "../utils";
 
-const FIELD_TYPES: FieldType[] = ["TEXT", "PASSWORD", "SECRET", "TOTP", "URL", "EMAIL", "PHONE", "MULTILINE", "FILE"];
+// 与手机端一致：不提供「多行文本」（备注承担长文本），动态验证码排最后。
+// MULTILINE 仍是合法类型，旧数据里的多行字段照常显示与编辑。
+const FIELD_TYPES: FieldType[] = ["TEXT", "PASSWORD", "SECRET", "URL", "EMAIL", "PHONE", "FILE", "TOTP"];
 
 /** 对齐手机端 ItemEditScreen.kt typeLabel */
 function typeLabel(t: FieldType): string {
