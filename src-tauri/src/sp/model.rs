@@ -74,6 +74,8 @@ pub enum FieldType {
     Email,
     Phone,
     Multiline,
+    /// 文件：单个 ≤50KB 小文件，value 存 base64，file_name / file_mime 存元数据。
+    File,
 }
 
 
@@ -91,6 +93,12 @@ pub struct Field {
     /// 密码/秘密字段的历史值（新的在前）；空数组不写进 JSON，保持与旧格式逐字节一致。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub history: Vec<FieldHistoryEntry>,
+    /// FILE 字段的文件名；空值不写进 JSON（与 Kotlin @EncodeDefault(NEVER) 一致）。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub file_name: String,
+    /// FILE 字段的 MIME 类型；空值不写进 JSON。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub file_mime: String,
 }
 
 /// 密码/秘密字段被改掉之前的值。
@@ -121,6 +129,10 @@ impl<'de> Deserialize<'de> for Field {
             sensitive: Option<bool>,
             #[serde(default)]
             history: Vec<FieldHistoryEntry>,
+            #[serde(default)]
+            file_name: String,
+            #[serde(default)]
+            file_mime: String,
         }
         let raw = Raw::deserialize(deserializer)?;
         // Kotlin: sensitive = type == PASSWORD || type == SECRET（缺省时按 type 推导）
@@ -134,6 +146,8 @@ impl<'de> Deserialize<'de> for Field {
             r#type: raw.r#type,
             sensitive,
             history: raw.history,
+            file_name: raw.file_name,
+            file_mime: raw.file_mime,
         })
     }
 }
@@ -147,6 +161,8 @@ impl Default for Field {
             r#type: FieldType::Text,
             sensitive: false,
             history: Vec::new(),
+            file_name: String::new(),
+            file_mime: String::new(),
         }
     }
 }
@@ -649,10 +665,34 @@ mod tests {
             serde_json::to_string(&FieldType::Secret).unwrap(),
             "\"SECRET\""
         );
+        assert_eq!(serde_json::to_string(&FieldType::File).unwrap(), "\"FILE\"");
         assert_eq!(
             serde_json::to_string(&ItemStatus::Archived).unwrap(),
             "\"ARCHIVED\""
         );
+    }
+
+    #[test]
+    fn file_fields_roundtrip_and_omitted_when_empty() {
+        // 空文件元数据不写键，与 Kotlin @EncodeDefault(NEVER) 一致
+        let f: Field = serde_json::from_str(r#"{"label":"附件","type":"FILE"}"#).unwrap();
+        assert_eq!(f.r#type, FieldType::File);
+        assert!(!f.sensitive);
+        assert!(f.file_name.is_empty());
+        let json = serde_json::to_string(&f).unwrap();
+        assert!(!json.contains("fileName"), "{json}");
+        assert!(!json.contains("fileMime"), "{json}");
+
+        // 有文件元数据时按 camelCase 写出并可回读
+        let with_file: Field = serde_json::from_str(
+            r#"{"label":"附件","type":"FILE","value":"aGk=","fileName":"hi.txt","fileMime":"text/plain"}"#,
+        )
+        .unwrap();
+        assert_eq!(with_file.file_name, "hi.txt");
+        assert_eq!(with_file.file_mime, "text/plain");
+        let back = serde_json::to_string(&with_file).unwrap();
+        assert!(back.contains(r#""fileName":"hi.txt""#), "{back}");
+        assert!(back.contains(r#""fileMime":"text/plain""#), "{back}");
     }
 
     #[test]
