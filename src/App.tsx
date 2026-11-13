@@ -17,6 +17,7 @@ import {
   webdavPullIfChanged,
   webdavRestoreToCloud,
   deleteVault,
+  nativeDialog,
 } from "./api";
 import type { AppSettings, SortMode, SyncSummary, UpdateInfo, Vault, VaultItem, VaultMeta } from "./types";
 import type { AppCtx, SectionFilter, ToastKind } from "./app-context";
@@ -39,10 +40,19 @@ import { APP_VERSION } from "./version";
 
 type DialogKind = TopAction | "LABELS" | null;
 
+/** 锁定时的界面快照（对齐手机端 LockReturn）：解锁后回到原界面 */
+interface LockReturn {
+  vaultId: string;
+  selectItemId: string | null;
+  query: string;
+  labelFilter: string | null;
+  section: SectionFilter;
+}
+
 const DEFAULT_SETTINGS: AppSettings = {
   theme: "system",
   accent: "#1677FF",
-  autoLockMinutes: 5,
+  autoLockSeconds: 300,
   hibpApiKey: "",
   webdav: { baseUrl: "", username: "", password: "", remoteDir: "/SafePassword", enabled: false },
   autoBackupDays: 1,
@@ -184,7 +194,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ------------------------------------------------------------ toast
+  // ------------------------------------------------------------ toast（对齐手机端顶部圆角提示卡片）
 
   const notify = useCallback((msg: string, kind: ToastKind = "info") => {
     setToast({ id: Date.now(), msg, kind });
@@ -213,7 +223,8 @@ export default function App() {
 
   useEffect(() => {
     if (!toast) return;
-    const t = window.setTimeout(() => setToast(null), 3500);
+    // 对齐手机端：错误停留 5 秒，其余 2.5 秒；点一下即关
+    const t = window.setTimeout(() => setToast(null), toast.kind === "error" ? 5000 : 2500);
     return () => window.clearTimeout(t);
   }, [toast]);
 
@@ -314,13 +325,21 @@ export default function App() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** 锁定时的界面快照：解锁后回到原界面（对齐手机端 lockReturn） */
+  const lockReturnRef = useRef<LockReturn | null>(null);
+
   const lockNow = useCallback(() => {
+    // 快照当前界面（页面/搜索词/标签筛选），解锁后原样恢复
+    lockReturnRef.current = vault
+      ? { vaultId: vault.id, selectItemId, query, labelFilter, section }
+      : null;
     setVault(null);
     setSelectItemId(null);
     setDialog(null);
     setPreselectVaultId(null);
+    setDraftNew(null);
     void closeVault().catch(() => undefined);
-  }, []);
+  }, [vault, selectItemId, query, labelFilter, section]);
 
   // ------------------------------------------------------------ 同步状态文本（对齐手机端 3 秒状态）
 
@@ -474,12 +493,18 @@ export default function App() {
     [refreshFromBackend],
   );
 
-  // ------------------------------------------------------------ 自动锁定（闲置计时）
+  // ------------------------------------------------------------ 自动锁定（对齐手机端两段计时：后台时刻 + 前台闲置）
+  //
+  // autoLockSeconds：-1 = 从不；0 = 切到后台立即锁定；>0 = 后台离开该秒数或前台闲置该秒数后锁定。
 
   const idleRef = useRef<number | null>(null);
+  const backgroundAtRef = useRef<number | null>(null);
+
   useEffect(() => {
-    if (!vault || settings.autoLockMinutes <= 0) return;
-    const ms = settings.autoLockMinutes * 60_000;
+    if (!vault) return;
+    const secs = settings.autoLockSeconds;
+    if (secs <= 0) return; // 0 = 立即（走后台判定）；-1 = 从不
+    const ms = secs * 1000;
     const reset = () => {
       if (idleRef.current !== null) window.clearTimeout(idleRef.current);
       idleRef.current = window.setTimeout(() => {
@@ -494,7 +519,48 @@ export default function App() {
       if (idleRef.current !== null) window.clearTimeout(idleRef.current);
       for (const ev of events) window.removeEventListener(ev, reset);
     };
-  }, [vault, settings.autoLockMinutes, lockNow, notify]);
+  }, [vault, settings.autoLockSeconds, lockNow, notify]);
+
+  // 后台段计时：切后台（窗口失焦/隐藏）时记时刻或立即锁；回前台按离开时长判定。
+  useEffect(() => {
+    if (!vault) return;
+    const secs = settings.autoLockSeconds;
+    if (secs < 0) return; // 从不
+    const onHidden = () => {
+      if (nativeDialog.busy) return; // 自己弹的系统文件对话框不算切后台
+      if (secs === 0) {
+        lockNow();
+        notify("已根据自动锁定设置锁定", "info");
+      } else {
+        backgroundAtRef.current = Date.now();
+      }
+    };
+    const onVisible = () => {
+      nativeDialog.busy = false; // 文件对话框关闭回到窗口时顺带复位
+      const at = backgroundAtRef.current;
+      backgroundAtRef.current = null;
+      if (at !== null && secs > 0 && Date.now() - at >= secs * 1000) {
+        lockNow();
+        notify("离开时间超过自动锁定时长，已锁定", "info");
+      }
+    };
+    const onVisibility = () => (document.hidden ? onHidden() : onVisible());
+    // <input type="file"> 弹出的系统对话框同样会让窗口失焦：点到它就算"文件对话框中"
+    const onAnyClick = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && t.tagName === "INPUT" && (t as HTMLInputElement).type === "file") nativeDialog.busy = true;
+    };
+    window.addEventListener("blur", onHidden);
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisibility);
+    document.addEventListener("click", onAnyClick, true);
+    return () => {
+      window.removeEventListener("blur", onHidden);
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener("click", onAnyClick, true);
+    };
+  }, [vault, settings.autoLockSeconds, lockNow, notify]);
 
   // ------------------------------------------------------------ 自动同步（保存后延迟上传，对齐手机端 scheduleSync）
 
@@ -568,6 +634,24 @@ export default function App() {
     if (vaultIdRef.current === id) return;
     vaultIdRef.current = id;
     if (!id || !vault) return;
+    // 锁定 → 解锁回到原界面（对齐手机端 consumeLockReturn）：
+    // 同一个库就恢复搜索词/标签筛选/选中条目；换库或条目已删则回首页视图。
+    const back = lockReturnRef.current;
+    lockReturnRef.current = null;
+    if (back && back.vaultId === id) {
+      setSection(back.section);
+      const labelOk = back.labelFilter && vault.labels.some((l) => l.id === back.labelFilter);
+      if (labelOk) setLabelFilter(back.labelFilter);
+      else {
+        const d = settings.defaultLabelId;
+        setLabelFilter(d && vault.labels.some((l) => l.id === d) ? d : null);
+      }
+      setQuery(back.query);
+      setDraftNew(null);
+      const itemOk = back.selectItemId && vault.items.some((i) => i.id === back.selectItemId);
+      setSelectItemId(itemOk ? back.selectItemId : (vault.items.find((i) => i.status !== "TRASHED")?.id ?? null));
+      return;
+    }
     setSection("ALL");
     const d = settings.defaultLabelId;
     setLabelFilter(d && vault.labels.some((l) => l.id === d) ? d : null);
@@ -689,14 +773,15 @@ export default function App() {
       const item = newItemFromTemplate(templateId);
       item.title = "";
       item.notes = "";
+      // 对齐手机端：在某个标签分类下新建条目时，默认就带上该标签
+      if (labelFilter) item.labelIds = [labelFilter];
       setDraftNew(item);
       setSelectItemId(null);
       setSection("ALL");
-      setLabelFilter(null);
       setQuery("");
       setDialog(null);
     },
-    [vault],
+    [vault, labelFilter],
   );
 
   /** 新建草稿直接丢弃（未落库） */
@@ -810,18 +895,28 @@ export default function App() {
     );
   }
 
+  // 顶部提示卡片在解锁页也可见（如「已自动锁定」）
+  const toastEl = toast ? (
+    <div className={`toast ${toast.kind}`} onClick={() => setToast(null)}>
+      {toast.msg}
+    </div>
+  ) : null;
+
   if (!vault) {
     return (
-      <AuthScreens
-        vaults={vaults}
-        defaultVaultId={preselectVaultId ?? settings.lastVaultId}
-        onUnlock={handleUnlock}
-        onCreate={handleCreate}
-        onRestoreLocal={handleRestoreLocal}
-        webdav={settings.webdav}
-        onCloudRestored={refreshFromBackend}
-        onSaveWebdav={(cfg) => applySettings({ ...settings, webdav: cfg })}
-      />
+      <>
+        <AuthScreens
+          vaults={vaults}
+          defaultVaultId={preselectVaultId ?? settings.lastVaultId}
+          onUnlock={handleUnlock}
+          onCreate={handleCreate}
+          onRestoreLocal={handleRestoreLocal}
+          webdav={settings.webdav}
+          onCloudRestored={refreshFromBackend}
+          onSaveWebdav={(cfg) => applySettings({ ...settings, webdav: cfg })}
+        />
+        {toastEl}
+      </>
     );
   }
 
@@ -1004,7 +1099,7 @@ export default function App() {
 
       {updateOverlay}
 
-      {toast && <div className={`toast ${toast.kind}`}>{toast.msg}</div>}
+      {toastEl}
     </div>
   );
 }

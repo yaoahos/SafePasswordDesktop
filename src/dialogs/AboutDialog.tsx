@@ -5,6 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type { UpdateInfo } from "../types";
 import type { AppCtx } from "../app-context";
 import { APP_VERSION } from "../version";
+import { CHANGELOG, MAX_CHANGELOG_VERSIONS } from "../changelog";
 
 const PROJECT_URL = "https://github.com/yaoahos/SafePasswordDesktop";
 const RELEASES_URL = "https://github.com/yaoahos/SafePasswordDesktop/releases";
@@ -23,6 +24,8 @@ export function AboutDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [status, setStatus] = useState<string>("尚未检查更新");
   const [installing, setInstalling] = useState(false);
+  /** 应用内更新日志（最多 5 个版本，对齐手机端更新日志页） */
+  const [showLog, setShowLog] = useState(false);
 
   const open = (url: string) => {
     void openUrl(url).catch(() => ctx.notify("链接打开失败，请稍后重试", "error"));
@@ -118,8 +121,11 @@ export function AboutDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void
               {installing ? "下载中…" : info.assetUrl ? "下载并安装" : "打开下载页"}
             </button>
           )}
+          <button className="btn sm" onClick={() => setShowLog((v) => !v)}>
+            {showLog ? "收起更新日志" : "更新日志"}
+          </button>
           <button className="btn sm" onClick={() => open(RELEASES_URL)}>
-            更新日志
+            GitHub Releases
           </button>
         </div>
         <div className="setting-sub" style={{ marginTop: 8 }}>
@@ -138,6 +144,25 @@ export function AboutDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void
         <div className="setting-sub" style={{ marginTop: 4 }}>
           开启后每次启动静默查询一次，发现新版本只提示，不会自动下载安装。
         </div>
+        {showLog && (
+          <div style={{ marginTop: 12 }}>
+            {CHANGELOG.slice(0, MAX_CHANGELOG_VERSIONS).map((e, i) => (
+              <div key={e.version}>
+                {i > 0 && <div className="hr" style={{ margin: "10px 0" }} />}
+                <div style={{ fontWeight: 500, fontSize: 13 }}>
+                  {e.date} · {e.version}
+                </div>
+                <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                  {e.items.map((line, j) => (
+                    <li key={j} className="muted small" style={{ lineHeight: 1.7 }}>
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="about-foot muted small">

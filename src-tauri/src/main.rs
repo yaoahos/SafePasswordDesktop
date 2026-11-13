@@ -68,6 +68,8 @@ fn main() {
             commands::check_update,
             commands::update_download_and_install,
             commands::save_export,
+            commands::pick_any_file,
+            commands::capture_screen_png,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SafePassword");

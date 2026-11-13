@@ -86,8 +86,8 @@ pub struct AppSettings {
     pub theme: String,
     /// 主题强调色（#RRGGBB，对齐手机端 ThemeScreen 的 themePresets）
     pub accent: String,
-    /// 0 = 不自动锁定
-    pub auto_lock_minutes: i32,
+    /// 自动锁定秒数（对齐手机端 autoLockSeconds）：-1 = 从不，0 = 切到后台立即锁定，>0 = 后台离开或前台闲置该秒数后锁定
+    pub auto_lock_seconds: i32,
     pub hibp_api_key: String,
     pub webdav: WebDavConfig,
     /// 0 = 关闭自动备份，否则每 N 天（对齐手机端 autoBackupDays，默认 1）
@@ -118,7 +118,7 @@ impl Default for AppSettings {
         AppSettings {
             theme: "system".to_string(),
             accent: "#1677FF".to_string(),
-            auto_lock_minutes: 5,
+            auto_lock_seconds: 300,
             hibp_api_key: String::new(),
             webdav: WebDavConfig::default(),
             auto_backup_days: 1,
@@ -139,7 +139,19 @@ impl AppState {
         let store = VaultStore::new(data_root).map_err(err)?;
         let settings_path = data_root.join("settings.json");
         let mut settings: AppSettings = match fs::read_to_string(&settings_path) {
-            Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
+            Ok(text) => {
+                // 迁移：旧版 autoLockMinutes（分钟；0 = 关闭）→ autoLockSeconds（秒；-1 = 从不，0 = 立即）
+                let mut v: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+                if v.get("autoLockSeconds").is_none() {
+                    if let Some(m) = v.get("autoLockMinutes").and_then(|x| x.as_i64()) {
+                        let secs = if m <= 0 { -1 } else { m as i32 * 60 };
+                        if let Some(obj) = v.as_object_mut() {
+                            obj.insert("autoLockSeconds".into(), serde_json::json!(secs));
+                        }
+                    }
+                }
+                serde_json::from_value(v).unwrap_or_default()
+            }
             Err(_) => AppSettings::default(),
         };
         // 敏感字段落盘是 DPAPI 密文，读入时解码为内存明文（旧版明文无前缀原样通过）
@@ -894,6 +906,95 @@ pub async fn save_export(
     }
     std::fs::write(&path, bytes).map_err(|e| format!("写入失败：{e}"))?;
     Ok(Some(path.to_string_lossy().to_string()))
+}
+
+// ---------------------------------------------------------------- 选文件 / 截图（文件字段、二维码识图）
+
+/// 读文件的安全上限：防止误选超大文件把内存/Base64 撑爆（文件字段的 50KB 由前端按手机端文案判定）。
+const PICK_FILE_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickedFile {
+    pub name: String,
+    pub size: u64,
+    /// 内容 Base64（不带 data: 前缀）
+    pub base64: String,
+}
+
+/// 系统「打开文件」对话框：读出文件名/大小/内容。取消返回 None。
+#[tauri::command]
+pub async fn pick_any_file(app: tauri::AppHandle, image_only: bool) -> CmdResult<Option<PickedFile>> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let mut dlg = app.dialog().file();
+        if image_only {
+            dlg = dlg.add_filter("图片", &["png", "jpg", "jpeg", "gif", "bmp", "webp"]);
+        }
+        dlg.blocking_pick_file()
+    })
+    .await
+    .map_err(|e| format!("打开对话框失败：{e}"))?;
+
+    let Some(fp) = picked else {
+        return Ok(None); // 用户取消
+    };
+    let Some(path) = fp.as_path().map(|p| p.to_path_buf()) else {
+        return Err("文件路径无效".to_string());
+    };
+    let meta = std::fs::metadata(&path).map_err(|e| format!("读取文件失败：{e}"))?;
+    if meta.len() > PICK_FILE_MAX_BYTES {
+        return Err("文件过大，无法读取（上限 16MB）".to_string());
+    }
+    let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败：{e}"))?;
+    let name = path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    use base64::Engine as _;
+    Ok(Some(PickedFile {
+        name,
+        size: bytes.len() as u64,
+        base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+    }))
+}
+
+/// 截取整个虚拟屏幕（多显示器并集）为 PNG，返回 Base64。用于「截图识别」二维码。
+#[tauri::command]
+pub async fn capture_screen_png() -> CmdResult<String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let script = r#"
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+$b=[System.Windows.Forms.SystemInformation]::VirtualScreen
+$bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height
+$g=[System.Drawing.Graphics]::FromImage($bmp)
+$g.CopyFromScreen($b.X,$b.Y,0,0,$bmp.Size)
+$ms=New-Object System.IO.MemoryStream
+$bmp.Save($ms,[System.Drawing.Imaging.ImageFormat]::Png)
+$g.Dispose();$bmp.Dispose()
+[Convert]::ToBase64String($ms.ToArray())
+"#;
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script]);
+        // 不闪黑窗（CREATE_NO_WINDOW）
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        let out = cmd.output().map_err(|e| format!("调用截图命令失败：{e}"))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("截图失败：{}", err.trim()));
+        }
+        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if text.is_empty() {
+            return Err("截图失败：没有输出".to_string());
+        }
+        Ok(text)
+    })
+    .await
+    .map_err(|e| format!("截图任务失败：{e}"))?
 }
 
 // ---------------------------------------------------------------- 备份
