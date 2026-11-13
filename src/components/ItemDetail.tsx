@@ -7,11 +7,13 @@ import { Icon } from "./icons";
 import { LabelGlyph } from "./LabelGlyph";
 import { GeneratorDialog } from "../dialogs/GeneratorDialog";
 import { PasswordHistoryDialog } from "../dialogs/PasswordHistoryDialog";
-import { deleteFieldHistory } from "../api";
+import { deleteFieldHistory, pickAnyFile, saveExport } from "../api";
 import { normalizeIconFile } from "../iconCodec";
+import { QrScanDialog } from "./QrScanDialog";
 import {
   MASK,
   copyText,
+  formatSize,
   formatTime,
   iconBg,
   isMaskedField,
@@ -49,10 +51,12 @@ function typeLabel(t: FieldType): string {
   }
 }
 
-/** FILE 字段：value 是 base64，只展示文件名，内容在手机端维护。 */
+/** FILE 字段展示：文件名 · 大小（内容为 base64） */
 function fieldValueText(f: Field): string {
-  if (f.type === "FILE") return f.fileName ? `（文件）${f.fileName}` : "（文件，暂未选择）";
-  return f.value;
+  if (f.type !== "FILE") return f.value;
+  if (!f.fileName && !f.value) return "（文件，暂未选择）";
+  const size = f.value ? Math.floor((f.value.length * 3) / 4) : 0;
+  return `${f.fileName || "文件"}${size ? ` · ${formatSize(size)}` : ""}`;
 }
 
 /** 每秒滴答一次，驱动 TOTP 动态码刷新。 */
@@ -131,7 +135,7 @@ function ItemDetailInner({
   onRestore: () => Promise<void>;
   /** 彻底删除（后端 purge） */
   onPurge: () => Promise<void>;
-  notify: (msg: string, kind?: "info" | "success" | "error") => void;
+  notify: (msg: string, kind?: "info" | "success" | "error" | "warning") => void;
   /** 当前条目是否"刚从模板新建未保存"（对齐手机端 existing==null） */
   isNew: boolean;
   /** 「保存并新建」：保存当前后开新 LOGIN 条目 */
@@ -148,6 +152,8 @@ function ItemDetailInner({
   const [genFieldId, setGenFieldId] = useState<string | null>(null);
   /** 密码/秘密字段的历史记录弹窗 */
   const [histFieldId, setHistFieldId] = useState<string | null>(null);
+  /** 动态验证码字段「识别二维码」弹窗的目标字段 */
+  const [qrFieldId, setQrFieldId] = useState<string | null>(null);
   /** 预览态 / 编辑态（对齐手机端 ItemViewScreen ↔ ItemEditScreen；新建条目直接进编辑态） */
   const [editing, setEditing] = useState(false);
   /** 删除二次确认（v1 项 6：删除要确认提示） */
@@ -164,6 +170,7 @@ function ItemDetailInner({
     setFieldDlg(null);
     setGenFieldId(null);
     setHistFieldId(null);
+    setQrFieldId(null);
   }, [item, isNew]);
 
   const patch = (p: Partial<VaultItem>) => {
@@ -212,6 +219,38 @@ function ItemDetailInner({
       notify("已更新图标", "success");
     } catch (e) {
       notify(e instanceof Error ? e.message : "无法读取图片", "error");
+    }
+  };
+
+  /** 文件字段：选择/替换文件（50KB 上限，对齐手机端 readSmallFile） */
+  const pickFieldFile = async (fieldId: string) => {
+    try {
+      const f = await pickAnyFile(false);
+      if (!f) return;
+      if (f.size > 50 * 1024) {
+        notify(`文件 ${formatSize(f.size)} 超过 50KB，无法存入字段`, "error");
+        return;
+      }
+      const cur = draft.fields.find((x) => x.id === fieldId);
+      if (cur && cur.value === f.base64 && (cur.fileName ?? "") === f.name) {
+        // 重复选中同一个文件时不做替换：内容一致却改 updatedAt 会白白触发一次同步
+        notify("当前已是该文件，未做替换", "info");
+        return;
+      }
+      patchField(fieldId, { value: f.base64, fileName: f.name });
+    } catch (e) {
+      notify(String(e), "error");
+    }
+  };
+
+  /** 文件字段：导出到本地（对齐手机端详情页导出） */
+  const exportFieldFile = async (f: Field) => {
+    if (!f.value) return;
+    try {
+      const saved = await saveExport(f.fileName?.trim() || "文件", f.value);
+      if (saved) notify(`已导出到 ${saved}`, "success");
+    } catch (e) {
+      notify(`导出失败：${String(e)}`, "error");
     }
   };
 
@@ -391,6 +430,7 @@ function ItemDetailInner({
             <div className="card-title">详情</div>
             {draft.fields.map((f) => {
               const masked = isMaskedField(f.type, f.sensitive) && !shown[f.id];
+              const eyeable = f.type === "PASSWORD" || f.type === "SECRET";
               return (
                 <div className="preview-field" key={f.id}>
                   <div className="preview-field-label">{f.label}</div>
@@ -398,11 +438,8 @@ function ItemDetailInner({
                     {f.type === "FILE" ? (
                       fieldValueText(f)
                     ) : f.type === "TOTP" ? (
-                      shown[f.id] ? (
-                        f.value
-                      ) : (
-                        <TotpCode value={f.value} now={now} />
-                      )
+                      // 对齐手机端：动态验证码常显实时 6 位码，不遮挡、不提供查看密钥
+                      <TotpCode value={f.value} now={now} />
                     ) : f.value ? (
                       masked ? MASK : f.value
                     ) : (
@@ -432,7 +469,7 @@ function ItemDetailInner({
                         <Icon name="history" size={15} />
                       </button>
                     )}
-                    {isMaskedField(f.type, f.sensitive) && (
+                    {eyeable && (
                       <button
                         className="icon-btn"
                         title={shown[f.id] ? "隐藏" : "显示"}
@@ -441,26 +478,36 @@ function ItemDetailInner({
                         <Icon name={shown[f.id] ? "eye-off" : "eye"} size={15} />
                       </button>
                     )}
-                    <button
-                      className="icon-btn"
-                      title="复制"
-                      onClick={() => {
-                        if (f.type === "TOTP") {
-                          void copyTotpCode(f.value).then((r) => {
-                            if (r === "ok") notify(`已复制“${f.label}”动态码`, "success");
-                            else if (r === "bad-key") notify("密钥无效，无法生成动态码", "error");
-                            else notify("复制失败", "error");
-                          });
-                          return;
-                        }
-                        void copyText(f.value).then(
-                          () => notify(`已复制“${f.label}”`, "success"),
-                          () => notify("复制失败", "error"),
-                        );
-                      }}
-                    >
-                      <Icon name="copy" size={15} />
-                    </button>
+                    {f.type === "FILE" && f.value ? (
+                      <button
+                        className="icon-btn"
+                        title="导出到本地"
+                        onClick={() => void exportFieldFile(f)}
+                      >
+                        <Icon name="file-export" size={15} />
+                      </button>
+                    ) : (
+                      <button
+                        className="icon-btn"
+                        title="复制"
+                        onClick={() => {
+                          if (f.type === "TOTP") {
+                            void copyTotpCode(f.value).then((r) => {
+                              if (r === "ok") notify(`已复制“${f.label}”动态码`, "success");
+                              else if (r === "bad-key") notify("密钥无效，无法生成动态码", "error");
+                              else notify("复制失败", "error");
+                            });
+                            return;
+                          }
+                          void copyText(f.value).then(
+                            () => notify(`已复制“${f.label}”`, "success"),
+                            () => notify("复制失败", "error"),
+                          );
+                        }}
+                      >
+                        <Icon name="copy" size={15} />
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -644,7 +691,7 @@ function ItemDetailInner({
               </div>
               {trashed ? (
                 <div className="field-value">{f.type === "FILE" ? fieldValueText(f) : f.value ? (masked ? MASK : f.value) : ""}</div>
-              ) : f.type === "PASSWORD" || f.type === "SECRET" || f.type === "TOTP" ? (
+              ) : f.type === "PASSWORD" || f.type === "SECRET" ? (
                 <>
                   <div className="input-wrap grow">
                     <input
@@ -661,17 +708,57 @@ function ItemDetailInner({
                       <Icon name={shown[f.id] ? "eye-off" : "eye"} size={16} />
                     </button>
                   </div>
-                  {!trashed && (
-                    <>
-                      <button className="icon-btn" title="生成密码" onClick={() => setGenFieldId(f.id)}>
-                        <Icon name="dice" size={15} />
-                      </button>
-                    </>
-                  )}
+                  <button className="icon-btn" title="生成密码" onClick={() => setGenFieldId(f.id)}>
+                    <Icon name="dice" size={15} />
+                  </button>
+                </>
+              ) : f.type === "TOTP" ? (
+                <>
+                  <input
+                    className="input field-value"
+                    value={f.value}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(e) => patchField(f.id, { value: e.target.value })}
+                  />
+                  {/* 对齐手机端：动态验证码不放查看/生成按钮，取密钥走「识别二维码」 */}
+                  <button
+                    className="icon-btn"
+                    title="识别二维码"
+                    onClick={() => setQrFieldId(f.id)}
+                  >
+                    <Icon name="qr" size={15} />
+                  </button>
                 </>
               ) : f.type === "FILE" ? (
-                <div className="input field-value" title="文件内容在手机端维护">
-                  {fieldValueText(f)}
+                <div
+                  className="file-box"
+                  title="单个文件，不超过 50KB"
+                  onClick={() => void pickFieldFile(f.id)}
+                >
+                  <Icon name="folder" size={16} />
+                  <div className="file-box-main">
+                    <div className="file-box-title">
+                      {f.fileName || "选择文件"}
+                    </div>
+                    <div className="file-box-sub">
+                      {f.value
+                        ? `${formatSize(Math.floor((f.value.length * 3) / 4))} · 点按更换`
+                        : "单个文件，不超过 50KB"}
+                    </div>
+                  </div>
+                  {f.value && (
+                    <button
+                      className="icon-btn"
+                      title="清除文件"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        patchField(f.id, { value: "", fileName: undefined });
+                      }}
+                    >
+                      <Icon name="close" size={15} />
+                    </button>
+                  )}
                 </div>
               ) : (
                 <input
@@ -680,18 +767,20 @@ function ItemDetailInner({
                   onChange={(e) => patchField(f.id, { value: e.target.value })}
                 />
               )}
-              <button
-                className="icon-btn"
-                title="复制"
-                onClick={() => {
-                  void copyText(f.value).then(
-                    () => notify(`已复制“${f.label}”`, "success"),
-                    () => notify("复制失败", "error"),
-                  );
-                }}
-              >
-                <Icon name="copy" size={15} />
-              </button>
+              {f.type !== "FILE" && f.type !== "TOTP" && (
+                <button
+                  className="icon-btn"
+                  title="复制"
+                  onClick={() => {
+                    void copyText(f.value).then(
+                      () => notify(`已复制“${f.label}”`, "success"),
+                      () => notify("复制失败", "error"),
+                    );
+                  }}
+                >
+                  <Icon name="copy" size={15} />
+                </button>
+              )}
               {!trashed && (
                 <>
                   <button
@@ -835,7 +924,7 @@ function ItemDetailInner({
             className="input"
             autoFocus
             value={fLabel}
-            placeholder="自定义字段"
+            placeholder="留空则按类型自动命名"
             onChange={(e) => setFLabel(e.target.value)}
           />
           <div className="muted small" style={{ marginTop: 10 }}>
@@ -848,6 +937,11 @@ function ItemDetailInner({
               </option>
             ))}
           </select>
+          {fType === "FILE" && (
+            <div className="muted small" style={{ marginTop: 8 }}>
+              文件内容会加密存进密码库，单个文件不超过 50KB。
+            </div>
+          )}
           <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
             <button className="btn" onClick={() => setFieldDlg(null)}>
               取消
@@ -855,7 +949,8 @@ function ItemDetailInner({
             <button
               className="btn primary"
               onClick={() => {
-                const label = fLabel.trim() || "自定义字段";
+                // 对齐手机端：字段名留空时用类型名兜底（密码、网址、动态验证码…）
+                const label = fLabel.trim() || typeLabel(fType);
                 const sensitive = fType === "PASSWORD" || fType === "SECRET" || fType === "TOTP";
                 if (fieldDlg.mode === "add") {
                   patch({
@@ -879,6 +974,16 @@ function ItemDetailInner({
           notify={notify}
           onClose={() => setGenFieldId(null)}
           onUse={(pw) => patchField(genFieldId, { value: pw })}
+        />
+      )}
+      {qrFieldId && (
+        <QrScanDialog
+          onDecoded={(text) => {
+            patchField(qrFieldId, { value: text });
+            setQrFieldId(null);
+            notify("已填入动态验证码密钥", "success");
+          }}
+          onClose={() => setQrFieldId(null)}
         />
       )}
       {historyDialog}

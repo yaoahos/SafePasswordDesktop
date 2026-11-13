@@ -31,6 +31,7 @@ export type IconName =
   | "menu"
   | "tag"
   | "wand"
+  | "qr"
   | "history";
 
 const PATHS: Record<IconName, React.ReactNode> = {
@@ -197,6 +198,14 @@ const PATHS: Record<IconName, React.ReactNode> = {
     </>
   ),
   /** 历史记录：时钟 */
+  qr: (
+    <>
+      <rect x="4" y="4" width="6" height="6" rx="1" />
+      <rect x="14" y="4" width="6" height="6" rx="1" />
+      <rect x="4" y="14" width="6" height="6" rx="1" />
+      <path d="M14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z" />
+    </>
+  ),
   history: (
     <>
       <circle cx="12" cy="12" r="8" />

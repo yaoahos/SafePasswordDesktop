@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import type { Label, SortMode, VaultItem } from "../types";
 import { iconBg, itemIcon, itemMatches, labelColorCss } from "../utils";
 import { Icon } from "./icons";
@@ -48,6 +48,12 @@ function ItemListInner({
     [items, query, searchPasswords],
   );
 
+  // 对齐手机端：切换分类/标签后列表回到顶部，不停在上次滚动位置
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [sectionTitle]);
+
   return (
     <div className="item-list">
       <div className="item-list-top">
@@ -89,7 +95,7 @@ function ItemListInner({
         {syncText && <div className="list-sync">{syncText}</div>}
       </div>
 
-      <div className="item-scroll">
+      <div className="item-scroll" ref={scrollRef}>
         {visible.length === 0 && (
           <div className="empty-hint">
             {items.length === 0 ? "这里还没有条目，点击右上角“新建”添加" : "没有匹配的条目"}

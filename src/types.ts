@@ -157,7 +157,8 @@ export interface AppSettings {
   theme: ThemeMode;
   /** 主题强调色（#RRGGBB，null/空 = 默认蓝） */
   accent: string;
-  autoLockMinutes: number;
+  /** 自动锁定秒数（对齐手机端 autoLockSeconds）：-1 = 从不，0 = 切到后台立即锁定，>0 = 两段计时秒数 */
+  autoLockSeconds: number;
   hibpApiKey: string;
   webdav: WebDavConfig;
   /** 0 = 关闭自动备份，否则每 N 天（对齐手机端） */

@@ -17,6 +17,13 @@ import type {
 
 // 后端命令层：src-tauri/src/commands.rs（参数名 camelCase，Rust 自动转换）
 
+/**
+ * 系统文件对话框打开期间为 true。
+ * 「切到后台立即锁定」会把窗口失焦当切后台，必须豁免自己弹的对话框，
+ * 否则选个文件回来就被锁了。
+ */
+export const nativeDialog = { busy: false };
+
 export const listVaults = () => invoke<VaultMeta[]>("list_vaults");
 
 export const createVault = (name: string, password: string) =>
@@ -84,8 +91,14 @@ export const exportXml = () => invoke<string>("export_xml");
 export const exportVaultJson = () => invoke<string>("export_vault_json");
 
 /** 弹出系统保存对话框并写入（base64 内容，返回实际保存路径；取消返回 null） */
-export const saveExport = (defaultName: string, base64Data: string) =>
-  invoke<string | null>("save_export", { defaultName, base64Data });
+export const saveExport = async (defaultName: string, base64Data: string) => {
+  nativeDialog.busy = true;
+  try {
+    return await invoke<string | null>("save_export", { defaultName, base64Data });
+  } finally {
+    nativeDialog.busy = false;
+  }
+};
 
 export const importCsv = (text: string) => invoke<number>("import_csv", { text });
 
@@ -149,3 +162,25 @@ export const checkUpdate = (appVersion: string) =>
 
 export const updateDownloadAndInstall = (assetUrl: string) =>
   invoke<string>("update_download_and_install", { assetUrl });
+
+// ---- 选文件 / 截图（文件字段、二维码识图，对齐手机端文件选择与扫码）----
+
+export interface PickedFile {
+  name: string;
+  size: number;
+  /** 内容 Base64（不带 data: 前缀） */
+  base64: string;
+}
+
+/** 系统「打开文件」对话框并读出内容；取消返回 null。imageOnly=true 时只显示图片 */
+export const pickAnyFile = async (imageOnly = false) => {
+  nativeDialog.busy = true;
+  try {
+    return await invoke<PickedFile | null>("pick_any_file", { imageOnly });
+  } finally {
+    nativeDialog.busy = false;
+  }
+};
+
+/** 截取整个虚拟屏幕（多显示器并集）为 PNG，返回 Base64 */
+export const captureScreenPng = () => invoke<string>("capture_screen_png");

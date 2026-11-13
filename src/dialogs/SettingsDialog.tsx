@@ -34,6 +34,9 @@ import type { AppCtx } from "../app-context";
 
 type Tab = "security" | "sync" | "vault" | "display" | "transfer";
 
+/** 服务器地址留空时的默认填充（坚果云，对齐手机端 WebDavScreen）；用户可改成 NAS 等 */
+const DEFAULT_WEBDAV_SERVER = "https://dav.jianguoyun.com/dav/";
+
 const TABS: { key: Tab; label: string }[] = [
   { key: "security", label: "安全" },
   { key: "sync", label: "同步与备份" },
@@ -66,21 +69,31 @@ export function SettingsDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => v
 // ---------------------------------------------------------------- 安全
 
 function SecurityTab({ ctx }: { ctx: AppCtx }) {
-  const [minutes, setMinutes] = useState(String(ctx.settings.autoLockMinutes));
   const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const saveMinutes = async () => {
-    const n = Number(minutes);
-    if (!Number.isFinite(n) || n < 0) {
-      setMsg({ ok: false, text: "请输入不小于 0 的分钟数（0 = 关闭自动锁定）" });
-      return;
-    }
-    await ctx.applySettings({ ...ctx.settings, autoLockMinutes: Math.floor(n) });
-    setMsg({ ok: true, text: `自动锁定已设为 ${Math.floor(n)} 分钟` });
+  // 对齐手机端自动锁定选项（秒）：-1 从不 / 0 立即 / 其余为两段计时时长
+  const AUTO_LOCK_OPTIONS: { v: number; label: string }[] = [
+    { v: -1, label: "从不" },
+    { v: 0, label: "立即" },
+    { v: 30, label: "30 秒" },
+    { v: 60, label: "1 分钟" },
+    { v: 300, label: "5 分钟" },
+    { v: 900, label: "15 分钟" },
+  ];
+  const autoLockLabel = (secs: number) => {
+    if (secs < 0) return "从不";
+    if (secs === 0) return "切到后台立即锁定";
+    if (secs < 60) return `${secs} 秒`;
+    return `${Math.round(secs / 60)} 分钟`;
+  };
+
+  const saveAutoLock = async (secs: number) => {
+    await ctx.applySettings({ ...ctx.settings, autoLockSeconds: secs });
+    setMsg({ ok: true, text: `自动锁定：${autoLockLabel(secs)}` });
   };
 
   const changePw = async () => {
@@ -109,21 +122,24 @@ function SecurityTab({ ctx }: { ctx: AppCtx }) {
   return (
     <>
       <div className="section-cap">自动锁定</div>
-      <div className="setting-row">
+      <div className="setting-row" style={{ alignItems: "flex-start" }}>
         <div className="setting-text">
-          <div className="setting-title">空闲后自动锁定</div>
-          <div className="setting-sub">鼠标/键盘闲置该时长后自动锁定密码库，0 = 关闭</div>
+          <div className="setting-title">自动锁定</div>
+          <div className="setting-sub">
+            两段计时：切到后台超过该时长、或在前台闲置该时长都会锁定。「立即」= 切到后台就锁；当前：{autoLockLabel(ctx.settings.autoLockSeconds)}
+          </div>
         </div>
-        <input
-          className="input"
-          style={{ width: 74, textAlign: "center" }}
-          type="number"
-          min={0}
-          value={minutes}
-          onChange={(e) => setMinutes(e.target.value)}
-          onBlur={() => void saveMinutes()}
-        />
-        <span className="muted small">分钟</span>
+      </div>
+      <div className="seg" style={{ marginTop: 6 }}>
+        {AUTO_LOCK_OPTIONS.map((o) => (
+          <button
+            key={o.v}
+            className={ctx.settings.autoLockSeconds === o.v ? "active" : ""}
+            onClick={() => void saveAutoLock(o.v)}
+          >
+            {o.label}
+          </button>
+        ))}
       </div>
 
       <div className="hr" />
@@ -164,8 +180,16 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
 
   const patch = (p: Partial<WebDavConfig>) => setCfg((c) => ({ ...c, ...p }));
 
-  const saveCfg = async () => {
-    await ctx.applySettings({ ...ctx.settings, webdav: cfg });
+  /** 服务器地址留空时自动填默认（坚果云）地址并回显（对齐手机端 ensureServerAddress） */
+  const ensureServerAddress = (): WebDavConfig => {
+    if (cfg.baseUrl.trim()) return cfg;
+    const filled = { ...cfg, baseUrl: DEFAULT_WEBDAV_SERVER };
+    setCfg(filled);
+    return filled;
+  };
+
+  const saveCfg = async (c: WebDavConfig = ensureServerAddress()) => {
+    await ctx.applySettings({ ...ctx.settings, webdav: c });
   };
 
   const doSaveAndSync = async () => {
@@ -173,8 +197,9 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
     setBusy("sync");
     setMsg(null);
     try {
-      await saveCfg();
-      const s = await webdavSync(cfg, "MERGE");
+      const c = ensureServerAddress();
+      await saveCfg(c);
+      const s = await webdavSync(c, "MERGE");
       await ctx.refreshFromBackend();
       setMsg({ ok: true, text: `${s.message || "同步完成"}（${s.direction}）` });
     } catch (e) {
@@ -189,8 +214,9 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
     setBusy("pull");
     setMsg(null);
     try {
-      await saveCfg();
-      const s = await webdavPull(cfg);
+      const c = ensureServerAddress();
+      await saveCfg(c);
+      const s = await webdavPull(c);
       await ctx.refreshFromBackend();
       setMsg({ ok: true, text: `${s.message || "已拉取云端数据"}（${s.direction}）` });
       setConfirmPull(false);
@@ -649,14 +675,16 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
 
   const refreshCloud = async () => {
     setScope("cloud");
-    if (!cfg.baseUrl.trim()) {
-      setCloudErr("请先在「同步与备份」里填写 WebDAV 服务器地址");
-      return;
+    // 留空自动填坚果云地址（对齐手机端：读取云端密码库前 ensureServerAddress），并持久化回显
+    let c = cfg;
+    if (!c.baseUrl.trim()) {
+      c = { ...c, baseUrl: DEFAULT_WEBDAV_SERVER };
+      void ctx.applySettings({ ...ctx.settings, webdav: c });
     }
     setBusy("cloud");
     setCloudErr(null);
     try {
-      setCloud(await webdavListCloud(cfg));
+      setCloud(await webdavListCloud(c));
     } catch (e) {
       setCloudErr(String(e));
     } finally {
@@ -923,6 +951,8 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
   const [err, setErr] = useState<string | null>(null);
   /** 提示显示在触发操作的分区底部（export / import / spv） */
   const [tScope, setTScope] = useState<"export" | "import" | "spv">("export");
+  /** 明文导出风险确认（对齐手机端 ConfirmDialog）：确认后才真正导出 */
+  const [pendingPlainExport, setPendingPlainExport] = useState<"csv" | "xml" | "json" | null>(null);
 
   const run = async (key: string, fn: () => Promise<void>) => {
     setBusy(key);
@@ -941,8 +971,14 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
     return `${name}-${exportStamp()}.${ext}`;
   };
 
-  const doExport = (kind: "csv" | "xml" | "json") =>
+  const doExport = (kind: "csv" | "xml" | "json") => {
+    // 对齐手机端：明文导出前先做风险确认
+    setPendingPlainExport(kind);
+  };
+
+  const runPlainExport = (kind: "csv" | "xml" | "json") =>
     void run(`exp-${kind}`, async () => {
+      setPendingPlainExport(null);
       setTScope("export");
       setErr(null);
       setMsg(null);
@@ -1029,6 +1065,30 @@ function TransferTab({ ctx }: { ctx: AppCtx }) {
           导出 JSON
         </button>
       </div>
+
+      {pendingPlainExport && (
+        <div className="confirm-box" style={{ marginTop: 10 }}>
+          <div className="small" style={{ fontWeight: 600, marginBottom: 4 }}>
+            导出为明文文件？
+          </div>
+          <div className="small">
+            JSON / CSV / XML 里是完整的明文密码与备注，任何拿到文件的人都能直接看到。
+            建议只在必须迁移时导出，用完及时删除。
+          </div>
+          <div className="row" style={{ marginTop: 8, justifyContent: "flex-end" }}>
+            <button className="btn sm" onClick={() => setPendingPlainExport(null)}>
+              取消
+            </button>
+            <button
+              className="btn sm danger"
+              disabled={busy !== null}
+              onClick={() => void runPlainExport(pendingPlainExport)}
+            >
+              仍要导出
+            </button>
+          </div>
+        </div>
+      )}
 
       {msg && tScope === "export" && <div className="ok-text">{msg.text}</div>}
       {err && tScope === "export" && <div className="err-text">{err}</div>}

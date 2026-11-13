@@ -1,6 +1,6 @@
 import type { AppSettings, Vault, VaultMeta } from "./types";
 
-export type ToastKind = "info" | "success" | "error";
+export type ToastKind = "info" | "success" | "error" | "warning";
 
 /** 左栏状态筛选 */
 export type SectionFilter = "ALL" | "FAVORITES" | "TRASH";

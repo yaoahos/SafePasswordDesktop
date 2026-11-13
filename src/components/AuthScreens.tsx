@@ -194,7 +194,8 @@ export function AuthScreens({
 
   const saveCloudCfg = async () => {
     if (!cloudCfg) return;
-    const baseUrl = cloudCfg.baseUrl.trim();
+    // 服务器地址留空自动填坚果云地址并回显（对齐手机端 ensureServerAddress）
+    const baseUrl = cloudCfg.baseUrl.trim() || "https://dav.jianguoyun.com/dav/";
     if (!/^https?:\/\//i.test(baseUrl)) {
       setError("服务器地址需以 http:// 或 https:// 开头");
       return;
