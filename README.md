@@ -332,3 +332,5 @@ SafePasswordDesktop/
 - 安全机制：主密码经 PBKDF2-HMAC-SHA256（210,000 次）派生密钥、AES-256-GCM 加密，库内容先压缩再加密；设置中的敏感字段用 Windows DPAPI 保护
 - 外观与交互：20 种主题色与自定义配色、浅色 / 深色 / 跟随系统、自定义标题栏、三栏自适应布局、条目预览卡片
 - 其他：检查更新与就地升级、复制敏感内容 30 秒自动清空、空闲自动锁定
+
+更早的版本与完整日志见 [Releases](https://github.com/yaoahos/SafePasswordDesktop/releases)。
