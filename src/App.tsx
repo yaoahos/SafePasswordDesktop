@@ -18,6 +18,7 @@ import {
   webdavRestoreToCloud,
   deleteVault,
   nativeDialog,
+  lockSuspend,
 } from "./api";
 import type { AppSettings, SortMode, SyncSummary, UpdateInfo, Vault, VaultItem, VaultMeta } from "./types";
 import type { AppCtx, SectionFilter, ToastKind } from "./app-context";
@@ -528,6 +529,7 @@ export default function App() {
     if (secs < 0) return; // 从不
     const onHidden = () => {
       if (nativeDialog.busy) return; // 自己弹的系统文件对话框不算切后台
+      if (Date.now() < lockSuspend.until) return; // 截屏取景等自己发起的窗口动作不算切后台
       if (secs === 0) {
         lockNow();
         notify("已根据自动锁定设置锁定", "info");

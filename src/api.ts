@@ -23,6 +23,8 @@ import type {
  * 否则选个文件回来就被锁了。
  */
 export const nativeDialog = { busy: false };
+/** 自己发起的窗口动作（截屏取景前最小化、全屏切换）不算切后台，该时刻前豁免自动锁定 */
+export const lockSuspend = { until: 0 };
 
 export const listVaults = () => invoke<VaultMeta[]>("list_vaults");
 

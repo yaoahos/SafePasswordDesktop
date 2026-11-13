@@ -1,16 +1,20 @@
 /**
  * 动态验证码「识别二维码」对话框（对齐手机端扫码录入，桌面端按平台换成两种取图方式）：
  *   ① 选择本地图片文件（二维码截图）
- *   ② 选取界面图片：截取屏幕后拖框选出二维码区域
+ *   ② 截图识别：先最小化本窗口（不算切后台、不触发自动锁定），截取整个屏幕后
+ *      全屏显示屏幕内容，由用户拖框选出二维码区域
  * 解码结果必须能解析为 TOTP 密钥（otpauth:// 或裸 Base32），否则提示换一张图。
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Dialog } from "./Dialog";
-import { captureScreenPng, pickAnyFile } from "../api";
+import { captureScreenPng, lockSuspend, pickAnyFile } from "../api";
 import { parseTotp } from "../totp";
 
 type Rect = { x: number; y: number; w: number; h: number };
+
+const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -50,6 +54,21 @@ async function decodeQr(dataUrl: string, rect: Rect | null, displayWidth: number
   return found?.data ?? null;
 }
 
+/**
+ * 自己发起的窗口动作（截屏取景前最小化、全屏切换）不算切后台：
+ * 动作期间豁免自动锁定，结束后 0.8s 解除（吸收切换瞬间的失焦事件）。
+ */
+async function withLockSuspend(fn: () => Promise<void>): Promise<void> {
+  lockSuspend.until = Date.now() + 120_000;
+  try {
+    await fn();
+  } finally {
+    window.setTimeout(() => {
+      lockSuspend.until = 0;
+    }, 800);
+  }
+}
+
 export function QrScanDialog({
   onDecoded,
   onClose,
@@ -66,6 +85,21 @@ export function QrScanDialog({
   const wrapRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const dragRef = useRef<{ x0: number; y0: number } | null>(null);
+  /** 是否已把窗口切到全屏选区（关闭时要还原） */
+  const fullscreenRef = useRef(false);
+
+  // 卸载兜底：还原全屏、解除锁定豁免
+  useEffect(
+    () => () => {
+      lockSuspend.until = 0;
+      if (fullscreenRef.current) {
+        void getCurrentWindow()
+          .setFullscreen(false)
+          .catch(() => undefined);
+      }
+    },
+    [],
+  );
 
   const pickLocal = async () => {
     setErr(null);
@@ -75,18 +109,41 @@ export function QrScanDialog({
       const mime = f.name.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
       setImgUrl(`data:${mime};base64,${f.base64}`);
       setRect(null);
+      await withLockSuspend(async () => {
+        try {
+          await getCurrentWindow().setFullscreen(true);
+          fullscreenRef.current = true;
+        } catch {
+          /* 全屏失败时仍可窗口内大图选取 */
+        }
+      });
     } catch (e) {
       setErr(String(e));
     }
   };
 
+  /** 截图识别：最小化本窗口 → 截取整个屏幕 → 全屏显示供框选 */
   const shotScreen = async () => {
     setErr(null);
     setBusy(true);
     try {
-      const b64 = await captureScreenPng();
-      setImgUrl(`data:image/png;base64,${b64}`);
-      setRect(null);
+      await withLockSuspend(async () => {
+        const win = getCurrentWindow();
+        await win.minimize();
+        await sleep(700); // 等最小化动画结束，避免把自己截进画面
+        const b64 = await captureScreenPng();
+        await win.unminimize();
+        await win.show();
+        await win.setFocus().catch(() => undefined);
+        try {
+          await win.setFullscreen(true);
+          fullscreenRef.current = true;
+        } catch {
+          /* 全屏失败时仍可窗口内大图选取 */
+        }
+        setImgUrl(`data:image/png;base64,${b64}`);
+        setRect(null);
+      });
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -107,6 +164,12 @@ export function QrScanDialog({
       if (!parseTotp(text)) {
         setErr("这不是动态验证码密钥，换一个二维码试试");
         return;
+      }
+      if (fullscreenRef.current) {
+        fullscreenRef.current = false;
+        await getCurrentWindow()
+          .setFullscreen(false)
+          .catch(() => undefined);
       }
       onDecoded(text);
     } catch (e) {
@@ -144,60 +207,30 @@ export function QrScanDialog({
     dragRef.current = null;
   };
 
-  return (
-    <Dialog title="识别二维码" onClose={onClose} width={560}>
-      <div className="muted small" style={{ lineHeight: 1.7 }}>
-        对着网站给出的二维码截图识别，或截取当前屏幕后拖框选出二维码区域。
-      </div>
-      <div className="row" style={{ gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-        <button className="btn" disabled={busy} onClick={() => void pickLocal()}>
-          选择图片文件…
-        </button>
-        <button className="btn" disabled={busy} onClick={() => void shotScreen()}>
-          {busy ? "处理中…" : "截图识别"}
-        </button>
-        {imgUrl && (
-          <>
-            <button
-              className="btn primary"
-              disabled={busy}
-              onClick={() => void decode(rect && rect.w > 4 && rect.h > 4 ? rect : null)}
-            >
-              {busy ? "识别中…" : rect && rect.w > 4 && rect.h > 4 ? "识别所选区域" : "识别整图"}
-            </button>
-            <button
-              className="btn"
-              onClick={() => {
-                setRect(null);
-                setErr(null);
-              }}
-            >
-              清除选区
-            </button>
-          </>
-        )}
-      </div>
-      {err && (
-        <div className="err-text" style={{ marginTop: 10 }}>
-          {err}
-        </div>
-      )}
-      {imgUrl && (
+  const cancel = () => {
+    if (fullscreenRef.current) {
+      fullscreenRef.current = false;
+      void getCurrentWindow()
+        .setFullscreen(false)
+        .catch(() => undefined);
+    }
+    onClose();
+  };
+
+  // 有图 = 全屏选区模式；没图 = 菜单对话框
+  if (imgUrl) {
+    return (
+      <div className="qr-pick-overlay">
+        <div className="qr-pick-tip">拖框选出二维码区域，不框选则识别整图</div>
         <div
           ref={wrapRef}
-          className="qr-shot-wrap"
-          style={{ marginTop: 12, display: "inline-block", cursor: "crosshair" }}
+          className="qr-shot-wrap qr-pick-wrap"
+          style={{ cursor: "crosshair" }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
         >
-          <img
-            ref={imgRef}
-            src={imgUrl}
-            alt="待识别图片"
-            draggable={false}
-            style={{ maxHeight: 360, maxWidth: "100%", width: "auto", height: "auto" }}
-          />
+          <img ref={imgRef} src={imgUrl} alt="待识别图片" draggable={false} />
           {rect && rect.w > 2 && rect.h > 2 && (
             <div
               className="qr-shot-rect"
@@ -205,10 +238,54 @@ export function QrScanDialog({
             />
           )}
         </div>
-      )}
-      {!imgUrl && (
-        <div className="empty-hint" style={{ marginTop: 16 }}>
-          还没有图片：先「选择图片文件」或「截图识别」
+        {err && <div className="err-text">{err}</div>}
+        <div className="qr-pick-bar">
+          <button
+            className="btn primary"
+            disabled={busy}
+            onClick={() => void decode(rect && rect.w > 4 && rect.h > 4 ? rect : null)}
+          >
+            {busy ? "识别中…" : rect && rect.w > 4 && rect.h > 4 ? "识别所选区域" : "识别整图"}
+          </button>
+          <button
+            className="btn"
+            onClick={() => {
+              setRect(null);
+              setErr(null);
+            }}
+          >
+            清除选区
+          </button>
+          <button className="btn" disabled={busy} onClick={() => void shotScreen()}>
+            {busy ? "处理中…" : "重新截图"}
+          </button>
+          <button className="btn" disabled={busy} onClick={() => void pickLocal()}>
+            换一张图
+          </button>
+          <button className="btn" onClick={cancel}>
+            取消
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Dialog title="识别二维码" onClose={onClose} width={560}>
+      <div className="muted small" style={{ lineHeight: 1.7 }}>
+        「截图识别」会先最小化本窗口，再截取整个屏幕，随后全屏显示屏幕内容，由你拖框选出二维码区域；该过程不会触发自动锁定。也可以直接选择本地的二维码图片。
+      </div>
+      <div className="row" style={{ gap: 8, marginTop: 12 }}>
+        <button className="btn" disabled={busy} onClick={() => void pickLocal()}>
+          选择图片文件…
+        </button>
+        <button className="btn primary" disabled={busy} onClick={() => void shotScreen()}>
+          {busy ? "处理中…" : "截图识别"}
+        </button>
+      </div>
+      {err && (
+        <div className="err-text" style={{ marginTop: 10 }}>
+          {err}
         </div>
       )}
     </Dialog>
