@@ -643,7 +643,12 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
       await deleteVault(m.id);
       const wasCurrent = vault?.id === m.id;
       setDelId(null);
-      setMsg({ ok: true, text: `已删除「${m.name}」` });
+      setMsg({
+        ok: true,
+        text: m.cloudKey
+          ? `已删除本机密码库「${m.name}」，云端副本保留`
+          : `已删除密码库「${m.name}」`,
+      });
       if (wasCurrent) {
         onClose();
         ctx.gotoSelect();
@@ -722,7 +727,7 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
           <span className="settings-group-dot" /> 本地密码库
         </div>
         <div className="setting-sub" style={{ marginBottom: 8 }}>
-          每个密码库有独立的主密码和文件；切换后需要在解锁页输入该库主密码。
+          每个密码库有独立的主密码和文件；切换后需要在解锁页输入该库主密码。删除只清本机文件，云端副本保留。
         </div>
         {ctx.vaults.map((m) => {
           const current = m.id === vault?.id;
@@ -782,7 +787,7 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
           </button>
         </div>
         <div className="setting-sub" style={{ marginBottom: 8 }}>
-          云端只保存密文；下载并切换时需要输入该库的主密码。
+          云端只保存密文；下载并切换时需要输入该库的主密码。这里的删除只清云端，不影响本机已下载的副本。
         </div>
         {cloudErr && <div className="err-text">{cloudErr}</div>}
         {cloud === null && !cloudErr && (
