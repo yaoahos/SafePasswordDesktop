@@ -2239,3 +2239,49 @@ input[type="password"]::-ms-clear {
   background: rgba(22, 119, 255, 0.18);
   pointer-events: none;
 }
+
+/* ---------------------------------------------------------------- 二维码全屏选区（截图识别） */
+
+.qr-pick-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: rgba(16, 18, 22, 0.92);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  user-select: none;
+}
+
+.qr-pick-tip {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.qr-pick-wrap {
+  /* 图片按原始比例放进可视区，尽量铺满 */
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 150px);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.qr-pick-wrap img {
+  display: block;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 150px);
+  width: auto;
+  height: auto;
+  pointer-events: none;
+}
+
+.qr-pick-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 0 16px;
+}

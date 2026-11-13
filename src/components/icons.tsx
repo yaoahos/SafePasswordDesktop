@@ -200,10 +200,14 @@ const PATHS: Record<IconName, React.ReactNode> = {
   /** 历史记录：时钟 */
   qr: (
     <>
-      <rect x="4" y="4" width="6" height="6" rx="1" />
-      <rect x="14" y="4" width="6" height="6" rx="1" />
-      <rect x="4" y="14" width="6" height="6" rx="1" />
-      <path d="M14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z" />
+      {/* 彩色描边：图案不变，四个模块各一色（用户要求识别二维码按钮图标彩色化） */}
+      <rect x="4" y="4" width="6" height="6" rx="1" stroke="#4C8DFF" />
+      <rect x="14" y="4" width="6" height="6" rx="1" stroke="#8B5CF6" />
+      <rect x="4" y="14" width="6" height="6" rx="1" stroke="#F5A623" />
+      <path
+        d="M14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z"
+        stroke="#22C55E"
+      />
     </>
   ),
   history: (
