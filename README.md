@@ -4,11 +4,11 @@ SafePassword 桌面版是一个离线优先的密码管理器。界面与数据�
 
 - 项目名：`SafePassword Desktop`
 - 应用标识：`com.yaoahos.safepassword.desktop`
-- 正式版本：`1.0.4`
+- 正式版本：`1.1.0`
 - 支持平台：Windows 10 / 11（x64，需要 WebView2 运行时）
-- 安装包：`SafePassword_1.0.4_x64-setup.exe`（NSIS）/ `SafePassword_1.0.4_x64_zh-CN.msi`
-- 安装包大小：2,457,840 字节（NSIS）/ 3,444,736 字节（MSI）
-- SHA-256：`3A860146123D122FD84C1FC6F92331A8258C21FA7F54A4FA38301FB944CA5B70`（NSIS）/ `A92052504FA1AB84BBF370A8390E5D8162700C40BC17BD6BF6330C678ACF9164`（MSI）
+- 安装包：`SafePassword_1.1.0_x64-setup.exe`（NSIS）/ `SafePassword_1.1.0_x64_zh-CN.msi`
+- 安装包大小：2,453,244 字节（NSIS）/ 3,440,640 字节（MSI）
+- SHA-256：`3A365A662B93ED5D7F7DD389E1C5688D619CED9556CB1BB587AC51E40D1ACC3C`（NSIS）/ `48CD84A764A1DAFD3F7362C2C73CCF7005160CC3A06EE79099C83E166F054100`（MSI）
 - 发布下载：[Releases](https://github.com/yaoahos/SafePasswordDesktop/releases)
 
 > 本项目为独立实现，未使用任何第三方应用的源代码；界面与交互仅作设计参考。密码库格式与 Android 版互通。
@@ -289,7 +289,7 @@ SafePasswordDesktop/
 
 ## 十、版本记录
 
-**2026/11/13 · 1.0.4**
+**2026/11/13 · 1.1.0**
 - 新增：动态验证码支持识别二维码录入——本地图片或截屏框选，取景时不触发自动锁定
 - 新增：TOTP 认证器字段，保存 otpauth:// 链接或 Base32 密钥，实时生成 6 位动态码
 - 新增：文件字段可保存、替换与导出小文件（单个不超过 50KB）
