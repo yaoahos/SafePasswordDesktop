@@ -334,77 +334,23 @@ pub fn current_vault(state: State<AppState>) -> CmdResult<Option<Vault>> {
 }
 
 #[tauri::command]
-pub async fn delete_vault(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    let (meta, cfg, content_key) = {
-        let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
-        // 删之前先记下内容密钥：云端文件名由它派生（改名不变），用来精确删云端文件
-        let content_key = inner
-            .current
-            .as_ref()
-            .filter(|c| c.meta.id == id)
-            .map(|c| c.container.vault.content_key.clone())
-            .filter(|k| !k.trim().is_empty());
-        if inner.current.as_ref().is_some_and(|c| c.meta.id == id) {
-            drop_current(&mut inner);
-        }
-        let cfg = inner.settings.webdav.clone();
-        let found = inner
-            .store
-            .list()
-            .map_err(err)?
-            .into_iter()
-            .find(|m| m.id == id);
-        match found {
-            Some(meta) => {
-                inner.store.delete(&meta).map_err(err)?;
-                (Some(meta), cfg, content_key)
-            }
-            // 本地已经不存在这个库（例如文件已被删掉、只是界面上还残留一条）：
-            // 删除是幂等操作，这里按成功处理，让界面刷新后自然消失。
-            None => (None, cfg, content_key),
-        }
-    };
-    let Some(meta) = meta else {
-        return Ok(());
-    };
-    // 云端同步删除（尽力而为：失败不影响本地删除结果，保证一端操作另一端也能感知）
-    if cfg.is_configured() && cfg.enabled {
-        if let Ok(client) = WebDavClient::new(cfg.clone()) {
-            // 云端文件名可能有两种：内容密钥键（新方案，改名不变）与库名键（旧版本写的）
-            let mut keys: Vec<String> = Vec::new();
-            if let Some(ck) = content_key.as_deref() {
-                if let Some(k) = crate::sp::cloud::key_for_content(ck) {
-                    keys.push(k);
-                }
-            }
-            // 有内容密钥就是"按 key 精确删"：只删本库的文件、只删本库的清单条目。
-            // 库名可以重复（同名库冲突），按名字清理会误删别人的条目，所以只在
-            // 拿不到内容密钥（更老的库，没有稳定键）时才退回按名字。
-            let exact = !keys.is_empty();
-            let name_key = key_for(&meta.name);
-            if !keys.contains(&name_key) {
-                keys.push(name_key);
-            }
-            for key in keys.iter() {
-                let _ = client.delete(&cfg.remote_path(key)).await;
-            }
-            if let Ok(Some(bytes)) = client.get(&cfg.manifest_path()).await {
-                let text = String::from_utf8_lossy(&bytes).to_string();
-                let mut manifest = CloudManifest::parse(Some(text.as_str()));
-                let before = manifest.vaults.len();
-                manifest.vaults.retain(|e| {
-                    if keys.contains(&e.key) {
-                        return false;
-                    }
-                    !exact && e.name.trim() == meta.name.trim()
-                });
-                if manifest.vaults.len() != before {
-                    let _ = client
-                        .put(&cfg.manifest_path(), manifest.to_json().as_bytes())
-                        .await;
-                }
-            }
-        }
+pub fn delete_vault(state: State<AppState>, id: String) -> CmdResult<()> {
+    let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+    if inner.current.as_ref().is_some_and(|c| c.meta.id == id) {
+        drop_current(&mut inner);
+    }
+    // 只删本地文件与本地索引，**不动云端**：清云端要走设置页「云端密码库」里那个
+    // 独立的删除按钮。误删本机副本还能从云端重新下载，也不会连带别的设备。
+    let found = inner
+        .store
+        .list()
+        .map_err(err)?
+        .into_iter()
+        .find(|m| m.id == id);
+    // 本地已经不存在这个库（例如文件已被删掉、只是界面上还残留一条）：
+    // 删除是幂等操作，这里按成功处理，让界面刷新后自然消失。
+    if let Some(meta) = found {
+        inner.store.delete(&meta).map_err(err)?;
     }
     Ok(())
 }
