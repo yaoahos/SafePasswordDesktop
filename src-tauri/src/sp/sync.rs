@@ -662,7 +662,7 @@ impl SyncEngine {
                 return Ok(UploadOutcome::Uploaded);
             }
         };
-        let mut manifest = CloudManifest::parse(manifest_text.as_deref());
+        let manifest = CloudManifest::parse(manifest_text.as_deref());
         let want = container.vault.name.trim().to_lowercase();
         if let Some(other) = manifest
             .vaults
@@ -676,17 +676,31 @@ impl SyncEngine {
         // 记下新的版本指纹：下一次同步用 HEAD 比对即可，不必再下载整包。
         // 服务器不支持 HEAD 时留空 → 下次退回完整流程，行为安全。
         self.refresh_rev(container, remote_path).await;
+        // 清单是所有密码库共用的一份文件：从同名检查那次 GET 到这里隔着一次整包上传，
+        // 期间别的设备很可能刚写过清单。直接写回旧快照会把别人新加的条目抹掉
+        // （云端列表里少一个库，文件还在但用户看不到）。写入前再取一次最新清单，
+        // 只把自己这条 upsert 进去。
+        let fresh = match self.webdav.get(&self.config.manifest_path()).await {
+            Ok(Some(bytes)) => Some(CloudManifest::parse(Some(
+                String::from_utf8_lossy(&bytes).as_ref(),
+            ))),
+            // 读不到就退回进来时读到的那份，至少保证本库登记不丢。
+            _ => None,
+        };
+        let mut manifest = fresh.unwrap_or(manifest);
         manifest.upsert(
             remote_key,
             &container.vault.name,
             container.vault.updated_at,
             bytes.len() as i64,
         );
-        let _ = self
+        // 写清单失败不能当成已登记：留标记，下次同步开头补写（repair_manifest）。
+        let manifest_ok = self
             .webdav
             .put(&self.config.manifest_path(), manifest.to_json().as_bytes())
-            .await;
-        self.cache.manifest_dirty = false;
+            .await
+            .is_ok();
+        self.cache.manifest_dirty = !manifest_ok;
         Ok(UploadOutcome::Uploaded)
     }
 
