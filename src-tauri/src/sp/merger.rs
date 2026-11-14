@@ -69,11 +69,10 @@ pub fn merge(local: &Vault, remote: &Vault, last_synced_at: i64) -> MergeResult 
             (Some(li), Some(ri)) => {
                 let local_new = li.updated_at > last_synced_at;
                 let remote_new = ri.updated_at > last_synced_at;
-                if local_new
-                    && remote_new
-                    && li.updated_at != ri.updated_at
-                    && !same_content(li, ri)
-                {
+                // 判冲突只看「两边都改过 + 内容确实不同」。不能加 `li.updated_at != ri.updated_at`：
+                // 时间戳相同不代表是同一份改动（同毫秒编辑、批量导入都会撞同一个时间戳），
+                // 漏判冲突就会静默取本地、丢掉远端内容。与 Android VaultMerger.kt 一致。
+                if local_new && remote_new && !same_content(li, ri) {
                     let (winner, loser) = if li.updated_at >= ri.updated_at {
                         (li, ri)
                     } else {
@@ -307,5 +306,29 @@ mod tests {
         let mut archived = item("b", "x", 1);
         archived.status = ItemStatus::Archived;
         assert_eq!(archived.copy_as_conflict_copy().status, ItemStatus::Active);
+    }
+
+    #[test]
+    fn same_timestamp_different_content_conflicts() {
+        // 同毫秒编辑 / 批量导入会让两端撞出同一个 updatedAt。
+        // 内容不同就必须判冲突，否则会静默取本地、丢掉远端改动。
+        let mut local = Vault::default();
+        local.items.push(item("a", "手机改的", SYNCED + 10));
+        let mut remote = Vault::default();
+        remote.items.push(item("a", "电脑改的", SYNCED + 10));
+        let result = merge(&local, &remote, SYNCED);
+        assert_eq!(result.conflicts, 1);
+        assert_eq!(result.vault.items.len(), 2);
+    }
+
+    #[test]
+    fn same_timestamp_same_content_no_conflict() {
+        let mut local = Vault::default();
+        local.items.push(item("a", "同内容", SYNCED + 10));
+        let mut remote = Vault::default();
+        remote.items.push(item("a", "同内容", SYNCED + 10));
+        let result = merge(&local, &remote, SYNCED);
+        assert_eq!(result.conflicts, 0);
+        assert_eq!(result.vault.items.len(), 1);
     }
 }
