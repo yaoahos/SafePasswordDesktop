@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use base64::Engine as _;
@@ -38,6 +39,8 @@ type CmdResult<T> = Result<T, String>;
 
 const LOCK_BROKEN: &str = "内部状态锁已损坏";
 const NO_OPEN_VAULT: &str = "请先解锁一个密码库";
+/// 同步闸门拦截时给用户看的提示（替代此前误导性的 `NO_OPEN_VAULT`）。
+const SYNC_BUSY: &str = "正在同步中，请稍候";
 
 fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
@@ -77,6 +80,29 @@ pub struct AppStateInner {
 
 pub struct AppState {
     pub inner: Mutex<AppStateInner>,
+    /// 同步单飞闸门：同一时刻只允许一个同步/拉取跑完整条链路。
+    ///
+    /// 同步过程中 `current` 会被整体 take 出来（`run_sync` / `webdav_restore_to_cloud`），
+    /// 期间第二次调用会撞上 `NO_OPEN_VAULT`，用户看到的是「请先解锁一个密码库」这种
+    /// 与事实无关的报错；更麻烦的是两个任务交替写本地文件与云端清单。用独立闸门提前拦住。
+    pub sync_busy: AtomicBool,
+}
+
+/// 同步闸门的 RAII 守卫：持有时置位，drop 时复位（任何提前 return 都不会漏放）。
+pub struct SyncGate<'a>(&'a AtomicBool);
+
+impl<'a> SyncGate<'a> {
+    fn acquire(flag: &'a AtomicBool) -> CmdResult<Self> {
+        flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| SyncGate(flag))
+            .map_err(|_| SYNC_BUSY.to_string())
+    }
+}
+
+impl Drop for SyncGate<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,6 +200,7 @@ impl AppState {
                 sync_cache,
                 sync_cache_path,
             }),
+            sync_busy: AtomicBool::new(false),
         })
     }
 }
@@ -1158,6 +1185,9 @@ async fn run_sync(
     strategy: Option<ConflictStrategy>,
     pull: bool,
 ) -> CmdResult<SyncSummary> {
+    // 单飞：抢不到闸门说明已经有一次同步在跑，直接回「正在同步中」，
+    // 而不是让第二个任务去 take 已被拿走的 current、撞出「请先解锁一个密码库」。
+    let _gate = SyncGate::acquire(&state.sync_busy)?;
     // 引擎构建（需要引用 current），随后把 current 整体取出，await 期间不碰锁。
     let (mut engine, cur) = {
         let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
@@ -1256,6 +1286,8 @@ pub async fn webdav_restore_to_cloud(
     state: State<'_, AppState>,
     config: WebDavConfig,
 ) -> CmdResult<SyncSummary> {
+    // 与 run_sync 共用同一把闸门：它也 take current，和普通同步撞在一起同样会互相踩。
+    let _gate = SyncGate::acquire(&state.sync_busy)?;
     let (mut engine, cur) = {
         let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
         let engine = build_engine(&inner, &config)?;
@@ -1392,8 +1424,14 @@ pub async fn webdav_pull_if_changed(
     if !changed {
         return Ok(None);
     }
-    // 确有变化 → 静默同步（本地修改优先，对齐 doSync 默认 KEEP_LOCAL）
-    let summary = run_sync(state.clone(), config, Some(ConflictStrategy::KeepLocal), false).await?;
+    // 确有变化 → 静默同步，策略用「合并」而不是「本地覆盖云端」：
+    // 两端都改过时 KEEP_LOCAL 会把对端改动整片盖掉，与手机端 doSync 默认的 MERGE 相反，
+    // 也违反「不按时间戳挑赢家、两侧都合并」。撞上正在进行的同步就静默跳过，下次轮询再试。
+    let summary = match run_sync(state.clone(), config, None, false).await {
+        Ok(s) => s,
+        Err(e) if e == SYNC_BUSY => return Ok(None),
+        Err(e) => return Err(e),
+    };
     // 同步后服务器时间会变，重新记录，避免下一次把自己刚上传的当成远端更新
     if let Ok(Some(s2)) = client.stat(&path).await {
         let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
