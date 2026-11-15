@@ -7,7 +7,7 @@
 > 所有常量均直接摘自源码并标注 `文件名:行号`。凡源码行为存在歧义或历史不一致之处，
 > 集中列在第 15 节「已知歧义」，实现前请务必阅读。
 >
-> 源文件（均位于 `core/src/main/kotlin/com/yaoahos/safepassword/core/`，行号以 2026-11 时点版本为准）：
+> 源文件（均位于 Android 仓库的 `core/src/main/kotlin/com/yaoahos/safepassword/core/`，行号以 2026-11 时点版本为准）：
 > `crypto/Crypto.kt`、`crypto/VaultContainer.kt`、`io/VaultCodec.kt`、`io/VaultXml.kt`、
 > `io/AtomicFiles.kt`、`json/AppJson.kt`、`model/Model.kt`、`model/TemplateCatalog.kt`、
 > `storage/VaultStore.kt`、`storage/BackupManager.kt`、`storage/AttachmentStore.kt`、
