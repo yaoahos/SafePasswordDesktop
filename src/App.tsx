@@ -205,22 +205,28 @@ export default function App() {
 
   const autoUpdateChecked = useRef(false);
   useEffect(() => {
-    // 解锁进入首页后才检查：解锁页弹出的更新提示会打断正在输主密码的人
-    if (!vault || autoUpdateChecked.current || !settings.checkUpdatesOnLaunch) return;
-    autoUpdateChecked.current = true;
+    // 启动即检查（窗口加载完 1.5 秒后），不必等解锁：停在选库页/解锁页时
+    // 也该知道有新版本。提示窗口本身仍只在首页渲染，不会打断输主密码的人。
+    if (!booted || autoUpdateChecked.current || !settings.checkUpdatesOnLaunch) return;
     const timer = setTimeout(() => {
+      // 「已查过」的标记放在真正发起请求这一刻，而不是排定时器时：
+      // 否则 StrictMode 的 effect 重放（挂载→清理→再挂载）会把定时器清掉、
+      // 标记却已置位，检查被永久跳过——开发时永远看不到这个弹窗。
+      if (autoUpdateChecked.current) return;
+      autoUpdateChecked.current = true;
       void (async () => {
         try {
           const r = await checkUpdate(APP_VERSION);
           // 发现新版本时弹出带更新内容的窗口，而不是一闪而过的提示条
           if (r.hasUpdate) setUpdatePrompt(r);
-        } catch {
-          // 启动检查静默失败：离线或网络受限时不该打扰用户
+        } catch (e) {
+          // 静默失败：离线或网络受限时不该打扰用户，但留一条日志便于排查
+          console.warn("启动检查更新失败", e);
         }
       })();
     }, 1500);
     return () => clearTimeout(timer);
-  }, [vault, settings.checkUpdatesOnLaunch]);
+  }, [booted, settings.checkUpdatesOnLaunch]);
 
   useEffect(() => {
     if (!toast) return;
