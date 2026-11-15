@@ -7,8 +7,8 @@ SafePassword 桌面版是一个离线优先的密码管理器。界面与数据�
 - 正式版本：`1.1.2`
 - 支持平台：Windows 10 / 11（x64，需要 WebView2 运行时）
 - 安装包：`SafePassword_1.1.2_x64-setup.exe`（NSIS）/ `SafePassword_1.1.2_x64_zh-CN.msi`
-- 安装包大小：2,454,086 字节（NSIS）/ 3,444,736 字节（MSI）
-- SHA-256：`D4E8EAEB229C81349C3C26FD38205338A57A71E37520DBBA9F0FB5B5C8EFCC46`（NSIS）/ `2AC37CBFAEEA0986A85E4909DAFDC040DC5865F198DD7223BCCC6948B5E058ED`（MSI）
+- 安装包大小：2,454,006 字节（NSIS）/ 3,444,736 字节（MSI）
+- SHA-256：`7F4D95DA7A219C17A52924F1AD1E9B0D0ED7973A348941CADECC85DAEA3F2582`（NSIS）/ `25892ED4D947414DC570D8AE4E5CEE588085D1157409C1388C233D2A20D0F04A`（MSI）
 - 发布下载：[Releases](https://github.com/yaoahos/SafePasswordDesktop/releases)
 
 > 本项目为独立实现，未使用任何第三方应用的源代码；界面与交互仅作设计参考。密码库格式与 Android 版互通。
@@ -76,7 +76,8 @@ SafePassword Desktop 面向希望把密码数据掌握在自己手里的用户�
 - 标签管理：五边形标签图标、20 种预置色与自定义色值、排序值、批量删除。
 
 **更新**
-- 关于页「检查更新」从 GitHub Releases 拉取最新版本；有新版本时可下载并启动安装包。
+- 启动后自动检查一次新版本（关于页可关闭），发现更新时弹出带更新内容的窗口，可直接下载并启动安装包。
+- 关于页「检查更新」可随时手动触发。
 - 「更新日志」按钮跳转 GitHub Releases 查看完整版本历史。
 
 ---
@@ -166,16 +167,11 @@ npx tauri build
 产物：
 
 ```text
-src-tauri/target/release/bundle/nsis/SafePassword_1.0.3_x64-setup.exe
-src-tauri/target/release/bundle/msi/SafePassword_1.0.3_x64_zh-CN.msi
+src-tauri/target/release/bundle/nsis/SafePassword_1.1.2_x64-setup.exe
+src-tauri/target/release/bundle/msi/SafePassword_1.1.2_x64_zh-CN.msi
 ```
 
-首次打包若卡在 NSIS 工具下载，可先设置本机代理再重试（地址与端口按自己的代理软件改）：
-
-```bat
-set HTTP_PROXY=http://127.0.0.1:7890
-set HTTPS_PROXY=http://127.0.0.1:7890
-```
+首次打包会自动下载 NSIS 与 WiX 打包工具链，需要能访问外网；网络受限时请自行配置代理或镜像后再重试。
 
 ### 5. 测试
 
@@ -183,7 +179,7 @@ set HTTPS_PROXY=http://127.0.0.1:7890
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-- 当前 93 个测试通过（88 个单元测试 + 3 个命令层 E2E + 1 个 WebDAV 双设备同步 E2E + 1 个 mock 冒烟），另有 1 个实网 HIBP 测试默认跳过（`cargo test -- --ignored`）。
+- 当前 109 个测试通过（100 个单元测试 + 3 个命令层 E2E + 5 个 WebDAV 双设备与冲突 E2E + 1 个 mock 冒烟），另有 1 个实网 HIBP 测试默认跳过（`cargo test -- --ignored`）。
 - 跨端字节兼容：`interop/` 下用手机端 Kotlin core 生成夹具，验证 Rust 能解、手机端能解 Rust 写出的 `.spv`，明文 JSON 逐字节一致。
 
 ---
