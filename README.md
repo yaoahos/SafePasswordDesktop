@@ -4,11 +4,11 @@ SafePassword 桌面版是一个离线优先的密码管理器。界面与数据�
 
 - 项目名：`SafePassword Desktop`
 - 应用标识：`com.yaoahos.safepassword.desktop`
-- 正式版本：`1.1.1`
+- 正式版本：`1.1.2`
 - 支持平台：Windows 10 / 11（x64，需要 WebView2 运行时）
-- 安装包：`SafePassword_1.1.1_x64-setup.exe`（NSIS）/ `SafePassword_1.1.1_x64_zh-CN.msi`
-- 安装包大小：2,452,756 字节（NSIS）/ 3,444,736 字节（MSI）
-- SHA-256：`02ED45F0AFDDA44C7B37C857046774D798D7B48C93723C8ACDD5537B248B9170`（NSIS）/ `561BAB4A81C98F5233771FA69B4032C5057BC1993F34F4D245022C9D9F0CAAA1`（MSI）
+- 安装包：`SafePassword_1.1.2_x64-setup.exe`（NSIS）/ `SafePassword_1.1.2_x64_zh-CN.msi`
+- 安装包大小：2,454,086 字节（NSIS）/ 3,444,736 字节（MSI）
+- SHA-256：`D4E8EAEB229C81349C3C26FD38205338A57A71E37520DBBA9F0FB5B5C8EFCC46`（NSIS）/ `2AC37CBFAEEA0986A85E4909DAFDC040DC5865F198DD7223BCCC6948B5E058ED`（MSI）
 - 发布下载：[Releases](https://github.com/yaoahos/SafePasswordDesktop/releases)
 
 > 本项目为独立实现，未使用任何第三方应用的源代码；界面与交互仅作设计参考。密码库格式与 Android 版互通。
@@ -289,6 +289,9 @@ SafePasswordDesktop/
 
 ## 十、版本记录
 
+**2026/11/15 · 1.1.2**
+- 修复：清理过期删除记录被当成内容变化，同步时整库重传
+
 **2026/11/14 · 1.1.1**
 - 修复：两台设备几乎同时上传不同密码库时，云端列表少一个库（文件还在但列表里看不到）
 - 修复：两端在同一毫秒修改同一条目时漏判冲突，一侧内容被直接覆盖
@@ -324,14 +327,5 @@ SafePasswordDesktop/
 - 优化：完善检查更新失败的提示，触发频率限制时给出可重试的时间
 - 修复：更新检查不再显示 HTTP 状态码与接口返回内容，下载失败仅提示处理方式
 - 优化：调整解锁页的间距、圆角与输入框高度，改善版面留白
-
-**2026/11/04 · 1.0.1**
-- 修复：从云端恢复后首次同步会误报“已上传本地更新”，本地与云端内容相同时也重复上传
-- 修复：新建密码库同步时可能覆盖云端清单里的其它库
-- 修复：CSV / XML 导出再导入会丢失标签颜色、标签排序与秘密字段类型
-- 新增：本地库名与云端已有库重名时提示改名，改完自动继续同步
-- 新增：设置里可关闭「启动时检查更新」
-- 优化：从云端恢复页的配置不再填完地址和用户名就自动收起，按钮改为展开 / 收起
-- 优化：删除云端密码库改为按 key 精确清理，不再误删同名库；上传提示统一文案
 
 更早的版本与完整日志见 [Releases](https://github.com/yaoahos/SafePasswordDesktop/releases)。
