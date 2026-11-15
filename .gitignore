@@ -13,3 +13,6 @@ interop/fixtures/android/*.reopen.json
 interop/fixtures/android/reopen*.json
 interop/fixtures/android/*.rust-rewritten.sicv
 AGENTS.md
+
+# ---- 工具本地状态：含本机路径日志、截图等，绝不入库 ----
+.workbuddy/
