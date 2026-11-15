@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use crate::sp::cloud::{key_for, CloudManifest};
 use crate::sp::container::VaultContainer;
 use crate::sp::crypto::to_hex;
-use crate::sp::merger::merge;
+use crate::sp::merger::{drop_expired_tombstones, merge};
 use crate::sp::model::{now_ms, Vault};
 use crate::sp::webdav::{RemoteStat, WebDavClient, WebDavConfig};
 
@@ -266,8 +266,11 @@ impl SyncEngine {
                         });
                     }
                     // 云端没变、本地有改动：跳过下载，直接上传
+                    // 指纹用归一化后的库（缓存里那份也是），否则本地留着一个过期墓碑时
+                    // 这里永远比不上，宁可多传一次整包。
                     if !self.cache.content_hash.is_empty()
-                        && content_hash(&local.vault) == self.cache.content_hash
+                        && content_hash(&drop_expired_tombstones(&local.vault))
+                            == self.cache.content_hash
                     {
                         local.vault.last_synced_at = local.vault.updated_at.max(now_ms());
                         return Ok(SyncResult {
@@ -494,6 +497,11 @@ impl SyncEngine {
         // `last_synced_at` 同源、都取自本机时钟，不需要容差。
         let local_changed = local.vault.updated_at > last;
 
+        // 过期墓碑只是簿记残留：一端清掉、另一端还留着，不该被当成内容差异。
+        // 合并与内容指纹统一基于归一化后的库，否则「清墓碑」会被判成本机改动并整库重传。
+        let local_clean = drop_expired_tombstones(&local.vault);
+        let remote_clean = drop_expired_tombstones(&remote.vault);
+
         let result = match conflict_strategy {
             ConflictStrategy::KeepLocal if local_changed => {
                 let prev_synced = local.vault.last_synced_at;
@@ -513,17 +521,17 @@ impl SyncEngine {
                 })
             }
             _ => {
-                let local_hash = content_hash(&local.vault);
-                let merged = merge(&local.vault, &remote.vault, last);
+                let local_hash = content_hash(&local_clean);
+                let merged = merge(&local_clean, &remote_clean, last);
                 let mut updated = local.with_vault(merged.vault.clone());
                 // 库名不参与条目合并：谁更晚改库（改名也算）就跟谁的名字，
                 // 否则改名会被对端当成"本地改名"再覆盖回去。
-                if remote.vault.updated_at > local.vault.updated_at && remote.vault.updated_at > last {
-                    updated.vault.name = remote.vault.name.clone();
+                if remote_clean.updated_at > local_clean.updated_at && remote_clean.updated_at > last {
+                    updated.vault.name = remote_clean.name.clone();
                 }
                 updated.vault.last_synced_at = updated.vault.updated_at.max(now_ms());
                 // 合并结果与云端完全一致（通常只有对端改过）：不必回传整包。
-                if content_hash(&updated.vault) == content_hash(&remote.vault) {
+                if content_hash(&updated.vault) == content_hash(&remote_clean) {
                     // 本地内容没变 → 没东西可下载；变了 → 说明这次从云端拿到了更新。
                     // 用内容哈希判断而不是时间戳：两端时钟不可比，且上传方可能把
                     // updated_at 原样带过来，靠时间戳会把"刚下载"误判成"已是最新"。

@@ -2,12 +2,25 @@
 //! “删除不复活”规则集中在此，任何一端有比删除更新的修改才撤销墓碑。
 #![allow(dead_code)]
 
-use crate::sp::model::{now_ms, Label, Tombstone, Vault, VaultItem};
+use crate::sp::model::{now_ms, Label, Tombstone, Vault, VaultItem, TOMBSTONE_TTL_MS};
 
 #[derive(Debug, Clone)]
 pub struct MergeResult {
     pub vault: Vault,
     pub conflicts: usize,
+}
+
+/// 抹掉已过保留期的墓碑（对应 Android `VaultMerger.dropExpiredTombstones`）。
+///
+/// 墓碑过期后既不能复活条目、也拦不住任何同步，纯粹是簿记残留；可它是库内容的一部分，
+/// 于是「哪一端先把它清掉」就成了内容差异——[merge] 末尾的清理会让合并结果与云端对不上，
+/// 同步因此被判成「本地有改动」并整库重传（一个 2023 年的过期墓碑就够了）。
+/// 同步前先把两端都归一化，三个内容指纹都基于归一化结果。
+pub fn drop_expired_tombstones(vault: &Vault) -> Vault {
+    let before = now_ms() - TOMBSTONE_TTL_MS;
+    let mut cleaned = vault.clone();
+    cleaned.tombstones.retain(|t| t.deleted_at >= before);
+    cleaned
 }
 
 pub fn merge(local: &Vault, remote: &Vault, last_synced_at: i64) -> MergeResult {
@@ -141,6 +154,7 @@ fn same_content(a: &VaultItem, b: &VaultItem) -> bool {
 mod tests {
     use super::*;
     use crate::sp::model::{FieldType, Field, ItemStatus};
+    use crate::sp::sync::content_hash;
 
     const SYNCED: i64 = 1_000_000;
 
@@ -207,6 +221,38 @@ mod tests {
         assert_eq!(result.conflicts, 0);
         assert_eq!(result.vault.items.len(), 1);
         assert_eq!(result.vault.items[0].updated_at, SYNCED + 20);
+    }
+
+    #[test]
+    fn expired_tombstone_is_bookkeeping_not_content() {
+        // 两端条目完全相同，本地多一个过期墓碑：归一化后内容指纹必须一致，
+        // 否则同步会把「清墓碑」当成用户改动并整库重传（Android 端实测每冷启动一次）。
+        let mut a = Vault::default();
+        a.items.push(item("a", "同内容", SYNCED));
+        a.tombstones.push(Tombstone {
+            id: "gone".to_string(),
+            deleted_at: now_ms() - TOMBSTONE_TTL_MS - 1,
+        });
+        let mut b = a.clone();
+        b.tombstones.clear();
+        assert_ne!(
+            content_hash(&a),
+            content_hash(&b),
+            "未经归一化时两者内容本来就不同"
+        );
+        assert_eq!(
+            content_hash(&drop_expired_tombstones(&a)),
+            content_hash(&drop_expired_tombstones(&b)),
+            "归一化后应完全一致"
+        );
+
+        // 新鲜墓碑必须留着，否则已删除的条目会从云端复活。
+        let mut fresh = a.clone();
+        fresh.tombstones = vec![Tombstone {
+            id: "gone".to_string(),
+            deleted_at: now_ms(),
+        }];
+        assert_eq!(drop_expired_tombstones(&fresh).tombstones.len(), 1);
     }
 
     #[test]
