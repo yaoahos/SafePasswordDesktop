@@ -6,7 +6,6 @@
  * 解码结果必须能解析为 TOTP 密钥（otpauth:// 或裸 Base32），否则提示换一张图。
  */
 import { useEffect, useRef, useState } from "react";
-import jsQR from "jsqr";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Dialog } from "./Dialog";
 import { Icon } from "./icons";
@@ -51,6 +50,8 @@ async function decodeQr(dataUrl: string, rect: Rect | null, displayWidth: number
     ctx.drawImage(img, 0, 0);
   }
   const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  // 按需加载扫码库：只有真正识别二维码时才下载这段 JS，缩小启动主包。
+  const { default: jsQR } = await import("jsqr");
   const found = jsQR(data.data, data.width, data.height, { inversionAttempts: "attemptBoth" });
   return found?.data ?? null;
 }

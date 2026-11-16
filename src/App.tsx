@@ -4,6 +4,7 @@ import {
   closeVault,
   createVault,
   deleteItem,
+  deleteFieldHistory,
   getSettings,
   listVaults,
   openVault,
@@ -27,6 +28,7 @@ import { ItemList } from "./components/ItemList";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar, type TopAction } from "./components/TopBar";
 import { Dialog } from "./components/Dialog";
+import { Icon } from "./components/icons";
 import { AboutDialog } from "./dialogs/AboutDialog";
 import { GeneratorDialog } from "./dialogs/GeneratorDialog";
 import { LabelManagerDialog } from "./dialogs/LabelManagerDialog";
@@ -261,6 +263,15 @@ export default function App() {
       const root = document.documentElement.style;
       root.setProperty("--primary", accent);
       root.setProperty("--primary-soft", `${accent}1F`);
+      // 派生色跟随强调色：卡片淡底/边框、解锁页光晕、hover 底色不再固定为蓝
+      const rgb = accent.slice(1).match(/.{2}/g)!.map((h) => parseInt(h, 16));
+      const [r, g, b] = rgb;
+      const tint = (a: number) => `rgba(${r}, ${g}, ${b}, ${a})`;
+      root.setProperty("--card-soft", tint(dark ? 0.045 : 0.035));
+      root.setProperty("--card-border", tint(dark ? 0.13 : 0.11));
+      root.setProperty("--auth-glow", tint(dark ? 0.09 : 0.07));
+      root.setProperty("--auth-ring", tint(dark ? 0.075 : 0.055));
+      root.setProperty("--hover", tint(dark ? 0.1 : 0.06));
     };
     apply();
     mq.addEventListener("change", apply);
@@ -326,6 +337,9 @@ export default function App() {
 
   // ------------------------------------------------------------ 流程
 
+  /** 锁定代次：写操作返回时若代次已变，说明期间被锁定，丢弃结果不重新点亮界面 */
+  const lockEpochRef = useRef(0);
+
   const refreshVaults = useCallback(async () => {
     try {
       setVaults(await listVaults());
@@ -336,7 +350,10 @@ export default function App() {
 
   const refreshFromBackend = useCallback(async () => {
     try {
+      const epoch = lockEpochRef.current;
       const [cv, lv, st] = await Promise.all([currentVault(), listVaults(), getSettings()]);
+      // 期间被锁定：丢弃结果，避免"界面已锁定却又重新显示明文库"
+      if (epoch !== lockEpochRef.current) return;
       setVault(cv);
       setVaults(lv);
       // 设置也一起刷新：恢复/导入会改写 lastVaultId，前端设置不同步就会拿着
@@ -359,8 +376,6 @@ export default function App() {
    * 或保存先落地后 closeVault 把后端清空导致后续操作全失败。
    */
   const vaultOpQueue = useRef<Promise<void>>(Promise.resolve());
-  /** 锁定代次：写操作返回时若代次已变，说明期间被锁定，丢弃结果不重新点亮界面 */
-  const lockEpochRef = useRef(0);
   const enqueueVaultOp = useCallback(<T,>(op: () => Promise<T>): Promise<T> => {
     const run = vaultOpQueue.current.then(op, op);
     // 队列只串顺序、不吞错误：无论成功失败都让下一条继续跑
@@ -413,7 +428,7 @@ export default function App() {
         const id = vaultId ?? vault?.id ?? null;
         const name = (id && vaults.find((v) => v.id === id)?.name) || vault?.name || "";
         if (id) setNameConflict({ id, name, message: r.message });
-        flashSync("err", r.message || "云端已有同名密码库，请改名后再同步");
+        // 提示走弹窗（setNameConflict），状态文本保持静默
         clearSync();
         return;
       }
@@ -760,6 +775,17 @@ export default function App() {
     [enqueueVaultOp],
   );
 
+  /** 删除某字段的一条历史记录：走串行队列 + 锁定代次，回写顶层 vault（否则切走切回会"复活"且不同步） */
+  const deleteFieldHistoryOf = useCallback(
+    async (itemId: string, fieldId: string, index: number) => {
+      const epoch = lockEpochRef.current;
+      const v = await enqueueVaultOp(() => deleteFieldHistory(itemId, fieldId, index));
+      if (epoch !== lockEpochRef.current) return; // 期间被锁定，丢弃结果
+      setVault(v);
+    },
+    [enqueueVaultOp],
+  );
+
   /** 列表行内收藏：点击即生效（对齐手机端，不走草稿保存） */
   const toggleFavorite = useCallback(
     async (item: VaultItem) => {
@@ -1059,14 +1085,21 @@ export default function App() {
               onDelete={detailDelete}
               onRestore={restoreSelected}
               onPurge={purgeSelected}
+              onDeleteFieldHistory={deleteFieldHistoryOf}
               notify={notify}
               isNew={!!draftNew}
               onSaveAndCreate={saveAndCreate}
             />
           ) : (
-            <div className="detail">
-              <div className="empty-hint" style={{ paddingTop: 120 }}>
-                选择左侧条目查看详情，或点击“＋ 新建”创建
+            <div className="detail detail-center">
+              <div className="empty-state">
+                <div className="empty-state-icon">
+                  <Icon name="shield" size={30} />
+                </div>
+                <div className="empty-state-title">还没有选中条目</div>
+                <div className="empty-state-sub">
+                  从左侧列表选择一条查看详情，或点击“＋ 新建”创建
+                </div>
               </div>
             </div>
           )}

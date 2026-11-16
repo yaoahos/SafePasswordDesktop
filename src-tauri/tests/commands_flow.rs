@@ -96,12 +96,13 @@ fn ui_full_flow_roundtrip() {
 
     // 6. 改主密码：旧密码被拒 → 改成功 → 旧密码失效、新密码可开
     assert!(
-        c::change_master_password(app.state::<AppState>(), "wrong".into(), "new".into()).is_err()
+        c::change_master_password(app.state::<AppState>(), "wrong".into(), "newpass123".into())
+            .is_err()
     );
     c::change_master_password(
         app.state::<AppState>(),
         "pw-主密码123🚀".into(),
-        "新主密码123".into(),
+        "新主密码1234".into(),
     )
     .unwrap();
     let id = meta.id.clone();
@@ -110,12 +111,12 @@ fn ui_full_flow_roundtrip() {
         c::open_vault(app.state::<AppState>(), id.clone(), "pw-主密码123🚀".into()).is_err(),
         "旧主密码应失效"
     );
-    let v = c::open_vault(app.state::<AppState>(), id.clone(), "新主密码123".into()).unwrap();
+    let v = c::open_vault(app.state::<AppState>(), id.clone(), "新主密码1234".into()).unwrap();
     assert_eq!(v.items.len(), 1);
 
     // 7. 模拟重启：全新 AppState 打开
     let app2 = mock_app(&root);
-    let v2 = c::open_vault(app2.state::<AppState>(), id.clone(), "新主密码123".into()).unwrap();
+    let v2 = c::open_vault(app2.state::<AppState>(), id.clone(), "新主密码1234".into()).unwrap();
     assert_eq!(v2.items[0].title, "GitHub");
     assert!(v2.items[0].attachments.is_empty());
 

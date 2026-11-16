@@ -132,7 +132,7 @@ export function GeneratorDialog({
               <input
                 type="range"
                 min={3}
-                max={10}
+                max={8}
                 value={wordCount}
                 onChange={(e) => setWordCount(Number(e.target.value))}
               />

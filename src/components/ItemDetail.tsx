@@ -7,7 +7,7 @@ import { Icon } from "./icons";
 import { LabelGlyph } from "./LabelGlyph";
 import { GeneratorDialog } from "../dialogs/GeneratorDialog";
 import { PasswordHistoryDialog } from "../dialogs/PasswordHistoryDialog";
-import { deleteFieldHistory, pickAnyFile, saveExport } from "../api";
+import { pickAnyFile, saveExport } from "../api";
 import { normalizeIconFile } from "../iconCodec";
 import { QrScanDialog } from "./QrScanDialog";
 import {
@@ -117,6 +117,7 @@ function ItemDetailInner({
   onDelete,
   onRestore,
   onPurge,
+  onDeleteFieldHistory,
   notify,
   isNew,
   onSaveAndCreate,
@@ -131,6 +132,8 @@ function ItemDetailInner({
   onRestore: () => Promise<void>;
   /** 彻底删除（后端 purge） */
   onPurge: () => Promise<void>;
+  /** 删除某字段的一条历史记录（走 App 串行队列并回写顶层 vault） */
+  onDeleteFieldHistory: (itemId: string, fieldId: string, index: number) => Promise<void>;
   notify: (msg: string, kind?: "info" | "success" | "error" | "warning") => void;
   /** 当前条目是否"刚从模板新建未保存"（对齐手机端 existing==null） */
   isNew: boolean;
@@ -155,6 +158,9 @@ function ItemDetailInner({
   /** 删除二次确认（v1 项 6：删除要确认提示） */
   const [confirmDel, setConfirmDel] = useState(false);
 
+  // 仅在切换条目（id 变）或新建态变化时重置草稿。不能依赖整个 item：
+  // 顶层 vault 回写（如删除历史、同步刷新）会产生同 id 的新引用，若依赖 item
+  // 就会重置草稿、关闭历史弹窗、丢掉未保存编辑。
   useEffect(() => {
     setDraft(item);
     setShown({});
@@ -166,7 +172,15 @@ function ItemDetailInner({
     setGenFieldId(null);
     setHistFieldId(null);
     setQrFieldId(null);
-  }, [item, isNew]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只按条目身份重置，见上
+  }, [item.id, isNew]);
+
+  // 同一条目内容被外部更新（同步拉取、删除历史回写等）：无未保存编辑时同步草稿，
+  // 有编辑时保留用户输入不覆盖。dirty/editing 在此为最新渲染值，故不入依赖。
+  useEffect(() => {
+    if (!dirty && !editing) setDraft(item);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅随 item 变化触发
+  }, [item]);
 
   const patch = (p: Partial<VaultItem>) => {
     setDraft((d) => ({ ...d, ...p }));
@@ -343,7 +357,9 @@ function ItemDetailInner({
           onClose={() => setHistFieldId(null)}
           onDelete={async (index) => {
             try {
-              await deleteFieldHistory(draft.id, field.id, index);
+              // 走 App 串行队列并回写顶层 vault，避免切走再切回历史"复活"、且能触发自动同步
+              await onDeleteFieldHistory(draft.id, field.id, index);
+              // 本地草稿同步删除，保持弹窗打开时立即反映（顶层 vault 已更新，此处仅同步视图）
               setDraft((d) => ({
                 ...d,
                 fields: d.fields.map((x) =>

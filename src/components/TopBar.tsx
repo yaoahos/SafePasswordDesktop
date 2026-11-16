@@ -11,15 +11,18 @@ export type TopAction =
   | "SYNC"
   | "LOCK";
 
+/** 图标色调（语义 token，随主题/暗色/强调色联动，定义见 styles.css 的 --tone-*） */
+type Tone = "primary" | "danger" | "violet" | "muted" | "cyan" | "crimson";
+
 /** 顶部动作：线性图标、放大加深；WebDAV 与导入入口已移除（改由设置页承载） */
-export const TOP_ACTIONS: { key: TopAction; label: string; icon: IconName; color: string }[] = [
-  { key: "GENERATOR", label: "密码生成器", icon: "dice", color: "#1677FF" },
-  { key: "SECURITY", label: "安全中心", icon: "shield", color: "#DC2626" },
-  { key: "THEME", label: "主题", icon: "palette", color: "#9333EA" },
-  { key: "SETTINGS", label: "设置", icon: "sliders", color: "#374151" },
-  { key: "ABOUT", label: "关于", icon: "info", color: "#0891B2" },
-  { key: "SYNC", label: "同步", icon: "refresh", color: "#1677FF" },
-  { key: "LOCK", label: "锁定", icon: "lock", color: "#C2185B" },
+export const TOP_ACTIONS: { key: TopAction; label: string; icon: IconName; tone: Tone }[] = [
+  { key: "GENERATOR", label: "密码生成器", icon: "dice", tone: "primary" },
+  { key: "SECURITY", label: "安全中心", icon: "shield", tone: "danger" },
+  { key: "THEME", label: "主题", icon: "palette", tone: "violet" },
+  { key: "SETTINGS", label: "设置", icon: "sliders", tone: "muted" },
+  { key: "ABOUT", label: "关于", icon: "info", tone: "cyan" },
+  { key: "SYNC", label: "同步", icon: "refresh", tone: "primary" },
+  { key: "LOCK", label: "锁定", icon: "lock", tone: "crimson" },
 ];
 
 /** 应用标题栏（标准桌面软件样式）：左侧图标 + 应用名 + 版本，右侧窗口按钮 */
@@ -45,7 +48,7 @@ export function TopBar({ onAction }: { onAction: (a: TopAction) => void }) {
       <div className="toolbar">
         {TOP_ACTIONS.map((a) => (
           <button key={a.key} className="topbar-btn" onClick={() => onAction(a.key)} title={a.label}>
-            <span className="topbar-icon" style={{ color: a.color }}>
+            <span className={`topbar-icon tone-${a.tone}`}>
               <Icon name={a.icon} size={19} />
             </span>
             <span>{a.label}</span>

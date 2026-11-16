@@ -108,8 +108,16 @@ function ItemListInner({
 
       <div className="item-scroll" ref={scrollRef}>
         {visible.length === 0 && (
-          <div className="empty-hint">
-            {items.length === 0 ? "这里还没有条目，点击右上角“新建”添加" : "没有匹配的条目"}
+          <div className="empty-state">
+            <div className="empty-state-icon">
+              <Icon name={items.length === 0 ? "folder" : "search"} size={30} />
+            </div>
+            <div className="empty-state-title">
+              {items.length === 0 ? "这里还没有条目" : "没有匹配的条目"}
+            </div>
+            <div className="empty-state-sub">
+              {items.length === 0 ? "点击右上角“＋ 新建”添加你的第一条密码" : "换个关键词或清除筛选后再试试"}
+            </div>
           </div>
         )}
         {visible.map((item) => {
@@ -125,6 +133,8 @@ function ItemListInner({
               className={`item-card${selectedId === item.id ? " selected" : ""}`}
               onClick={() => onSelect(item.id)}
               onKeyDown={(e) => {
+                // 焦点在内层按钮（收藏）时不接管：避免 Enter 同时触发收藏与选中
+                if (e.target !== e.currentTarget) return;
                 if (e.key === "Enter" || e.key === " ") onSelect(item.id);
               }}
             >

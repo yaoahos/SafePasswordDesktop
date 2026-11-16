@@ -21,7 +21,7 @@ use crate::sp::container::VaultContainer;
 use crate::sp::dpapi;
 use crate::sp::fsutil::write_atomic;
 use crate::sp::generator::{self, GeneratorOptions};
-use crate::sp::hibp::HibpClient;
+use crate::sp::hibp;
 use crate::sp::model::{
     default_label_color, new_id, now_ms, FieldHistoryEntry, FieldType, Label, LabelSpec, Vault,
     VaultItem, VaultMeta,
@@ -234,8 +234,9 @@ impl AppStateInner {
     fn persist_settings(&self) -> CmdResult<()> {
         // 敏感字段以 DPAPI 密文落盘，内存中保持明文
         let mut s = self.settings.clone();
-        s.hibp_api_key = dpapi::encode_secret(&s.hibp_api_key);
-        s.webdav.password = dpapi::encode_secret(&s.webdav.password);
+        // 加密失败时直接返回错误阻止落盘，避免敏感字段以明文写进 settings.json。
+        s.hibp_api_key = dpapi::encode_secret(&s.hibp_api_key)?;
+        s.webdav.password = dpapi::encode_secret(&s.webdav.password)?;
         let text = serde_json::to_string_pretty(&s).map_err(err)?;
         write_atomic(&self.settings_path, text.as_bytes()).map_err(err)
     }
@@ -256,6 +257,25 @@ impl AppStateInner {
             }
         }
         self.data_root.join("backups")
+    }
+
+    /// 校验备份文件路径必须落在允许的备份目录内，且扩展名为 .spv。
+    /// 用 canonicalize 解析 .. / 符号链接后再比对，防止 backup_delete / backup_restore
+    /// 被传入任意路径造成任意文件删除或读取。
+    fn checked_backup_path(&self, path: &str) -> CmdResult<PathBuf> {
+        let canonical = fs::canonicalize(path).map_err(err)?;
+        if canonical.extension().and_then(|e| e.to_str()) != Some("spv") {
+            return Err("只能操作 .spv 备份文件".to_string());
+        }
+        let allowed = [self.backups_dir(), self.data_root.join("backups")];
+        if !allowed.iter().any(|dir| {
+            fs::canonicalize(dir)
+                .map(|root| canonical.starts_with(root))
+                .unwrap_or(false)
+        }) {
+            return Err("备份文件路径不在允许目录内".to_string());
+        }
+        Ok(canonical)
     }
 
     /// 改动后统一落盘（自动保存语义）。
@@ -708,23 +728,26 @@ pub async fn security_report_full(state: State<'_, AppState>) -> CmdResult<Secur
             .clone()
     };
     let index = security::password_index(&vault);
-    let hibp = HibpClient::new();
-    let mut counts: HashMap<String, i64> = HashMap::new();
+    // 复用全局 Client 连接池；用信号量把并发限制在 4，避免一次性对 HIBP 打太多请求被限流。
+    let client = hibp::shared();
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(4));
+    let mut tasks = tokio::task::JoinSet::new();
     for (password, ids) in index {
-        if let Ok(n) = hibp.password_count(&password).await {
-            let n = n as i64;
-            for id in ids {
-                counts.insert(id, n);
-            }
+        let sem = std::sync::Arc::clone(&sem);
+        tasks.spawn(async move {
+            let _permit = sem.acquire().await.expect("信号量不会关闭");
+            let n = client.password_count(&password).await.ok();
+            (ids, n)
+        });
+    }
+    let mut counts: HashMap<String, i64> = HashMap::new();
+    while let Some(Ok((ids, Some(n)))) = tasks.join_next().await {
+        let n = n as i64;
+        for id in ids {
+            counts.insert(id, n);
         }
     }
     Ok(security::analyze(&vault, &counts))
-}
-
-#[tauri::command]
-pub async fn check_password_breach(password: String) -> CmdResult<i32> {
-    let hibp = HibpClient::new();
-    hibp.password_count(&password).await.map_err(err)
 }
 
 // ---------------------------------------------------------------- 导入 / 导出
@@ -1040,9 +1063,10 @@ pub fn backup_list(state: State<AppState>) -> CmdResult<Vec<BackupInfo>> {
 /// 用备份覆盖（同 id 库）或按新库导入（id 已不存在）。
 #[tauri::command]
 pub fn backup_restore(state: State<AppState>, path: String, password: String) -> CmdResult<Vault> {
+    let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+    let path = inner.checked_backup_path(&path)?;
     let bytes = fs::read(&path).map_err(err)?;
     let container = VaultContainer::open(&bytes, &password).map_err(err)?;
-    let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
     let existing = inner
         .store
         .list()
@@ -1083,7 +1107,8 @@ pub fn backup_restore(state: State<AppState>, path: String, password: String) ->
 
 #[tauri::command]
 pub fn backup_delete(state: State<AppState>, path: String) -> CmdResult<()> {
-    let _ = &state;
+    let inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+    let path = inner.checked_backup_path(&path)?;
     fs::remove_file(&path).map_err(err)
 }
 

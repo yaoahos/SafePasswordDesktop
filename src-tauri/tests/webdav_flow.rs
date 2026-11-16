@@ -486,6 +486,15 @@ async fn rename_does_not_hijack_another_vault_with_the_same_name() {
     assert_eq!(mine.len(), 1, "应当只多出一个库文件：{mine:?}");
     files.lock().unwrap().remove(&mine[0]);
 
+    // 本地删掉「甲库」（delete_vault 不动云端），使本地只剩「乙库」，
+    // 这样改名不会被本地重名校验拦下，才能走到云端同名冲突这一步
+    let jia = c::list_vaults(app.state::<AppState>())
+        .unwrap()
+        .into_iter()
+        .find(|m| m.name == "甲库")
+        .expect("本地应有甲库");
+    c::delete_vault(app.state::<AppState>(), jia.id).unwrap();
+
     // 把本地库二改名成「甲库」（与云端库一同名）再同步
     let id = c::current_vault(app.state::<AppState>())
         .unwrap()

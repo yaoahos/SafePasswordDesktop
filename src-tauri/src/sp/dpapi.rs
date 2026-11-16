@@ -130,18 +130,14 @@ pub fn unprotect(blob: &[u8]) -> Result<Vec<u8>, String> {
     Ok(unsafe { DataBlob::take(out) })
 }
 
-/// 设置写盘用：非空 → `dpapi:<base64>`；空串保持空；加密失败回落原文（绝不让保存设置失败）。
-pub fn encode_secret(plain: &str) -> String {
+/// 设置写盘用：非空 → `dpapi:<base64>`；空串保持空。
+/// 加密失败时返回 Err（由调用方阻止保存），绝不把敏感信息以明文写盘。
+pub fn encode_secret(plain: &str) -> Result<String, String> {
     if plain.is_empty() {
-        return String::new();
+        return Ok(String::new());
     }
-    match protect(plain.as_bytes()) {
-        Ok(blob) => format!("dpapi:{}", base64::engine::general_purpose::STANDARD.encode(blob)),
-        Err(e) => {
-            eprintln!("[dpapi] 加密失败，回落明文写盘：{e}");
-            plain.to_string()
-        }
-    }
+    let blob = protect(plain.as_bytes())?;
+    Ok(format!("dpapi:{}", base64::engine::general_purpose::STANDARD.encode(blob)))
 }
 
 /// 设置读入用：`dpapi:` 前缀 → 解码（失败/异机 → 空串，让用户重输）；无前缀 → 原文（兼容旧明文 settings.json 迁移）。
@@ -171,14 +167,14 @@ mod tests {
 
     #[test]
     fn encode_uses_prefix_and_decodes_back() {
-        let enc = encode_secret("pw123");
+        let enc = encode_secret("pw123").expect("DPAPI 加密应成功");
         assert!(enc.starts_with("dpapi:"), "应带前缀，得到 {enc}");
         assert_eq!(decode_secret(&enc), "pw123");
     }
 
     #[test]
     fn empty_stays_empty() {
-        assert_eq!(encode_secret(""), "");
+        assert_eq!(encode_secret("").expect("空串无需加密"), "");
         assert_eq!(decode_secret(""), "");
     }
 

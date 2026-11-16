@@ -1,6 +1,6 @@
-//! 对齐 Android HibpClient.kt：HIBP range k-匿名查询 + 邮箱泄露查询（v3 API Key）。
-#![allow(dead_code)]
+//! 对齐 Android HibpClient.kt：HIBP range k-匿名查询，密码本体不出本机。
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use sha1::{Digest, Sha1};
@@ -9,22 +9,19 @@ use sha1::{Digest, Sha1};
 pub enum HibpError {
     #[error("泄露库查询失败（HTTP {0}）")]
     RangeHttp(u16),
-    #[error("邮箱泄露检查需要填写 HIBP API Key")]
-    MissingApiKey,
-    #[error("无法解析 HIBP 响应")]
-    Parse,
-    #[error("HIBP API Key 无效")]
-    InvalidKey,
-    #[error("HIBP 请求过于频繁，请稍后再试")]
-    RateLimited,
-    #[error("邮箱查询失败（HTTP {0}）")]
-    EmailHttp(u16),
     #[error("网络错误：{0}")]
     Network(String),
 }
 
 pub struct HibpClient {
     client: reqwest::Client,
+}
+
+/// 全局共享实例：reqwest::Client 内部连接池可跨请求复用，避免每次查询重新握手。
+static SHARED: OnceLock<HibpClient> = OnceLock::new();
+
+pub fn shared() -> &'static HibpClient {
+    SHARED.get_or_init(HibpClient::new)
 }
 
 impl Default for HibpClient {
@@ -69,41 +66,6 @@ impl HibpClient {
             .map_err(|e| HibpError::Network(e.to_string()))?;
         Ok(parse_range_body(&text, suffix).unwrap_or(0))
     }
-
-    /// 邮箱泄露检查需要 HIBP API Key（官方付费接口）。
-    pub async fn email_breaches(&self, email: &str, api_key: &str) -> Result<Vec<String>, HibpError> {
-        if email.trim().is_empty() {
-            return Ok(Vec::new());
-        }
-        if api_key.trim().is_empty() {
-            return Err(HibpError::MissingApiKey);
-        }
-        let encoded = form_encode(email);
-        let url = format!(
-            "https://haveibeenpwned.com/api/v3/breachedaccount/{encoded}?truncateResponse=true"
-        );
-        let response = self
-            .client
-            .get(&url)
-            .header("hibp-api-key", api_key)
-            .header("user-agent", "SafePassword-Desktop")
-            .send()
-            .await
-            .map_err(|e| HibpError::Network(e.to_string()))?;
-        match response.status().as_u16() {
-            200 => {
-                let text = response
-                    .text()
-                    .await
-                    .map_err(|e| HibpError::Network(e.to_string()))?;
-                parse_breach_names(&text).ok_or(HibpError::Parse)
-            }
-            404 => Ok(Vec::new()),
-            401 => Err(HibpError::InvalidKey),
-            429 => Err(HibpError::RateLimited),
-            other => Err(HibpError::EmailHttp(other)),
-        }
-    }
 }
 
 fn sha1_hex_upper(bytes: &[u8]) -> String {
@@ -136,34 +98,6 @@ fn parse_range_body(text: &str, suffix: &str) -> Option<i32> {
     None
 }
 
-fn parse_breach_names(text: &str) -> Option<Vec<String>> {
-    let parsed: serde_json::Value = serde_json::from_str(text).ok()?;
-    let arr = parsed.as_array()?;
-    let mut names = Vec::new();
-    for element in arr {
-        if let Some(name) = element.get("Name").and_then(|v| v.as_str()) {
-            names.push(name.to_string());
-        }
-    }
-    Some(names)
-}
-
-/// 对齐 java.net.URLEncoder.encode(email, "UTF-8") 的表单编码：
-/// 保留 [A-Za-z0-9.*_-]，空格 → '+'，其余取 UTF-8 字节 %XX（大写 hex）。
-fn form_encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'*' | b'-' | b'.' | b'_' => {
-                out.push(byte as char)
-            }
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,35 +120,10 @@ mod tests {
         assert_eq!(parse_range_body("AAAAA:1:extra", "AAAAA"), None);
     }
 
-    #[test]
-    fn breach_names_parse() {
-        let text = r#"[{"Name":"Adobe"},{"Name":"LinkedIn"},{"Name":"Adobe"}]"#;
-        assert_eq!(
-            parse_breach_names(text),
-            Some(vec!["Adobe".to_string(), "LinkedIn".to_string(), "Adobe".to_string()])
-        );
-        assert_eq!(parse_breach_names("not-json"), None);
-        assert_eq!(parse_breach_names(r#"{"Name":"x"}"#), None); // 非数组
-    }
-
-    #[test]
-    fn form_encode_java_compatible() {
-        assert_eq!(form_encode("user@example.com"), "user%40example.com");
-        assert_eq!(form_encode("a b"), "a+b");
-        assert_eq!(form_encode("café"), "caf%C3%A9");
-        // Java URLEncoder 保留 . * _ -，其余都编码
-        assert_eq!(form_encode("a.b*c_d-e"), "a.b*c_d-e");
-        assert_eq!(form_encode("~"), "%7E");
-    }
-
     #[tokio::test]
-    async fn blank_inputs_short_circuit() {
+    async fn blank_input_short_circuits() {
         let client = HibpClient::new();
         assert_eq!(client.password_count("  ").await.unwrap(), 0);
-        assert_eq!(client.email_breaches("", "key").await.unwrap(), Vec::<String>::new());
-        // 空 key（非空邮箱）→ MissingApiKey，不发网络请求
-        let err = client.email_breaches("a@b.c", "").await.unwrap_err();
-        assert!(matches!(err, HibpError::MissingApiKey));
     }
 
     /// 实网测试：验证真实 range API 可达（Add-Padding 大写 SHA-1 前缀语义）。

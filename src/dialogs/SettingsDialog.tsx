@@ -707,7 +707,7 @@ function VaultTab({ ctx, onClose }: { ctx: AppCtx; onClose: () => void }) {
     try {
       const b64 = await webdavGetVault(cfg, c.key);
       if (!b64) throw new Error("云端没有找到该密码库文件");
-      const meta = await importVaultBytes(b64, dlPw, c.name);
+      const meta = await importVaultBytes(b64, dlPw, c.name, true);
       await ctx.refreshFromBackend();
       setDlKey(null);
       setDlPw("");

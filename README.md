@@ -4,11 +4,11 @@ SafePassword 桌面版是一个离线优先的密码管理器。界面与数据�
 
 - 项目名：`SafePassword Desktop`
 - 应用标识：`com.yaoahos.safepassword.desktop`
-- 正式版本：`1.1.2`
+- 正式版本：`1.1.3`
 - 支持平台：Windows 10 / 11（x64，需要 WebView2 运行时）
-- 安装包：`SafePassword_1.1.2_x64-setup.exe`（NSIS）/ `SafePassword_1.1.2_x64_zh-CN.msi`
-- 安装包大小：2,454,006 字节（NSIS）/ 3,444,736 字节（MSI）
-- SHA-256：`7F4D95DA7A219C17A52924F1AD1E9B0D0ED7973A348941CADECC85DAEA3F2582`（NSIS）/ `25892ED4D947414DC570D8AE4E5CEE588085D1157409C1388C233D2A20D0F04A`（MSI）
+- 安装包：`SafePassword_1.1.3_x64-setup.exe`（NSIS）/ `SafePassword_1.1.3_x64_zh-CN.msi`
+- 安装包大小：2,458,969 字节（NSIS）/ 3,444,736 字节（MSI）
+- SHA-256：`9716E5E89745834BEDF291B5BA041BC361F61BA850880D221DD10726FAE1BFB6`（NSIS）/ `95A52272DFE53761D0205073FF2EB48E2D7F129D7D4364FAC27CE2703CED51F9`（MSI）
 - 发布下载：[Releases](https://github.com/yaoahos/SafePasswordDesktop/releases)
 
 > 本项目为独立实现，未使用任何第三方应用的源代码；界面与交互仅作设计参考。密码库格式与 Android 版互通。
@@ -167,8 +167,8 @@ npx tauri build
 产物：
 
 ```text
-src-tauri/target/release/bundle/nsis/SafePassword_1.1.2_x64-setup.exe
-src-tauri/target/release/bundle/msi/SafePassword_1.1.2_x64_zh-CN.msi
+src-tauri/target/release/bundle/nsis/SafePassword_1.1.3_x64-setup.exe
+src-tauri/target/release/bundle/msi/SafePassword_1.1.3_x64_zh-CN.msi
 ```
 
 首次打包会自动下载 NSIS 与 WiX 打包工具链，需要能访问外网；网络受限时请自行配置代理或镜像后再重试。
@@ -179,7 +179,7 @@ src-tauri/target/release/bundle/msi/SafePassword_1.1.2_x64_zh-CN.msi
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-- 当前 109 个测试通过（100 个单元测试 + 3 个命令层 E2E + 5 个 WebDAV 双设备与冲突 E2E + 1 个 mock 冒烟），另有 1 个实网 HIBP 测试默认跳过（`cargo test -- --ignored`）。
+- 当前 107 个测试通过（98 个单元测试 + 3 个命令层 E2E + 5 个 WebDAV 双设备与冲突 E2E + 1 个 mock 冒烟），另有 1 个实网 HIBP 测试默认跳过（`cargo test -- --ignored`）。
 - 跨端字节兼容：`interop/` 下用手机端 Kotlin core 生成夹具，验证 Rust 能解、手机端能解 Rust 写出的 `.spv`，明文 JSON 逐字节一致。
 
 ---
@@ -285,6 +285,22 @@ SafePasswordDesktop/
 
 ## 十、版本记录
 
+**2026/11/17 · 1.1.3**
+- 修复：删除密码历史后切走再切回，已删除的记录重新出现，且不会同步到其它设备
+- 修复：从设置页下载云端密码库后立刻整包回传，可能覆盖其它设备上的改动
+- 修复：同步与本地编辑或锁定同时发生时，内容被覆盖、已锁定的界面重新显示内容，解锁后还会误报「已上传本地更新」
+- 修复：搜索文件类条目时命中文件名不含关键词的条目
+- 修复：删除正在筛选的标签后，列表仍停留在这个标签上
+- 修复：更换主题色后界面配色不跟随，深色主题下设置图标难以辨认
+- 修复：系统加密不可用时，WebDAV 密码与泄露查询密钥会以明文保存，改为提示保存失败
+- 修复：口令短语可选词数超过实际生成数量、收藏星标按回车会同时打开条目、重名提示被立即清除
+- 新增：搜索框增加清除按钮
+- 优化：密码生成器、主题、标签管理、识别二维码界面改为分区卡片布局
+- 优化：识别二维码支持直接识别本地图片整图，模块改为按需加载
+- 优化：锁定界面增加淡主题色光晕，列表与详情页空状态改为图标加说明并居中
+- 优化：同步超时由 30 秒放宽到 150 秒
+- 优化：安全中心的泄露查询改为并发执行
+
 **2026/11/15 · 1.1.2**
 - 修复：清理过期删除记录被当成内容变化，同步时整库重传
 - 修复：启动检查更新被解锁后的同步打断，配了自动同步就永远不提示新版本
@@ -319,10 +335,5 @@ SafePasswordDesktop/
 - 修复：设置中指定的「默认展示」标签在解锁后未生效，进入首页仍显示全部条目
 - 优化：条目默认图标配色由 8 种增加到 17 种，并让取色分布更均匀，减少多个条目颜色相近的情况
 - 修复：密码输入框统一提供显示 / 隐藏按钮，修改主密码、WebDAV、恢复与导入等位置不再有看不到内容的输入框
-
-**2026/11/05 · 1.0.2**
-- 优化：完善检查更新失败的提示，触发频率限制时给出可重试的时间
-- 修复：更新检查不再显示 HTTP 状态码与接口返回内容，下载失败仅提示处理方式
-- 优化：调整解锁页的间距、圆角与输入框高度，改善版面留白
 
 更早的版本与完整日志见 [Releases](https://github.com/yaoahos/SafePasswordDesktop/releases)。

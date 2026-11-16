@@ -526,12 +526,15 @@ impl SyncEngine {
                     updated.vault.name = remote_clean.name.clone();
                 }
                 updated.vault.last_synced_at = updated.vault.updated_at.max(now_ms());
+                // 接下来几处判断用的是同一份内容指纹（upload 与 refresh_rev 只改簿记
+                // 字段，content_hash 已抹掉这些），只算一次复用，避免整库反复 clone+序列化。
+                let updated_hash = content_hash(&updated.vault);
                 // 合并结果与云端完全一致（通常只有对端改过）：不必回传整包。
-                if content_hash(&updated.vault) == content_hash(&remote_clean) {
+                if updated_hash == content_hash(&remote_clean) {
                     // 本地内容没变 → 没东西可下载；变了 → 说明这次从云端拿到了更新。
                     // 用内容哈希判断而不是时间戳：两端时钟不可比，且上传方可能把
                     // updated_at 原样带过来，靠时间戳会把"刚下载"误判成"已是最新"。
-                    let downloaded = content_hash(&updated.vault) != local_hash;
+                    let downloaded = updated_hash != local_hash;
                     self.cache.rev = head.as_ref().map(RemoteRev::from_stat);
                     if self.cache.rev.is_none() {
                         // 这次是完整流程（此前没有指纹），顺手补一次 HEAD，
@@ -544,7 +547,7 @@ impl SyncEngine {
                             .flatten()
                             .map(|stat| RemoteRev::from_stat(&stat));
                     }
-                    self.cache.content_hash = content_hash(&updated.vault);
+                    self.cache.content_hash = updated_hash;
                     return Ok(SyncResult {
                         container: updated,
                         direction: if downloaded {
@@ -570,7 +573,7 @@ impl SyncEngine {
                 }
                 // 合并结果与本机一致 → 云端没带来新内容，这次只是本机改动，记为 Uploaded；
                 // 否则说明真的合并了两边的改动。
-                let only_local = content_hash(&updated.vault) == local_hash;
+                let only_local = updated_hash == local_hash;
                 let message = if merged.conflicts > 0 {
                     format!("已合并，产生 {} 个冲突副本", merged.conflicts)
                 } else if !only_local {
