@@ -1,6 +1,6 @@
 /**
  * 动态验证码「识别二维码」对话框（对齐手机端扫码录入，桌面端按平台换成两种取图方式）：
- *   ① 选择本地图片文件（二维码截图）
+ *   ① 选择本地图片文件：直接识别整图，成功后回填
  *   ② 截图识别：先最小化本窗口（不算切后台、不触发自动锁定），截取整个屏幕后
  *      全屏显示屏幕内容，由用户拖框选出二维码区域
  * 解码结果必须能解析为 TOTP 密钥（otpauth:// 或裸 Base32），否则提示换一张图。
@@ -101,24 +101,39 @@ export function QrScanDialog({
     [],
   );
 
+  /** 本地图片直接识别整图，不进入选区界面 */
   const pickLocal = async () => {
     setErr(null);
+    setBusy(true);
     try {
+      if (fullscreenRef.current) {
+        await withLockSuspend(async () => {
+          fullscreenRef.current = false;
+          await getCurrentWindow()
+            .setFullscreen(false)
+            .catch(() => undefined);
+        });
+      }
+      setImgUrl(null);
+      setRect(null);
       const f = await pickAnyFile(true);
       if (!f) return;
       const mime = f.name.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
-      setImgUrl(`data:${mime};base64,${f.base64}`);
-      setRect(null);
-      await withLockSuspend(async () => {
-        try {
-          await getCurrentWindow().setFullscreen(true);
-          fullscreenRef.current = true;
-        } catch {
-          /* 全屏失败时仍可窗口内大图选取 */
-        }
-      });
+      const dataUrl = `data:${mime};base64,${f.base64}`;
+      const text = await decodeQr(dataUrl, null, 0);
+      if (!text) {
+        setErr("图片中没有识别到二维码，请换一张图");
+        return;
+      }
+      if (!parseTotp(text)) {
+        setErr("这不是动态验证码密钥，换一个二维码试试");
+        return;
+      }
+      onDecoded(text);
     } catch (e) {
       setErr(String(e));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -271,13 +286,13 @@ export function QrScanDialog({
   }
 
   return (
-    <Dialog title="识别二维码" onClose={onClose} width={560}>
+    <Dialog title="识别二维码" onClose={onClose} width={640} className="dialog-roomy qr-scan-dialog">
       <div className="muted small" style={{ lineHeight: 1.7 }}>
-        「截图识别」会先最小化本窗口，再截取整个屏幕，随后全屏显示屏幕内容，由你拖框选出二维码区域；该过程不会触发自动锁定。也可以直接选择本地的二维码图片。
+        「选择图片文件」直接识别整图，成功后自动回填；「截图识别」会先最小化本窗口，再截取整个屏幕，随后全屏显示屏幕内容，由你拖框选出二维码区域。
       </div>
-      <div className="row" style={{ gap: 8, marginTop: 12 }}>
+      <div className="row qr-menu-actions" style={{ gap: 8 }}>
         <button className="btn" disabled={busy} onClick={() => void pickLocal()}>
-          选择图片文件…
+          {busy ? "识别中…" : "选择图片文件…"}
         </button>
         <button className="btn primary" disabled={busy} onClick={() => void shotScreen()}>
           {busy ? "处理中…" : "截图识别"}

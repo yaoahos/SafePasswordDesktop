@@ -53,7 +53,7 @@ export function ThemeDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void
   };
 
   return (
-    <Dialog title="主题" onClose={onClose} width={460}>
+    <Dialog title="主题" onClose={onClose} width={560} className="dialog-roomy theme-dialog">
       <div className="section-cap">模式</div>
       <div className="seg">
         {THEMES.map((t) => (

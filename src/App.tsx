@@ -368,9 +368,9 @@ export default function App() {
     setSyncState(null);
   }, []);
 
-  /** 同步结果落地：云端已删除 → 弹窗让用户选择；手动同步时才强制弹窗 */
+  /** 同步结果落地：云端已删除 → 弹窗让用户选择；静默拉取不显示上传类成功提示 */
   const applySync = useCallback(
-    async (r: SyncSummary, vaultId: string | null, manual = false) => {
+    async (r: SyncSummary, vaultId: string | null, manual = false, silent = false) => {
       if (r.direction === "NAME_CONFLICT") {
         // 云端已有同名库，这次没有写任何东西：让用户改名后再同步
         const id = vaultId ?? vault?.id ?? null;
@@ -394,8 +394,8 @@ export default function App() {
         return;
       }
       await refreshFromBackend();
-      // 定时/自动同步已是最新时不要打扰用户；手动同步才提示
-      if (r.direction === "NONE" && !manual) {
+      // 定时/自动同步已是最新时不要打扰用户；静默拉取即使补传也不显示成功提示
+      if (!manual && (silent || r.direction === "NONE")) {
         clearSync();
         return;
       }
@@ -433,16 +433,15 @@ export default function App() {
         );
         setQuery("");
         void listVaults().then(setVaults).catch(() => undefined);
-        // 解锁后做一次完整同步（合并双端，避免云端与本地不一致）
+        // 解锁后先做 HEAD 判定：云端没变化就不触发同步，避免新打开就补传一次
         void (async () => {
           const cfg = settings.webdav;
           if (!cfg.enabled || !/^https?:\/\//i.test(cfg.baseUrl)) return;
           try {
-            flashSync("working", "正在同步…");
-            const r = await withSyncTimeout(webdavSync(cfg, "MERGE"));
-            await applySync(r, v.id);
+            const r = await withSyncTimeout(webdavPullIfChanged(cfg));
+            if (r) await applySync(r, v.id, false, true);
           } catch (e) {
-            flashSync("err", syncErrorText("", e));
+            console.warn("解锁后自动拉取失败", e);
           }
         })();
         return null;
@@ -609,7 +608,7 @@ export default function App() {
       if (stopped || document.hidden) return; // 窗口不可见时不发请求：省请求数，也省电量
       try {
         const r = await withSyncTimeout(webdavPullIfChanged(cfg));
-        if (r) await applySync(r, vault.id); // 有更新才刷新（对齐手机端 silent pull）
+        if (r) await applySync(r, vault.id, false, true); // 有更新才刷新，后台补传不提示
       } catch (e) {
         // 对齐手机端 runCatching：拉取失败不打扰用户
         console.warn("自动拉取失败", e);

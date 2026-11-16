@@ -50,6 +50,7 @@ function ItemListInner({
 
   // 对齐手机端：切换分类/标签后列表回到顶部，不停在上次滚动位置
   const scrollRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
   }, [sectionTitle]);
@@ -86,11 +87,25 @@ function ItemListInner({
             <Icon name="search" size={16} />
           </span>
           <input
-            className="input with-ico"
+            ref={searchRef}
+            className={`input with-ico${query ? " with-clear" : ""}`}
             placeholder="搜索标题、账号、网址"
             value={query}
             onChange={(e) => onQuery(e.target.value)}
           />
+          {query && (
+            <button
+              className="icon-btn in-frame"
+              title="清除搜索"
+              aria-label="清除搜索"
+              onClick={() => {
+                onQuery("");
+                searchRef.current?.focus();
+              }}
+            >
+              <Icon name="close" size={14} />
+            </button>
+          )}
         </div>
         {syncText && <div className="list-sync">{syncText}</div>}
       </div>

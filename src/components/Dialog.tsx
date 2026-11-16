@@ -6,11 +6,13 @@ export function Dialog({
   onClose,
   children,
   width,
+  className,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   width?: number;
+  className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -33,7 +35,12 @@ export function Dialog({
 
   return (
     <div className="dialog-overlay">
-      <div className="dialog-panel" style={width ? { width } : undefined} tabIndex={-1} ref={ref}>
+      <div
+        className={`dialog-panel${className ? ` ${className}` : ""}`}
+        style={width ? { width } : undefined}
+        tabIndex={-1}
+        ref={ref}
+      >
         <div className="dialog-header">
           <div className="dialog-title">{title}</div>
           <button className="dialog-x" onClick={onClose} title="关闭" aria-label="关闭">

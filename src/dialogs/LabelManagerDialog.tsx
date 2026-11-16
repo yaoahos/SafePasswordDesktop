@@ -146,7 +146,7 @@ export function LabelManagerDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () 
   };
 
   return (
-    <Dialog title="标签管理" onClose={onClose} width={520}>
+    <Dialog title="标签管理" onClose={onClose} width={560} className="dialog-roomy label-manager-dialog">
       {view === "list" && (
         <>
           <button className="btn primary block" onClick={openNew}>

@@ -460,6 +460,10 @@ select.input option:hover {
   padding-left: 32px;
 }
 
+.input.with-clear {
+  padding-right: 34px;
+}
+
 textarea.input {
   height: auto;
   min-height: 84px;
@@ -963,6 +967,62 @@ select.input {
   width: 0;
   height: 0;
   display: none;
+}
+
+/* 内容较多的弹窗：放宽内边距与可用高度 */
+.dialog-roomy {
+  padding: 26px 28px;
+  max-height: 90vh;
+}
+.dialog-roomy .dialog-body {
+  margin-top: 14px;
+}
+
+.gen-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 18px;
+  row-gap: 2px;
+}
+.gen-options .check-row {
+  padding: 5px 0;
+}
+.gen-dialog .gen-result {
+  padding: 18px 20px;
+}
+.gen-dialog .gen-value {
+  font-size: 20px;
+}
+
+.theme-dialog .theme-grid {
+  gap: 12px;
+}
+.theme-dialog .theme-swatch {
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+
+.label-manager-dialog .label-list-row {
+  padding: 12px 14px;
+}
+.label-manager-dialog .palette-box {
+  padding: 14px;
+}
+.label-manager-dialog .palette-grid {
+  gap: 10px;
+}
+.label-manager-dialog .palette-dot {
+  width: 28px;
+  height: 28px;
+}
+.label-manager-dialog .form-row {
+  margin-bottom: 14px;
+}
+.label-manager-dialog .form-row .input {
+  height: 40px;
+}
+
+.qr-scan-dialog .qr-menu-actions {
+  margin-top: 16px;
 }
 
 /* ---- 启动检查更新的弹窗 ---- */

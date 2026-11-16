@@ -57,7 +57,7 @@ export function GeneratorDialog({
   };
 
   return (
-    <Dialog title="密码生成器" onClose={onClose}>
+    <Dialog title="密码生成器" onClose={onClose} width={600} className="dialog-roomy gen-dialog">
       <div className="seg" style={{ marginBottom: 12 }}>
         <button className={mode === "password" ? "active" : ""} onClick={() => setMode("password")}>
           随机密码
@@ -86,31 +86,33 @@ export function GeneratorDialog({
               />
             </div>
           </div>
-          <label className="check-row">
-            <input type="checkbox" checked={lower} onChange={(e) => setLower(e.target.checked)} /> 包含小写字母
-            a–z
-          </label>
-          <label className="check-row">
-            <input type="checkbox" checked={upper} onChange={(e) => setUpper(e.target.checked)} /> 包含大写字母
-            A–Z
-          </label>
-          <label className="check-row">
-            <input type="checkbox" checked={digits} onChange={(e) => setDigits(e.target.checked)} /> 包含数字 0–9
-          </label>
-          <label className="check-row">
-            <input type="checkbox" checked={symbols} onChange={(e) => setSymbols(e.target.checked)} /> 包含符号
-          </label>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={excludeAmbiguous}
-              onChange={(e) => setExcludeAmbiguous(e.target.checked)}
-            />
-            排除易混淆字符（l I 1 O 0）
-          </label>
-          <label className="check-row">
-            <input type="checkbox" checked={requireEach} onChange={(e) => setRequireEach(e.target.checked)} /> 强制每类至少一个
-          </label>
+          <div className="gen-options">
+            <label className="check-row">
+              <input type="checkbox" checked={lower} onChange={(e) => setLower(e.target.checked)} /> 包含小写字母
+              a–z
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={upper} onChange={(e) => setUpper(e.target.checked)} /> 包含大写字母
+              A–Z
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={digits} onChange={(e) => setDigits(e.target.checked)} /> 包含数字 0–9
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={symbols} onChange={(e) => setSymbols(e.target.checked)} /> 包含符号
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={excludeAmbiguous}
+                onChange={(e) => setExcludeAmbiguous(e.target.checked)}
+              />
+              排除易混淆字符（l I 1 O 0）
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={requireEach} onChange={(e) => setRequireEach(e.target.checked)} /> 强制每类至少一个
+            </label>
+          </div>
         </>
       ) : (
         <>
@@ -135,12 +137,14 @@ export function GeneratorDialog({
             <label className="field-caption">分隔符</label>
             <input className="input" value={separator} onChange={(e) => setSeparator(e.target.value)} />
           </div>
-          <label className="check-row">
-            <input type="checkbox" checked={capitalize} onChange={(e) => setCapitalize(e.target.checked)} /> 首字母大写
-          </label>
-          <label className="check-row">
-            <input type="checkbox" checked={includeNumber} onChange={(e) => setIncludeNumber(e.target.checked)} /> 追加数字
-          </label>
+          <div className="gen-options">
+            <label className="check-row">
+              <input type="checkbox" checked={capitalize} onChange={(e) => setCapitalize(e.target.checked)} /> 首字母大写
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={includeNumber} onChange={(e) => setIncludeNumber(e.target.checked)} /> 追加数字
+            </label>
+          </div>
         </>
       )}
 
