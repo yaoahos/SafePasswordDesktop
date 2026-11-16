@@ -416,33 +416,6 @@ impl VaultItem {
         }
     }
 
-    pub fn copy_as_duplicate(&self) -> VaultItem {
-        VaultItem {
-            id: new_id(),
-            title: {
-                let base = if self.title.trim().is_empty() {
-                    "未命名".to_string()
-                } else {
-                    self.title.clone()
-                };
-                format!("{base} 副本")
-            },
-            favorite: false,
-            status: ItemStatus::Active,
-            created_at: now_ms(),
-            updated_at: now_ms(),
-            deleted_at: None,
-            fields: self
-                .fields
-                .iter()
-                .map(|f| Field {
-                    id: new_id(),
-                    ..f.clone()
-                })
-                .collect(),
-            ..self.clone()
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -511,37 +484,8 @@ impl Vault {
         self.items.iter().find(|i| i.id == id)
     }
 
-    pub fn item_mut(&mut self, id: &str) -> Option<&mut VaultItem> {
-        self.items.iter_mut().find(|i| i.id == id)
-    }
-
     pub fn label(&self, id: &str) -> Option<&Label> {
         self.labels.iter().find(|l| l.id == id)
-    }
-
-    pub fn tombstone(&self, id: &str) -> Option<&Tombstone> {
-        self.tombstones.iter().find(|t| t.id == id)
-    }
-
-    pub fn active_items(&self) -> Vec<&VaultItem> {
-        self.items
-            .iter()
-            .filter(|i| i.status == ItemStatus::Active)
-            .collect()
-    }
-
-    pub fn archived_items(&self) -> Vec<&VaultItem> {
-        self.items
-            .iter()
-            .filter(|i| i.status == ItemStatus::Archived)
-            .collect()
-    }
-
-    pub fn trashed_items(&self) -> Vec<&VaultItem> {
-        self.items
-            .iter()
-            .filter(|i| i.status == ItemStatus::Trashed)
-            .collect()
     }
 
     /// 永久删除条目并留下墓碑，避免它在下一次同步时从云端复活。
@@ -605,11 +549,9 @@ pub struct TemplateIds;
 impl TemplateIds {
     pub const LOGIN: &'static str = "login";
     pub const BANK_CARD: &'static str = "bank_card";
-    pub const EMAIL: &'static str = "email";
     pub const WIFI: &'static str = "wifi";
     pub const IDENTITY: &'static str = "identity";
     pub const NOTE: &'static str = "note";
-    pub const CUSTOM: &'static str = "custom";
 }
 
 #[cfg(test)]

@@ -135,13 +135,27 @@ export function LabelManagerDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () 
 
   const remove = async () => {
     if (!editingId) return;
-    const ok = await persist(
-      vault.labels.filter((l) => l.id !== editingId),
-      "标签已删除",
-    );
-    if (ok) {
-      ctx.notify("注意：条目上仍保留该标签引用，请在条目中移除", "info");
+    const gone = editingId;
+    setBusy(true);
+    try {
+      // 同时清掉条目上的该标签引用，避免残留 id 造成幽灵筛选视图。
+      const items = vault.items.map((i) =>
+        i.labelIds.includes(gone) ? { ...i, labelIds: i.labelIds.filter((id) => id !== gone) } : i,
+      );
+      await updateVault({
+        ...vault,
+        labels: vault.labels.filter((l) => l.id !== gone),
+        items,
+        updatedAt: Date.now(),
+      });
+      await ctx.refreshFromBackend();
+      ctx.notify("标签已删除", "success");
+      setError(null);
       setView("list");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
     }
   };
 

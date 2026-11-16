@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef } from "react";
 import type { Label, SortMode, VaultItem } from "../types";
-import { iconBg, itemIcon, itemMatches, labelColorCss } from "../utils";
+import { iconBg, itemIcon, labelColorCss } from "../utils";
 import { Icon } from "./icons";
 
 type Props = {
@@ -9,7 +9,6 @@ type Props = {
   sectionTitle: string;
   query: string;
   onQuery: (q: string) => void;
-  searchPasswords: boolean;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onNew: () => void;
@@ -28,7 +27,6 @@ function ItemListInner({
   sectionTitle,
   query,
   onQuery,
-  searchPasswords,
   selectedId,
   onSelect,
   onNew,
@@ -43,10 +41,8 @@ function ItemListInner({
     () => new Map(allLabels.map((l) => [l.id, l] as const)),
     [allLabels],
   );
-  const visible = useMemo(
-    () => items.filter((i) => itemMatches(i, query, searchPasswords)),
-    [items, query, searchPasswords],
-  );
+  // items 已由 App 统一过滤+排序（含搜索匹配），这里直接用，避免二次 itemMatches。
+  const visible = items;
 
   // 对齐手机端：切换分类/标签后列表回到顶部，不停在上次滚动位置
   const scrollRef = useRef<HTMLDivElement>(null);

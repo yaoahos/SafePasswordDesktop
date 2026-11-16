@@ -42,7 +42,6 @@ fn main() {
             commands::security_report,
             commands::security_report_full,
             commands::check_password_breach,
-            commands::check_email_breaches,
             commands::export_csv,
             commands::export_xml,
             commands::export_vault_json,

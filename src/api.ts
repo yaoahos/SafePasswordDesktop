@@ -62,9 +62,6 @@ export const importVaultBytes = (
   fromCloud = false,
 ) => invoke<VaultMeta>("import_vault_bytes", { base64Data, password, name, fromCloud });
 
-export const importVaultJson = (json: string, password: string, name: string) =>
-  invoke<VaultMeta>("import_vault_json", { json, password, name });
-
 export const generatePassword = (options?: GeneratorOptions) =>
   invoke<string>("generate_password", { options });
 
@@ -82,9 +79,6 @@ export const evaluateStrength = (password: string) =>
 export const securityReport = () => invoke<SecurityReport>("security_report");
 
 export const securityReportFull = () => invoke<SecurityReport>("security_report_full");
-
-export const checkPasswordBreach = (password: string) =>
-  invoke<number>("check_password_breach", { password });
 
 export const exportCsv = () => invoke<string>("export_csv");
 
@@ -122,9 +116,6 @@ export const backupDelete = (path: string) => invoke<void>("backup_delete", { pa
 export const getSettings = () => invoke<AppSettings>("get_settings");
 
 export const setSettings = (settings: AppSettings) => invoke<void>("set_settings", { settings });
-
-export const webdavTestConnection = (config: WebDavConfig) =>
-  invoke<string>("webdav_test_connection", { config });
 
 export const webdavSync = (config: WebDavConfig, strategy?: SyncStrategy) =>
   invoke<SyncSummary>("webdav_sync", { config, strategy });

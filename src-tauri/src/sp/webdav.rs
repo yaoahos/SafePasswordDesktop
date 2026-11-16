@@ -184,10 +184,6 @@ impl WebDavClient {
         Ok(WebDavClient { config, client })
     }
 
-    pub fn config(&self) -> &WebDavConfig {
-        &self.config
-    }
-
     fn url(&self, path: &str) -> String {
         let mut url = self.config.normalized_base_url();
         let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();

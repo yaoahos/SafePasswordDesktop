@@ -62,7 +62,7 @@ export function PasswordHistoryDialog({
                   className="icon-btn"
                   title="复制"
                   onClick={() => {
-                    void copyText(entry.value).then(
+                    void copyText(entry.value, true).then(
                       () => notify("已复制历史密码", "success"),
                       () => notify("复制失败", "error"),
                     );

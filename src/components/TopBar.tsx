@@ -11,8 +11,6 @@ export type TopAction =
   | "SYNC"
   | "LOCK";
 
-export { APP_VERSION };
-
 /** 顶部动作：线性图标、放大加深；WebDAV 与导入入口已移除（改由设置页承载） */
 export const TOP_ACTIONS: { key: TopAction; label: string; icon: IconName; color: string }[] = [
   { key: "GENERATOR", label: "密码生成器", icon: "dice", color: "#1677FF" },

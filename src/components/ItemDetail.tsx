@@ -59,18 +59,14 @@ function fieldValueText(f: Field): string {
   return `${f.fileName || "文件"}${size ? ` · ${formatSize(size)}` : ""}`;
 }
 
-/** 每秒滴答一次，驱动 TOTP 动态码刷新。 */
-function useTotpTick(): number {
+/** TOTP 实时 6 位码 + 剩余秒数；密钥无效时给出提示。 */
+function TotpCode({ value }: { value: string }) {
+  // 滴答只在 TOTP 组件内部：没有 TOTP 字段的条目不会因秒级 tick 重渲染整个详情页。
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
-  return now;
-}
-
-/** TOTP 实时 6 位码 + 剩余秒数；密钥无效时给出提示。 */
-function TotpCode({ value, now }: { value: string; now: number }) {
   const params = useMemo(() => parseTotp(value), [value]);
   const counter = params ? Math.floor(now / 1000 / params.period) : 0;
   const [code, setCode] = useState<string | null>(null);
@@ -106,7 +102,7 @@ async function copyTotpCode(value: string): Promise<"ok" | "bad-key" | "fail"> {
     if (!params) return "bad-key";
     const code = await generateTotp(params, Math.floor(Date.now() / 1000 / params.period));
     if (!code) return "bad-key";
-    await copyText(code);
+    await copyText(code, true);
     return "ok";
   } catch {
     return "fail";
@@ -158,7 +154,6 @@ function ItemDetailInner({
   const [editing, setEditing] = useState(false);
   /** 删除二次确认（v1 项 6：删除要确认提示） */
   const [confirmDel, setConfirmDel] = useState(false);
-  const now = useTotpTick();
 
   useEffect(() => {
     setDraft(item);
@@ -439,7 +434,7 @@ function ItemDetailInner({
                       fieldValueText(f)
                     ) : f.type === "TOTP" ? (
                       // 对齐手机端：动态验证码常显实时 6 位码，不遮挡、不提供查看密钥
-                      <TotpCode value={f.value} now={now} />
+                      <TotpCode value={f.value} />
                     ) : f.value ? (
                       masked ? MASK : f.value
                     ) : (
@@ -499,7 +494,7 @@ function ItemDetailInner({
                             });
                             return;
                           }
-                          void copyText(f.value).then(
+                          void copyText(f.value, isMaskedField(f.type, f.sensitive)).then(
                             () => notify(`已复制“${f.label}”`, "success"),
                             () => notify("复制失败", "error"),
                           );
@@ -772,7 +767,7 @@ function ItemDetailInner({
                   className="icon-btn"
                   title="复制"
                   onClick={() => {
-                    void copyText(f.value).then(
+                    void copyText(f.value, isMaskedField(f.type, f.sensitive)).then(
                       () => notify(`已复制“${f.label}”`, "success"),
                       () => notify("复制失败", "error"),
                     );

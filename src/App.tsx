@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import "./styles.css";
 import {
   checkUpdate,
   closeVault,
@@ -66,8 +65,12 @@ const DEFAULT_SETTINGS: AppSettings = {
   checkUpdatesOnLaunch: true,
 };
 
-/** 同步请求上限：超时给出明确提示，避免界面一直停在"同步中…" */
-const SYNC_TIMEOUT_MS = 30_000;
+/**
+ * 前端兜底超时：必须明显大于后端单次 HTTP 超时（60s），否则前端先 reject、
+ * 底层 invoke 仍在跑并占用同步闸门，界面会误报超时且短时间内无法再次同步。
+ * 后端有界（单次请求 60s）保证不会真正无限挂起，这里只兜底极端卡死。
+ */
+const SYNC_TIMEOUT_MS = 150_000;
 
 function withSyncTimeout<T>(p: Promise<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -307,6 +310,20 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.defaultLabelId]);
 
+  // 标签被删除后，若当前筛选或默认展示指向已不存在的标签，自动回退，
+  // 避免出现「按已删 id 过滤、标题为空、侧栏又无法取消」的幽灵视图。
+  useEffect(() => {
+    if (!vault) return;
+    if (labelFilter && !vault.labels.some((l) => l.id === labelFilter)) {
+      setLabelFilter(null);
+    }
+    const d = settings.defaultLabelId;
+    if (d && !vault.labels.some((l) => l.id === d)) {
+      void applySettings({ ...settings, defaultLabelId: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vault, labelFilter, settings.defaultLabelId]);
+
   // ------------------------------------------------------------ 流程
 
   const refreshVaults = useCallback(async () => {
@@ -335,6 +352,25 @@ export default function App() {
   /** 锁定时的界面快照：解锁后回到原界面（对齐手机端 lockReturn） */
   const lockReturnRef = useRef<LockReturn | null>(null);
 
+  /**
+   * 写库操作串行队列：把所有 putItem 与 lockNow 的 closeVault 排进同一条链，
+   * 避免「保存进行中触发锁定」时 closeVault 与 putItem 并发——
+   * 否则二者返回顺序不定，会出现界面已锁定却被保存结果重新点亮、
+   * 或保存先落地后 closeVault 把后端清空导致后续操作全失败。
+   */
+  const vaultOpQueue = useRef<Promise<void>>(Promise.resolve());
+  /** 锁定代次：写操作返回时若代次已变，说明期间被锁定，丢弃结果不重新点亮界面 */
+  const lockEpochRef = useRef(0);
+  const enqueueVaultOp = useCallback(<T,>(op: () => Promise<T>): Promise<T> => {
+    const run = vaultOpQueue.current.then(op, op);
+    // 队列只串顺序、不吞错误：无论成功失败都让下一条继续跑
+    vaultOpQueue.current = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }, []);
+
   const lockNow = useCallback(() => {
     // 快照当前界面（页面/搜索词/标签筛选），解锁后原样恢复
     lockReturnRef.current = vault
@@ -345,8 +381,9 @@ export default function App() {
     setDialog(null);
     setPreselectVaultId(null);
     setDraftNew(null);
-    void closeVault().catch(() => undefined);
-  }, [vault, selectItemId, query, labelFilter, section]);
+    lockEpochRef.current += 1;
+    void enqueueVaultOp(() => closeVault()).catch(() => undefined);
+  }, [vault, selectItemId, query, labelFilter, section, enqueueVaultOp]);
 
   // ------------------------------------------------------------ 同步状态文本（对齐手机端 3 秒状态）
 
@@ -712,26 +749,32 @@ export default function App() {
 
   const saveItem = useCallback(
     async (next: VaultItem) => {
-      const v = await putItem(next);
+      const epoch = lockEpochRef.current;
+      const v = await enqueueVaultOp(() => putItem(next));
+      if (epoch !== lockEpochRef.current) return; // 期间被锁定，丢弃结果
       setVault(v);
       // 首次保存后草稿转为正式条目（对齐手机端保存后 existing!=null）
       setDraftNew((d) => (d && d.id === next.id ? null : d));
       setSelectItemId(next.id);
     },
-    [],
+    [enqueueVaultOp],
   );
 
   /** 列表行内收藏：点击即生效（对齐手机端，不走草稿保存） */
   const toggleFavorite = useCallback(
     async (item: VaultItem) => {
       try {
-        const v = await putItem({ ...item, favorite: !item.favorite, updatedAt: Date.now() });
+        const epoch = lockEpochRef.current;
+        const v = await enqueueVaultOp(() =>
+          putItem({ ...item, favorite: !item.favorite, updatedAt: Date.now() }),
+        );
+        if (epoch !== lockEpochRef.current) return;
         setVault(v);
       } catch (e) {
         notify(String(e), "error");
       }
     },
-    [notify],
+    [notify, enqueueVaultOp],
   );
 
   const duplicateSelected = useCallback(async () => {
@@ -739,39 +782,67 @@ export default function App() {
     const item = vault.items.find((i) => i.id === selectItemId);
     if (!item) return;
     const copy = duplicateItem(item);
-    const v = await putItem(copy);
-    setVault(v);
-    setSelectItemId(copy.id);
-    notify("已创建副本", "success");
-  }, [vault, selectItemId, notify]);
+    try {
+      const epoch = lockEpochRef.current;
+      const v = await enqueueVaultOp(() => putItem(copy));
+      if (epoch !== lockEpochRef.current) return;
+      setVault(v);
+      setSelectItemId(copy.id);
+      notify("已创建副本", "success");
+    } catch (e) {
+      notify(String(e), "error");
+    }
+  }, [vault, selectItemId, notify, enqueueVaultOp]);
 
   /** 非回收站条目 → 移回收站（后端 delete_item 是永久删除，软删需自己置状态） */
   const trashSelected = useCallback(async () => {
     if (!vault || !selectItemId) return;
     const item = vault.items.find((i) => i.id === selectItemId);
     if (!item) return;
-    const v = await putItem({ ...item, status: "TRASHED", deletedAt: Date.now(), updatedAt: Date.now() });
-    setVault(v);
-    setSelectItemId(null);
-    notify("已移入回收站", "success");
-  }, [vault, selectItemId, notify]);
+    try {
+      const epoch = lockEpochRef.current;
+      const v = await enqueueVaultOp(() =>
+        putItem({ ...item, status: "TRASHED", deletedAt: Date.now(), updatedAt: Date.now() }),
+      );
+      if (epoch !== lockEpochRef.current) return;
+      setVault(v);
+      setSelectItemId(null);
+      notify("已移入回收站", "success");
+    } catch (e) {
+      notify(String(e), "error");
+    }
+  }, [vault, selectItemId, notify, enqueueVaultOp]);
 
   const restoreSelected = useCallback(async () => {
     if (!vault || !selectItemId) return;
     const item = vault.items.find((i) => i.id === selectItemId);
     if (!item) return;
-    const v = await putItem({ ...item, status: "ACTIVE", deletedAt: null, updatedAt: Date.now() });
-    setVault(v);
-    notify("已恢复", "success");
-  }, [vault, selectItemId, notify]);
+    try {
+      const epoch = lockEpochRef.current;
+      const v = await enqueueVaultOp(() =>
+        putItem({ ...item, status: "ACTIVE", deletedAt: null, updatedAt: Date.now() }),
+      );
+      if (epoch !== lockEpochRef.current) return;
+      setVault(v);
+      notify("已恢复", "success");
+    } catch (e) {
+      notify(String(e), "error");
+    }
+  }, [vault, selectItemId, notify, enqueueVaultOp]);
 
   const purgeSelected = useCallback(async () => {
     if (!vault || !selectItemId) return;
-    const v = await deleteItem(selectItemId);
-    setVault(v);
-    setSelectItemId(null);
-    notify("已彻底删除", "success");
-  }, [vault, selectItemId, notify]);
+    try {
+      const epoch = lockEpochRef.current;
+      const v = await enqueueVaultOp(() => deleteItem(selectItemId));
+      if (epoch !== lockEpochRef.current) return;
+      setVault(v);
+      setSelectItemId(null);
+      notify("已彻底删除", "success");
+    } catch (e) {
+      notify(String(e), "error");
+    }
+  }, [vault, selectItemId, notify, enqueueVaultOp]);
 
   const createFromTemplate = useCallback(
     (templateId: string) => {
@@ -969,7 +1040,6 @@ export default function App() {
             sectionTitle={sectionTitle}
             query={query}
             onQuery={setQuery}
-            searchPasswords={settings.searchPasswords}
             sortMode={sortMode}
             sortAsc={sortAsc}
             onChangeSort={changeSort}

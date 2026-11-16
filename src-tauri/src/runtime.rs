@@ -13,9 +13,6 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, WindowEvent};
 
-/// 旧版本的数据目录名（`%APPDATA%\<identifier>`）。
-pub const LEGACY_DIR_NAME: &str = "com.yaoahos.safepassword.desktop";
-
 fn probe_writable(dir: &Path) -> bool {
     let probe = dir.join(".write-probe");
     match fs::write(&probe, b"ok") {

@@ -161,10 +161,6 @@ impl SyncEngine {
         SyncEngine { webdav, config, remote_key, cache }
     }
 
-    pub fn remote_key(&self) -> &str {
-        &self.remote_key
-    }
-
     /// 同步结束后的缓存快照，调用方负责落盘。
     pub fn cache_entry(&self) -> SyncCacheEntry {
         self.cache.clone()

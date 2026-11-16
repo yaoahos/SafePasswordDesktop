@@ -289,11 +289,6 @@ impl VaultContainer {
         ok
     }
 
-    /// 附件等内容密钥（base64 32 字节），contentKey 为空时先生成。
-    pub fn content_key(&mut self) -> Result<Vec<u8>, String> {
-        ensure_content_key(&mut self.vault);
-        crate::sp::crypto::from_base64(&self.vault.content_key)
-    }
 }
 
 impl Drop for VaultContainer {

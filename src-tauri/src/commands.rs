@@ -55,7 +55,9 @@ pub struct CurrentVault {
 }
 
 /// 把当前库从内存里摘下来，并顺手把主密码缓冲擦零（DEK 由 VaultContainer::drop 擦）。
+/// 递增世代：任何「用户主动」换库/锁定都属于一次世代切换，同步流程据此判断是否可写回。
 pub fn drop_current(inner: &mut AppStateInner) {
+    inner.current_epoch = inner.current_epoch.wrapping_add(1);
     if let Some(mut cur) = inner.current.take() {
         unsafe { crate::sp::crypto::wipe(cur.password.as_bytes_mut()) };
         cur.password.clear();
@@ -66,6 +68,10 @@ pub struct AppStateInner {
     pub data_root: PathBuf,
     pub store: VaultStore,
     pub current: Option<CurrentVault>,
+    /// 当前库世代：每次「用户主动」解锁/创建/导入/恢复/锁定/删除当前库时 +1。
+    /// 同步期间 current 会被 take 出来，用它判断结束时用户是否已经锁定或换库，
+    /// 避免把旧库写回内存造成「界面已锁定但后端仍解锁」或「界面是 B、数据是 A」串库。
+    pub current_epoch: u64,
     pub settings: AppSettings,
     pub settings_path: PathBuf,
     /// 自动拉取：上次远端 Last-Modified 缓存（对齐 Android lastRemoteMtime）
@@ -193,6 +199,7 @@ impl AppState {
                 data_root: data_root.clone(),
                 store,
                 current: None,
+                current_epoch: 0,
                 settings,
                 settings_path,
                 last_remote_mtime: 0,
@@ -206,6 +213,24 @@ impl AppState {
 }
 
 impl AppStateInner {
+    /// 用户主动解锁/创建/导入/恢复：递增世代后设置当前库。
+    fn set_current(&mut self, cur: CurrentVault) {
+        self.current_epoch = self.current_epoch.wrapping_add(1);
+        self.current = Some(cur);
+    }
+
+    /// 同步结束安全写回：仅当取出现后的世代未变、且期间无人解锁新库时，
+    /// 才把同步后的容器恢复为当前库；否则丢弃它（DEK 由 VaultContainer::drop 擦，
+    /// 主密码缓冲在此擦零），避免覆盖用户锁定/换库后的状态。
+    fn restore_after_sync(&mut self, epoch_at_start: u64, mut cur: CurrentVault) {
+        if self.current_epoch == epoch_at_start && self.current.is_none() {
+            self.current = Some(cur);
+        } else {
+            unsafe { crate::sp::crypto::wipe(cur.password.as_bytes_mut()) };
+            cur.password.clear();
+        }
+    }
+
     fn persist_settings(&self) -> CmdResult<()> {
         // 敏感字段以 DPAPI 密文落盘，内存中保持明文
         let mut s = self.settings.clone();
@@ -306,7 +331,7 @@ pub fn create_vault(state: State<AppState>, name: String, password: String) -> C
         }
     }
     let (container, meta) = inner.store.create(&name, &password).map_err(err)?;
-    inner.current = Some(CurrentVault {
+    inner.set_current(CurrentVault {
         container,
         meta: meta.clone(),
         password,
@@ -336,7 +361,7 @@ pub fn open_vault(state: State<AppState>, id: String, password: String) -> CmdRe
         meta.cloud_key = key;
         let _ = inner.store.update_meta(&meta);
     }
-    inner.current = Some(CurrentVault {
+    inner.set_current(CurrentVault {
         container,
         meta,
         password,
@@ -389,6 +414,16 @@ pub fn rename_vault(state: State<AppState>, id: String, name: String) -> CmdResu
         return Err("名称不能为空".to_string());
     }
     let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
+    // 与 create_vault 一致：本地不允许两个同名库（忽略大小写），排除自身。
+    let dup = inner
+        .store
+        .list()
+        .map_err(err)?
+        .into_iter()
+        .any(|m| m.id != id && m.name.eq_ignore_ascii_case(&trimmed));
+    if dup {
+        return Err(format!("已存在同名密码库“{trimmed}”"));
+    }
     let matches_current = inner.current.as_ref().is_some_and(|c| c.meta.id == id);
     if matches_current {
         let cur = inner.current.as_mut().unwrap();
@@ -531,8 +566,9 @@ pub fn change_master_password(
     old_password: String,
     new_password: String,
 ) -> CmdResult<()> {
-    if new_password.is_empty() {
-        return Err("新主密码不能为空".to_string());
+    // 与 create_vault 一致：纵深校验最小长度，避免绕过 UI 的调用把主密码改成弱密码。
+    if new_password.chars().count() < 8 {
+        return Err("新主密码至少 8 位".to_string());
     }
     let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
     let cur = inner.current.as_mut().ok_or(NO_OPEN_VAULT)?;
@@ -561,7 +597,7 @@ pub fn import_vault_bytes(
         .store
         .import_encrypted(&bytes, &password, &name, from_cloud.unwrap_or(false))
         .map_err(err)?;
-    inner.current = Some(CurrentVault {
+    inner.set_current(CurrentVault {
         container,
         meta: meta.clone(),
         password,
@@ -583,7 +619,7 @@ pub fn import_vault_json(
         .store
         .import_plain(vault, &password, &name)
         .map_err(err)?;
-    inner.current = Some(CurrentVault {
+    inner.set_current(CurrentVault {
         container,
         meta: meta.clone(),
         password,
@@ -689,16 +725,6 @@ pub async fn security_report_full(state: State<'_, AppState>) -> CmdResult<Secur
 pub async fn check_password_breach(password: String) -> CmdResult<i32> {
     let hibp = HibpClient::new();
     hibp.password_count(&password).await.map_err(err)
-}
-
-#[tauri::command]
-pub async fn check_email_breaches(state: State<'_, AppState>, email: String) -> CmdResult<Vec<String>> {
-    let key = {
-        let inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
-        inner.settings.hibp_api_key.clone()
-    };
-    let hibp = HibpClient::new();
-    hibp.email_breaches(&email, &key).await.map_err(err)
 }
 
 // ---------------------------------------------------------------- 导入 / 导出
@@ -1029,7 +1055,7 @@ pub fn backup_restore(state: State<AppState>, path: String, password: String) ->
             inner.store.save(&mut c, &meta).map_err(err)?;
             let vault = c.vault.clone();
             inner.mark_last_vault(&meta.id);
-            inner.current = Some(CurrentVault {
+            inner.set_current(CurrentVault {
                 container: c,
                 meta,
                 password,
@@ -1045,7 +1071,7 @@ pub fn backup_restore(state: State<AppState>, path: String, password: String) ->
             let vault = c.vault.clone();
             let _ = name;
             inner.mark_last_vault(&meta.id);
-            inner.current = Some(CurrentVault {
+            inner.set_current(CurrentVault {
                 container: c,
                 meta,
                 password,
@@ -1189,11 +1215,13 @@ async fn run_sync(
     // 而不是让第二个任务去 take 已被拿走的 current、撞出「请先解锁一个密码库」。
     let _gate = SyncGate::acquire(&state.sync_busy)?;
     // 引擎构建（需要引用 current），随后把 current 整体取出，await 期间不碰锁。
-    let (mut engine, cur) = {
+    // 同时记下世代：await 期间用户若锁定或换库会递增它，结束时据此决定是否写回。
+    let (mut engine, cur, epoch_at_start) = {
         let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
         let engine = build_engine(&inner, &config)?;
+        let epoch_at_start = inner.current_epoch;
         let cur = inner.current.take().ok_or(NO_OPEN_VAULT)?;
-        (engine, cur)
+        (engine, cur, epoch_at_start)
     };
     let password = cur.password.clone();
     let CurrentVault {
@@ -1215,11 +1243,14 @@ async fn run_sync(
             // 同名冲突：云端没有写入任何东西，本地也不要保存（容器里的 lastSyncedAt
             // 只是临时值），原样留着等用户改名后再同步。
             if result.direction == SyncDirection::NameConflict {
-                inner.current = Some(CurrentVault {
-                    container: result.container,
-                    meta,
-                    password,
-                });
+                inner.restore_after_sync(
+                    epoch_at_start,
+                    CurrentVault {
+                        container: result.container,
+                        meta,
+                        password,
+                    },
+                );
                 return Ok(summary);
             }
             let mut restored = CurrentVault {
@@ -1243,19 +1274,21 @@ async fn run_sync(
                 restored.meta.cloud_key = key;
                 let _ = inner.store.update_meta(&restored.meta);
             }
-            inner.current = Some(restored);
+            inner.restore_after_sync(epoch_at_start, restored);
             Ok(summary)
         }
         Err(e) => {
-            // 容器已被引擎消费，但同步失败时本地文件没有改动——重新打开恢复解锁状态
+            // 容器已被引擎消费，但同步失败时本地文件没有改动——重新打开恢复解锁状态。
+            // 若期间用户已锁定或换库，restore_after_sync 会丢弃这份恢复。
             match inner.store.open(&meta, &password) {
-                Ok(c) => {
-                    inner.current = Some(CurrentVault {
+                Ok(c) => inner.restore_after_sync(
+                    epoch_at_start,
+                    CurrentVault {
                         container: c,
                         meta,
                         password,
-                    });
-                }
+                    },
+                ),
                 Err(_) => drop_current(&mut inner),
             }
             Err(e.to_string())
@@ -1288,11 +1321,12 @@ pub async fn webdav_restore_to_cloud(
 ) -> CmdResult<SyncSummary> {
     // 与 run_sync 共用同一把闸门：它也 take current，和普通同步撞在一起同样会互相踩。
     let _gate = SyncGate::acquire(&state.sync_busy)?;
-    let (mut engine, cur) = {
+    let (mut engine, cur, epoch_at_start) = {
         let mut inner = state.inner.lock().map_err(|_| LOCK_BROKEN)?;
         let engine = build_engine(&inner, &config)?;
+        let epoch_at_start = inner.current_epoch;
         let cur = inner.current.take().ok_or(NO_OPEN_VAULT)?;
-        (engine, cur)
+        (engine, cur, epoch_at_start)
     };
     let CurrentVault {
         container,
@@ -1324,18 +1358,19 @@ pub async fn webdav_restore_to_cloud(
                 restored.meta.cloud_key = key;
                 let _ = inner.store.update_meta(&restored.meta);
             }
-            inner.current = Some(restored);
+            inner.restore_after_sync(epoch_at_start, restored);
             Ok(summary)
         }
         Err(e) => {
             match inner.store.open(&meta, &password) {
-                Ok(c) => {
-                    inner.current = Some(CurrentVault {
+                Ok(c) => inner.restore_after_sync(
+                    epoch_at_start,
+                    CurrentVault {
                         container: c,
                         meta,
                         password,
-                    });
-                }
+                    },
+                ),
                 Err(_) => drop_current(&mut inner),
             }
             Err(e.to_string())

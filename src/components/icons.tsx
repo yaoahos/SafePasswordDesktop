@@ -1,6 +1,5 @@
 /** 统一线性图标（内联 SVG，随文字颜色走），替代 emoji 保证清晰与一致。 */
 export type IconName =
-  | "key"
   | "shield"
   | "palette"
   | "sliders"
@@ -27,21 +26,12 @@ export type IconName =
   | "cloud"
   | "file-import"
   | "file-export"
-  | "back"
   | "menu"
   | "tag"
-  | "wand"
   | "qr"
   | "history";
 
 const PATHS: Record<IconName, React.ReactNode> = {
-  key: (
-    <>
-      <circle cx="8" cy="16" r="3.2" />
-      <path d="M10.4 13.6 L19 5" />
-      <path d="M15.5 5 H19 V8.5" />
-    </>
-  ),
   shield: (
     <>
       <path d="M12 3.2 L19.5 6.2 V12 C19.5 16.4 16.3 19.8 12 20.8 C7.7 19.8 4.5 16.4 4.5 12 V6.2 Z" />
@@ -173,7 +163,6 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M12 17v-5M9.7 14.3l2.3-2.3 2.3 2.3" />
     </>
   ),
-  back: <path d="M15 5l-7 7 7 7" />,
   menu: (
     <>
       <path d="M8.5 6.6h11M8.5 12h11M8.5 17.4h11" />
@@ -186,15 +175,6 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <path d="M4 4.8h8.6l7 7a2 2 0 0 1 0 2.8l-4.9 4.9a2 2 0 0 1-2.8 0l-7-7V4.8Z" />
       <circle cx="8.6" cy="8.6" r="1.5" />
-    </>
-  ),
-  /** 生成密码：魔杖 + 星芒（比 key/dice 更直观） */
-  wand: (
-    <>
-      <path d="M4.5 19.5 L14.4 9.6" />
-      <path d="M13.2 8.4 L15.6 10.8" />
-      <path d="M18 3.2 l0.9 2.3 2.3 0.9 -2.3 0.9 -0.9 2.3 -0.9-2.3 -2.3-0.9 2.3-0.9Z" fill="currentColor" stroke="none" />
-      <path d="M20.6 12.4 v2.2 M19.5 13.5 h2.2" />
     </>
   ),
   /** 历史记录：时钟 */

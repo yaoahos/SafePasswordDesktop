@@ -48,11 +48,13 @@ function scheduleClear(text: string): void {
     if (token !== clearToken) return; // 期间又复制了新内容，交由新定时器处理
     clearTimer = null;
     void (async () => {
+      // 必须先确认剪贴板仍是本应用复制的内容才清空。读失败时无法确认归属，
+      // 放弃清空，避免误删用户在其他应用里刚复制的内容。
       try {
         const cur = await navigator.clipboard.readText();
         if (cur !== text) return; // 用户已在别处复制了别的内容，不动它
       } catch {
-        // WebView2 可能拒绝读剪贴板：本应用未再复制过则尽力清空
+        return;
       }
       try {
         await navigator.clipboard.writeText("");
@@ -63,7 +65,8 @@ function scheduleClear(text: string): void {
   }, 30_000);
 }
 
-export async function copyText(text: string): Promise<void> {
+/** 复制文本到剪贴板。sensitive=true 时 30 秒后尝试自动清空（仅敏感内容）。 */
+export async function copyText(text: string, sensitive = false): Promise<void> {
   if (!text) return;
   let ok = false;
   try {
@@ -83,20 +86,7 @@ export async function copyText(text: string): Promise<void> {
       ta.remove();
     }
   }
-  if (ok) scheduleClear(text);
-}
-
-/** 浏览器侧下载：无插件，用 Blob + <a download> */
-export function downloadText(filename: string, text: string, mime = "text/plain;charset=utf-8"): void {
-  const blob = new Blob([text], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 3000);
+  if (ok && sensitive) scheduleClear(text);
 }
 
 export function arrayBufferToBase64(buf: ArrayBuffer): string {
@@ -107,22 +97,6 @@ export function arrayBufferToBase64(buf: ArrayBuffer): string {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
   return btoa(binary);
-}
-
-/** 下载二进制文件：b64 为标准 Base64（后端 export/attachment_read 返回） */
-export function downloadBase64(filename: string, b64: string, mime = "application/octet-stream"): void {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  const blob = new Blob([bytes], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 // ---------------------------------------------------------------- 模板
@@ -200,10 +174,6 @@ export const TEMPLATES: TemplateDef[] = [
 
 export function templateById(id: string): TemplateDef {
   return TEMPLATES.find((t) => t.id === id) ?? TEMPLATES[0];
-}
-
-export function templateEmoji(id: string): string {
-  return templateById(id).emoji;
 }
 
 export function makeField(label: string, type: FieldType, sensitive = false): Field {
@@ -326,12 +296,6 @@ export function itemIcon(item: VaultItem): ItemIcon {
   const color = FALLBACK_COLORS[((h % len) + len) % len];
   const ch = (item.title.trim().charAt(0) || "?").toUpperCase();
   return { kind: "char", char: ch, color };
-}
-
-/** 取首字符图标的底色（非首字符图标时返回 undefined） */
-export function iconFallbackColor(item: VaultItem): string | undefined {
-  const ic = itemIcon(item);
-  return ic.kind === "char" ? ic.color : undefined;
 }
 
 /** 首字符图标的行内样式（底色 + 白字），对齐手机端 ItemIcon fallback */

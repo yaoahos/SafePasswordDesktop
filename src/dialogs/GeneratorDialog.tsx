@@ -178,7 +178,7 @@ export function GeneratorDialog({
               <button
                 className="btn sm"
                 onClick={() => {
-                  void copyText(result).then(
+                  void copyText(result, true).then(
                     () => notify("已复制生成结果", "success"),
                     () => notify("复制失败", "error"),
                   );
