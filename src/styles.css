@@ -19,6 +19,8 @@ body,
   --text-faint: #9aa0a6;
   --border: #cfd5dd;
   --border-soft: #e3e7ec;
+  --card-soft: #f8f9fb;
+  --card-border: #e6eaf0;
   --primary: #1677ff;
   --primary-soft: #e8f1ff;
   --hover: rgba(22, 119, 255, 0.06);
@@ -39,6 +41,8 @@ body,
   --text-faint: #7c8593;
   --border: #3a3f48;
   --border-soft: #2c3037;
+  --card-soft: #1f2329;
+  --card-border: #30353d;
   --primary: #4d9bff;
   --primary-soft: #14294a;
   --hover: rgba(77, 155, 255, 0.1);
@@ -987,10 +991,10 @@ select.input {
   flex-direction: column;
   gap: 14px;
 }
-/* 分区卡片：给内容建立纵向层次 */
+/* 分区卡片：极淡底色 + 细边框，只做轻微分层不抢内容 */
 .dlg-section {
-  background: var(--surface-2, rgba(22, 119, 255, 0.04));
-  border: 1px solid var(--border);
+  background: var(--card-soft);
+  border: 1px solid var(--card-border);
   border-radius: 12px;
   padding: 14px 16px;
 }
@@ -1002,7 +1006,7 @@ select.input {
 }
 .dlg-divider {
   height: 1px;
-  background: var(--border);
+  background: var(--card-border);
   margin: 16px 0;
 }
 .dlg-section.column {
@@ -2025,11 +2029,11 @@ select.input option:checked {
   height: 36px;
 }
 
-/* 生成结果卡片（v1 反馈：更精致的展示） */
+/* 生成结果卡片：与分区卡片同一套淡色，避免深浅不一 */
 .gen-result {
-  border: 1px solid var(--border);
+  border: 1px solid var(--card-border);
   border-radius: 12px;
-  background: var(--surface-2, rgba(22, 119, 255, 0.05));
+  background: var(--card-soft);
   padding: 14px 16px;
 }
 .gen-value {
