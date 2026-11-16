@@ -19,8 +19,8 @@ body,
   --text-faint: #9aa0a6;
   --border: #cfd5dd;
   --border-soft: #e3e7ec;
-  --card-soft: #f8f9fb;
-  --card-border: #e6eaf0;
+  --card-soft: rgba(22, 119, 255, 0.035);
+  --card-border: rgba(22, 119, 255, 0.11);
   --primary: #1677ff;
   --primary-soft: #e8f1ff;
   --hover: rgba(22, 119, 255, 0.06);
@@ -41,8 +41,8 @@ body,
   --text-faint: #7c8593;
   --border: #3a3f48;
   --border-soft: #2c3037;
-  --card-soft: #1f2329;
-  --card-border: #30353d;
+  --card-soft: rgba(77, 155, 255, 0.045);
+  --card-border: rgba(77, 155, 255, 0.13);
   --primary: #4d9bff;
   --primary-soft: #14294a;
   --hover: rgba(77, 155, 255, 0.1);
@@ -979,17 +979,17 @@ select.input {
   display: none;
 }
 
-/* 内容较多的弹窗：宽度适中、高度充足、按区块分层，避免宽扁观感 */
+/* 内容较多的弹窗：宽度适中、高度按需、按区块分层，避免宽扁或底部空一大片 */
 .dialog-roomy {
-  padding: 22px 24px 24px;
-  min-height: min(520px, 82vh);
+  padding: 20px 24px 16px;
+  min-height: min(440px, 78vh);
   max-height: 88vh;
 }
 .dialog-roomy .dialog-body {
-  margin-top: 14px;
+  margin-top: 12px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 /* 分区卡片：极淡底色 + 细边框，只做轻微分层不抢内容 */
 .dlg-section {
