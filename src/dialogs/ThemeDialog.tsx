@@ -53,51 +53,54 @@ export function ThemeDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void
   };
 
   return (
-    <Dialog title="主题" onClose={onClose} width={560} className="dialog-roomy theme-dialog">
-      <div className="section-cap">模式</div>
-      <div className="seg">
-        {THEMES.map((t) => (
-          <button
-            key={t.key}
-            className={ctx.settings.theme === t.key ? "active" : ""}
-            onClick={() => void ctx.applySettings({ ...ctx.settings, theme: t.key })}
-          >
-            {t.label}
-          </button>
-        ))}
+    <Dialog title="主题" onClose={onClose} width={540} className="dialog-roomy theme-dialog">
+      <div className="dlg-section">
+        <div className="dlg-section-title">外观模式</div>
+        <div className="seg">
+          {THEMES.map((t) => (
+            <button
+              key={t.key}
+              className={ctx.settings.theme === t.key ? "active" : ""}
+              onClick={() => void ctx.applySettings({ ...ctx.settings, theme: t.key })}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="section-cap" style={{ marginTop: 14 }}>
-        强调色
-      </div>
-      <div className="theme-grid">
-        {THEME_PRESETS.map((c) => (
-          <button
-            key={c}
-            className={`theme-swatch${accent === c ? " active" : ""}`}
-            style={{ background: c }}
-            title={c}
-            onClick={() => applyAccent(c)}
+      <div className="dlg-section">
+        <div className="dlg-section-title">预设强调色</div>
+        <div className="theme-grid">
+          {THEME_PRESETS.map((c) => (
+            <button
+              key={c}
+              className={`theme-swatch${accent === c ? " active" : ""}`}
+              style={{ background: c }}
+              title={c}
+              onClick={() => applyAccent(c)}
+            />
+          ))}
+        </div>
+        <div className="dlg-divider" />
+        <div className="dlg-section-title">自定义颜色</div>
+        <div className="row">
+          <input
+            className="input grow"
+            placeholder="输入色值，如 #2563EB"
+            value={hex}
+            onChange={(e) => setHex(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") applyHex();
+            }}
           />
-        ))}
+          <button className="btn" onClick={applyHex}>
+            应用
+          </button>
+        </div>
+        <div className="setting-sub">当前强调色：{accent}</div>
+        {error && <div className="err-text">{error}</div>}
       </div>
-
-      <div className="row" style={{ marginTop: 10 }}>
-        <input
-          className="input grow"
-          placeholder="自定义颜色 #2563EB"
-          value={hex}
-          onChange={(e) => setHex(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") applyHex();
-          }}
-        />
-        <button className="btn sm" onClick={applyHex}>
-          应用
-        </button>
-      </div>
-      <div className="setting-sub">当前：{accent}</div>
-      {error && <div className="err-text">{error}</div>}
     </Dialog>
   );
 }

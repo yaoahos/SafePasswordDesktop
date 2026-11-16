@@ -371,6 +371,9 @@ export function itemMatches(item: VaultItem, query: string, searchPasswords: boo
   if (item.notes.toLowerCase().includes(q)) return true;
   if (item.url.toLowerCase().includes(q)) return true;
   return item.fields.some((f) => {
+    // FILE 字段 value 是 base64，搜它既无意义又会让任意短关键词误命中；
+    // 对齐手机端 AppUiState.kt，只按可见的文件名匹配。
+    if (f.type === "FILE") return (f.fileName ?? "").toLowerCase().includes(q);
     if (!searchPasswords && isMaskedField(f.type, f.sensitive)) return false;
     return (
       f.value.toLowerCase().includes(q) || f.label.toLowerCase().includes(q)

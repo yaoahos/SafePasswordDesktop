@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Dialog } from "./Dialog";
+import { Icon } from "./icons";
 import { captureScreenPng, lockSuspend, pickAnyFile } from "../api";
 import { parseTotp } from "../totp";
 
@@ -286,23 +287,24 @@ export function QrScanDialog({
   }
 
   return (
-    <Dialog title="识别二维码" onClose={onClose} width={640} className="dialog-roomy qr-scan-dialog">
-      <div className="muted small" style={{ lineHeight: 1.7 }}>
-        「选择图片文件」直接识别整图，成功后自动回填；「截图识别」会先最小化本窗口，再截取整个屏幕，随后全屏显示屏幕内容，由你拖框选出二维码区域。
-      </div>
-      <div className="row qr-menu-actions" style={{ gap: 8 }}>
-        <button className="btn" disabled={busy} onClick={() => void pickLocal()}>
-          {busy ? "识别中…" : "选择图片文件…"}
-        </button>
-        <button className="btn primary" disabled={busy} onClick={() => void shotScreen()}>
-          {busy ? "处理中…" : "截图识别"}
-        </button>
-      </div>
-      {err && (
-        <div className="err-text" style={{ marginTop: 10 }}>
-          {err}
+    <Dialog title="识别二维码" onClose={onClose} width={540} className="dialog-roomy qr-scan-dialog">
+      <div className="dlg-section column grow">
+        <div className="dlg-section-title">识别方式</div>
+        <div className="muted" style={{ lineHeight: 1.8 }}>
+          选择「图片文件」将直接识别整张图片，成功后自动回填密钥；「截图识别」会先最小化本窗口并截取屏幕，再由你拖框选出二维码区域。
         </div>
-      )}
+        <div className="qr-menu-actions" style={{ marginTop: "auto" }}>
+          <button className="btn block" disabled={busy} onClick={() => void pickLocal()}>
+            <Icon name="file-import" size={16} />
+            {busy ? "识别中…" : "选择图片文件"}
+          </button>
+          <button className="btn primary block" disabled={busy} onClick={() => void shotScreen()}>
+            <Icon name="qr" size={16} />
+            {busy ? "处理中…" : "截图识别"}
+          </button>
+        </div>
+        {err && <div className="err-text" style={{ marginTop: 10 }}>{err}</div>}
+      </div>
     </Dialog>
   );
 }

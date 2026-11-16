@@ -57,18 +57,23 @@ export function GeneratorDialog({
   };
 
   return (
-    <Dialog title="密码生成器" onClose={onClose} width={600} className="dialog-roomy gen-dialog">
-      <div className="seg" style={{ marginBottom: 12 }}>
-        <button className={mode === "password" ? "active" : ""} onClick={() => setMode("password")}>
-          随机密码
-        </button>
-        <button className={mode === "passphrase" ? "active" : ""} onClick={() => setMode("passphrase")}>
-          口令短语
-        </button>
+    <Dialog title="密码生成器" onClose={onClose} width={560} className="dialog-roomy gen-dialog">
+      <div className="dlg-section">
+        <div className="dlg-section-title">生成方式</div>
+        <div className="seg">
+          <button className={mode === "password" ? "active" : ""} onClick={() => setMode("password")}>
+            随机密码
+          </button>
+          <button className={mode === "passphrase" ? "active" : ""} onClick={() => setMode("passphrase")}>
+            口令短语
+          </button>
+        </div>
       </div>
 
-      {mode === "password" ? (
-        <>
+      <div className="dlg-section">
+        <div className="dlg-section-title">{mode === "password" ? "密码参数" : "短语参数"}</div>
+        {mode === "password" ? (
+          <>
           <div className="form-row">
             <div className="row">
               <label className="field-caption grow" style={{ marginBottom: 0 }}>
@@ -113,9 +118,9 @@ export function GeneratorDialog({
               <input type="checkbox" checked={requireEach} onChange={(e) => setRequireEach(e.target.checked)} /> 强制每类至少一个
             </label>
           </div>
-        </>
-      ) : (
-        <>
+          </>
+        ) : (
+          <>
           <div className="form-row">
             <div className="row">
               <label className="field-caption grow" style={{ marginBottom: 0 }}>
@@ -145,10 +150,10 @@ export function GeneratorDialog({
               <input type="checkbox" checked={includeNumber} onChange={(e) => setIncludeNumber(e.target.checked)} /> 追加数字
             </label>
           </div>
-        </>
-      )}
+          </>
+        )}
+      </div>
 
-      <div className="spacer-10" />
       <button className="btn primary block tall" onClick={() => void generate()}>
         生成
       </button>

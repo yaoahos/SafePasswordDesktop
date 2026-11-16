@@ -392,9 +392,15 @@ button {
   left: 11px;
   top: 50%;
   transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  /* inline SVG 默认按基线对齐会让图标偏下，去掉行框影响 */
+  line-height: 0;
   color: var(--text-3);
-  font-size: 14px;
   pointer-events: none;
+}
+.input-wrap .ico svg {
+  display: block;
 }
 
 /* 输入框内右侧的眼睛按钮（对齐手机端框内查看主密码） */
@@ -969,29 +975,58 @@ select.input {
   display: none;
 }
 
-/* 内容较多的弹窗：放宽内边距与可用高度 */
+/* 内容较多的弹窗：宽度适中、高度充足、按区块分层，避免宽扁观感 */
 .dialog-roomy {
-  padding: 26px 28px;
-  max-height: 90vh;
+  padding: 22px 24px 24px;
+  min-height: min(520px, 82vh);
+  max-height: 88vh;
 }
 .dialog-roomy .dialog-body {
   margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+/* 分区卡片：给内容建立纵向层次 */
+.dlg-section {
+  background: var(--surface-2, rgba(22, 119, 255, 0.04));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.dlg-section-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 10px;
+}
+.dlg-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 16px 0;
+}
+.dlg-section.column {
+  display: flex;
+  flex-direction: column;
 }
 
 .gen-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 18px;
-  row-gap: 2px;
+  column-gap: 22px;
+  row-gap: 6px;
 }
 .gen-options .check-row {
-  padding: 5px 0;
+  padding: 7px 0;
 }
 .gen-dialog .gen-result {
   padding: 18px 20px;
 }
 .gen-dialog .gen-value {
   font-size: 20px;
+}
+.gen-dialog .seg {
+  align-self: flex-start;
 }
 
 .theme-dialog .theme-grid {
@@ -1022,7 +1057,12 @@ select.input {
 }
 
 .qr-scan-dialog .qr-menu-actions {
-  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.qr-scan-dialog .qr-menu-actions .btn {
+  min-height: 46px;
 }
 
 /* ---- 启动检查更新的弹窗 ---- */

@@ -146,13 +146,14 @@ export function LabelManagerDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () 
   };
 
   return (
-    <Dialog title="标签管理" onClose={onClose} width={560} className="dialog-roomy label-manager-dialog">
+    <Dialog title="标签管理" onClose={onClose} width={540} className="dialog-roomy label-manager-dialog">
       {view === "list" && (
-        <>
+        <div className="dlg-section grow">
           <button className="btn primary block" onClick={openNew}>
             ＋ 新建标签
           </button>
-          <div className="spacer-10" />
+          <div className="dlg-divider" />
+          <div className="dlg-section-title">全部标签</div>
           {sorted.length === 0 && <div className="muted small">还没有标签</div>}
           <div className="label-list">
             {sorted.map((l) => (
@@ -167,15 +168,15 @@ export function LabelManagerDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () 
               </button>
             ))}
           </div>
-          <div className="setting-sub" style={{ marginTop: 8 }}>
+          <div className="setting-sub" style={{ marginTop: 10 }}>
             点击标签行编辑名称、颜色与排序；数字越小越靠前。
           </div>
-        </>
+        </div>
       )}
 
       {view === "edit" && (
-        <>
-          <div className="section-cap">{editingId ? "编辑标签" : "新建标签"}</div>
+        <div className="dlg-section column grow">
+          <div className="dlg-section-title">{editingId ? "编辑标签" : "新建标签"}</div>
           <div className="form-row">
             <label className="field-caption">标签名称</label>
             <input
@@ -247,9 +248,9 @@ export function LabelManagerDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () 
 
           {error && <div className="err-text">{error}</div>}
 
-          <div className="row" style={{ marginTop: 14, justifyContent: "flex-end" }}>
+          <div className="row" style={{ marginTop: "auto", paddingTop: 16, justifyContent: "flex-end" }}>
             {editingId && (
-              <button className="btn sm danger" disabled={busy} onClick={() => void remove()} style={{ marginRight: "auto" }}>
+              <button className="btn danger" disabled={busy} onClick={() => void remove()} style={{ marginRight: "auto" }}>
                 删除标签
               </button>
             )}
@@ -260,7 +261,7 @@ export function LabelManagerDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () 
               {busy ? "保存中…" : "保存"}
             </button>
           </div>
-        </>
+        </div>
       )}
     </Dialog>
   );
