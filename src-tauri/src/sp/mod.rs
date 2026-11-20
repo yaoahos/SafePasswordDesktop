@@ -1,4 +1,4 @@
-﻿//! SafePassword core —— Kotlin core 的 Rust 移植（字节兼容目标）。
+﻿//! MySafePass core —— Kotlin core 的 Rust 移植（字节兼容目标）。
 #![allow(dead_code)]
 
 pub mod backup;

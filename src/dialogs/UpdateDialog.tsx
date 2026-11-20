@@ -29,7 +29,7 @@ export function UpdateDialog({
     if (!info.assetUrl) {
       // 没有可下载的安装包（比如只有源码包）：退回浏览器下载页
       try {
-        await openUrl(info.url || "https://github.com/yaoahos/SafePasswordDesktop/releases");
+        await openUrl(info.url || "https://github.com/yaoahos/MySafePassDesktop/releases");
       } catch {
         setError("链接打开失败，请稍后重试");
         return;

@@ -1,4 +1,4 @@
-# SafePassword core 库 Rust 移植规范（byte-level）
+# MySafePass core 库 Rust 移植规范（byte-level）
 
 > 本文档面向 Tauri (Rust) 桌面端实现者，逐字节描述 Android 端 `core/` 模块（纯 Kotlin/JVM）的
 > 加密格式、文件格式、JSON schema、WebDAV 协议行为与同步/合并算法，目标是 **字节兼容**：
@@ -7,7 +7,7 @@
 > 所有常量均直接摘自源码并标注 `文件名:行号`。凡源码行为存在歧义或历史不一致之处，
 > 集中列在第 15 节「已知歧义」，实现前请务必阅读。
 >
-> 源文件（均位于 Android 仓库的 `core/src/main/kotlin/com/yaoahos/safepassword/core/`，行号以 2026-11 时点版本为准）：
+> 源文件（均位于 Android 仓库的 `core/src/main/kotlin/com/yaoahos/mysafepass/core/`，行号以 2026-11 时点版本为准）：
 > `crypto/Crypto.kt`、`crypto/VaultContainer.kt`、`io/VaultCodec.kt`、`io/VaultXml.kt`、
 > `io/AtomicFiles.kt`、`json/AppJson.kt`、`model/Model.kt`、`model/TemplateCatalog.kt`、
 > `storage/VaultStore.kt`、`storage/BackupManager.kt`、`storage/AttachmentStore.kt`、
@@ -16,6 +16,11 @@
 > `security/HibpClient.kt`；测试：`VaultContainerTest.kt`、`ToolsTest.kt`、`WebDavClientTest.kt`。
 > 少量行为由 Android 调用方 `apps/android/.../AppViewModel.kt`、`apps/android/.../AppContainer.kt`
 > 决定，也一并注明。
+>
+> **改名兼容（2026-11-20）**：软件名与包名已从 SafePassword 改为 MySafePass，但**加密容器格式不变**
+> （magic `SPV`、AAD、内容密钥派生均不变）。云端文件名写入 `MySafePass-<key>.spv` 与
+> `MySafePass-index.json`，读取时必须回退改名前的 `SafePassword-<key>.spv`、
+> `SafePassword-index.json` 与单文件 `SafePassword.spv`，否则存量云端库会「消失」。
 
 ---
 
@@ -356,13 +361,13 @@ SyncEngine.kt:30-31 注释；Android 调用方随后 `container.saveTo(vaultFile
 | `baseUrl` | `""` | 以 `http://` 或 `https://` 开头才算已配置（`isConfigured`） |
 | `username` | `""` | |
 | `password` | `""` | |
-| `remoteDir` | `"SafePassword"` | 服务器上的集合目录名 |
+| `remoteDir` | `"MySafePass"` | 服务器上的集合目录名 |
 | `enabled` | `false` | |
 
 - `normalizedBaseUrl()`：trim 后去尾部 `/` 再补一个 `/`（如 `https://dav.example.com/`）（:36）。
-- `normalizedDir()`：trim 后去掉首尾 `/`，空则回落 `"SafePassword"`（:38）。
-- **`remotePath(vaultKey) = "<remoteDir>/SafePassword.spv"` —— 参数被忽略！**（:40）
-  即一个账号下所有库共用同一个远端文件名 `SafePassword.spv`。桌面端必须跟随此行为才能与
+- `normalizedDir()`：trim 后去掉首尾 `/`，空则回落 `"MySafePass"`（:38）。
+- **`remotePath(vaultKey) = "<remoteDir>/MySafePass.spv"` —— 参数被忽略！**（:40）
+  即一个账号下所有库共用同一个远端文件名 `MySafePass.spv`。桌面端必须跟随此行为才能与
   Android 互通（详见第 15 节歧义 A）。
 - `attachmentsDir(vaultKey) = "<remoteDir>/attachments/<vaultKey>"`（:42）。
 - `vaultKey(name)`（:48-53）：name trim → 小写 → 所有 `[^a-z0-9\u4e00-\u9fa5]+`（非 ASCII 字母数字、
@@ -377,7 +382,7 @@ SyncEngine.kt:30-31 注释；Android 调用方随后 `container.saveTo(vaultFile
   不区分主机（ktor 插件行为），Rust 端可选择加固，但不影响正常服务器互通。
 - 超时（:92-96）：request 60_000ms、connect 20_000ms、socket 60_000ms。
 - `expectSuccess = false`：状态码自行处理（:80）。
-- User-Agent（仅 GET，:123）：`SafePassword-Android/1.4`。桌面端可改 UA，但服务器白名单场景需注意。
+- User-Agent（仅 GET，:123）：`MySafePass-Android/1.4`。桌面端可改 UA，但服务器白名单场景需注意。
 - URL 构造（:234-238）：`URLBuilder(baseUrl)` + 逐段 `appendPathSegments(segment)`——每段按 UTF-8
   百分号编码（vaultKey 可能含中文）。空段被丢弃。
 
@@ -436,7 +441,7 @@ SyncEngine.kt:30-31 注释；Android 调用方随后 `container.saveTo(vaultFile
 
 `SyncEngine(webDav, config, attachmentStore, vaultId, vaultName)`；`remoteKey = config.vaultKey(
 vaultName.ifBlank { vaultId })`（SyncEngine.kt:48）。远端主文件路径恒为
-`<remoteDir>/SafePassword.spv`（见 7.1）。
+`<remoteDir>/MySafePass.spv`（见 7.1）。
 
 ### 8.2 `sync(local, password, conflictStrategy = MERGE)` 逐步流程（SyncEngine.kt:84-218）
 
@@ -656,7 +661,7 @@ wood wren zephyr
 - 空 email ⇒ `[]`；空 apiKey ⇒ `HibpException("邮箱泄露检查需要填写 HIBP API Key")`。
 - `GET https://haveibeenpwned.com/api/v3/breachedaccount/<URLEncoder.encode(email,"UTF-8")>?truncateResponse=true`
   （注意 `URLEncoder` 是 form 编码：空格 → `+`）。
-- 请求头：`hibp-api-key: <apiKey>`、`user-agent: SafePassword-Android`。
+- 请求头：`hibp-api-key: <apiKey>`、`user-agent: MySafePass-Android`。
 - 响应：200 → JSON 数组，收集每个对象的 `"Name"` 字段（解析失败抛
   `HibpException("无法解析 HIBP 响应")`）；404 → `[]`（无泄露）；401 → `"HIBP API Key 无效"`；
   429 → `"HIBP 请求过于频繁，请稍后再试"`；其他 → `"邮箱查询失败（HTTP n）"`。
@@ -825,10 +830,10 @@ base64、`login` 字段名的邮箱识别等都有测试断言，可直接作为
 
 ## 15. 已知歧义 / 需要确认的点
 
-- **A. 远端文件名固定为 `SafePassword.spv`**：`WebDavConfig.remotePath()` 完全忽略 `vaultKey`
+- **A. 远端文件名固定为 `MySafePass.spv`**：`WebDavConfig.remotePath()` 完全忽略 `vaultKey`
   参数（WebDavClient.kt:40），一个 WebDAV 账号下一个远端文件。`WebDavClientTest.kt:34` 里出现的
   带 `key` 的路径只是测试用例写法，不代表运行时行为。桌面端应
-  跟随**当前** Android 行为（`SafePassword.spv`）才能互通；如桌面端生成别的文件名，两端永远互相
+  跟随**当前** Android 行为（`MySafePass.spv`）才能互通；如桌面端生成别的文件名，两端永远互相
   看不见。`vaultKey` 仅剩附件目录在用（SyncEngine.kt:223）。
 - **B. PBKDF2 口令编码**：JCE `PBKDF2WithHmacSHA256` 按 UTF-8 编码口令（无 NUL 终止）是 JDK 实现
   事实，但 core 源码无法直接证明。**必须用 Android 真机生成的 `.spv` 做 T1 验证**；若口令含
@@ -877,7 +882,7 @@ base64、`login` 字段名的邮箱识别等都有测试断言，可直接作为
 - **T8 JSON 兼容**：Android 库含全部字段（含 null deletedAt、tombstones、attachments、中文 label、
   color 负值、iconData data-URI 前缀）→ Rust 解析；Rust 序列化后 Android 打开无损；再验证
   **忽略未知字段**（Rust 输出里塞一个 `"_future": 1`，Android 仍能打开）。
-- **T9 首次同步**：Rust 端 `sync()` 对空远端 ⇒ PUT `SafePassword.spv`；Android 端配置同一 WebDAV
+- **T9 首次同步**：Rust 端 `sync()` 对空远端 ⇒ PUT `MySafePass.spv`；Android 端配置同一 WebDAV
   目录后能下载并合并（direction=DOWNLOADED）。确认远端路径两边一致（歧义 A）。
 - **T10 双向同步矩阵**：仅本地变 / 仅远端变 / 都变（四种 ConflictStrategy）/ 都未变——用
   真实 WebDAV（坚果云或自建 Nextcloud）跑一遍，比对 `SyncResult` 的 direction/conflicts/message。

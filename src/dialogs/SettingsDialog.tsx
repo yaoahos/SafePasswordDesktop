@@ -318,7 +318,7 @@ function SyncTab({ ctx }: { ctx: AppCtx }) {
         <label className="field-caption">远程目录</label>
         <input
           className="input"
-          placeholder="/SafePassword"
+          placeholder="/MySafePass"
           value={cfg.remoteDir}
           onChange={(e) => patch({ remoteDir: e.target.value })}
         />

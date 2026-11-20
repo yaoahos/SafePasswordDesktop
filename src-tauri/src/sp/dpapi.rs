@@ -10,9 +10,11 @@ use std::ffi::c_void;
 /// CRYPTPROTECT_UI_FORBIDDEN：不允许弹 UI（服务/后台场景必带）。
 const CRYPTPROTECT_UI_FORBIDDEN: u32 = 0x1;
 /// 固定附加熵：即使密文被拿走，没有本应用的熵串也无法在同机解出（防直接复制字段）。
-const ENTROPY: &[u8] = b"com.yaoahos.safepassword.desktop.settings.v1";
+const ENTROPY: &[u8] = b"com.yaoahos.mysafepass.desktop.settings.v1";
+/// 改名前的熵：仅用于解密存量 `dpapi:` 密文，新写入一律用 ENTROPY。
+const LEGACY_ENTROPY: &[u8] = b"com.yaoahos.safepassword.desktop.settings.v1";
 /// 描述字符串（会进 DPAPI 元数据，仅诊断用）。
-const DESC: &str = "SafePasswordDesktop settings";
+const DESC: &str = "MySafePassDesktop settings";
 
 #[repr(C)]
 struct DataBlob {
@@ -75,10 +77,14 @@ fn last_error() -> String {
     format!("GetLastError={}", std::io::Error::last_os_error())
 }
 
-/// 用 DPAPI 加密任意字节。
+/// 用 DPAPI 加密任意字节（新写入固定用新熵）。
 pub fn protect(plaintext: &[u8]) -> Result<Vec<u8>, String> {
+    protect_with(plaintext, ENTROPY)
+}
+
+fn protect_with(plaintext: &[u8], entropy: &[u8]) -> Result<Vec<u8>, String> {
     let descr: Vec<u16> = DESC.encode_utf16().chain(std::iter::once(0)).collect();
-    let entropy = DataBlob::from_slice(ENTROPY);
+    let entropy = DataBlob::from_slice(entropy);
     let input = DataBlob::from_slice(plaintext);
     let mut out = DataBlob {
         cb_data: 0,
@@ -101,9 +107,13 @@ pub fn protect(plaintext: &[u8]) -> Result<Vec<u8>, String> {
     Ok(unsafe { DataBlob::take(out) })
 }
 
-/// 用 DPAPI 解密（同一 Windows 用户上下文内）。
+/// 用 DPAPI 解密（同一 Windows 用户上下文内）：先新熵，失败再回退改名前的旧熵。
 pub fn unprotect(blob: &[u8]) -> Result<Vec<u8>, String> {
-    let entropy = DataBlob::from_slice(ENTROPY);
+    unprotect_with(blob, ENTROPY).or_else(|_| unprotect_with(blob, LEGACY_ENTROPY))
+}
+
+fn unprotect_with(blob: &[u8], entropy: &[u8]) -> Result<Vec<u8>, String> {
+    let entropy = DataBlob::from_slice(entropy);
     let input = DataBlob::from_slice(blob);
     let mut out = DataBlob {
         cb_data: 0,
@@ -163,6 +173,14 @@ mod tests {
         let blob = protect(pw.as_bytes()).expect("protect");
         assert_ne!(blob.len(), 0);
         assert_eq!(unprotect(&blob).expect("unprotect"), pw.as_bytes());
+    }
+
+    #[test]
+    fn legacy_entropy_ciphertext_still_decodes() {
+        // 改名前的 settings.json 密文必须还能读出来（下次保存会自动改用新熵重写）。
+        let pw = b"legacy-pw";
+        let blob = protect_with(pw, LEGACY_ENTROPY).expect("protect with legacy entropy");
+        assert_eq!(unprotect(&blob).expect("legacy fallback"), pw);
     }
 
     #[test]

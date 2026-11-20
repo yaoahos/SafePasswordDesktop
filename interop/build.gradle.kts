@@ -21,8 +21,8 @@ java {
 sourceSets {
     main {
         kotlin {
-            // 只读引用 Android 仓库的 core 源码（SafePassword 仓库不做任何修改）
-            srcDir("../../SafePassword/core/src/main/kotlin")
+            // 只读引用 Android 仓库的 core 源码（MySafePass 仓库不做任何修改）
+            srcDir("../../Android/core/src/main/kotlin")
             srcDir("src/main/kotlin")
         }
     }

@@ -1,7 +1,7 @@
 //! 互操作反向验证：Rust 重新加密保险库，供 Android core 打开。
 //!
 //! 用法: cargo run --example rewrite_fixture -- <in.spv> <password-file> <out.spv>
-use safepassword::sp::container::VaultContainer;
+use mysafepass::sp::container::VaultContainer;
 use std::fs;
 use std::process::exit;
 

@@ -13,7 +13,7 @@ import java.io.File
 import kotlinx.serialization.encodeToString
 
 /**
- * 与 Rust 侧互操作的夹具工具（桌面仓库专用，SafePassword 仓库只读）。
+ * 与 Rust 侧互操作的夹具工具（桌面仓库专用，MySafePass 仓库只读）。
  *
  * gen <dir>                 生成 known1.sicv（中文+emoji 主密码）与已知明文 JSON
  * verify <file> <pw> <out>  用 Kotlin 容器打开 .sicv，把明文 vault JSON 写到 out

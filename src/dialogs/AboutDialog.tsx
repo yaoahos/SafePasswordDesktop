@@ -6,8 +6,8 @@ import type { UpdateInfo } from "../types";
 import type { AppCtx } from "../app-context";
 import { APP_VERSION } from "../version";
 
-const PROJECT_URL = "https://github.com/yaoahos/SafePasswordDesktop";
-const RELEASES_URL = "https://github.com/yaoahos/SafePasswordDesktop/releases";
+const PROJECT_URL = "https://github.com/yaoahos/MySafePassDesktop";
+const RELEASES_URL = "https://github.com/yaoahos/MySafePassDesktop/releases";
 
 const LINKS: { name: string; url: string }[] = [
   { name: "Tauri", url: "https://tauri.app" },
@@ -62,12 +62,12 @@ export function AboutDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void
   };
 
   return (
-    <Dialog title="关于 SafePassword" onClose={onClose} width={560}>
+    <Dialog title="关于 MySafePass" onClose={onClose} width={560}>
       <div className="about-head">
         <img className="about-logo" src="/icon.png" alt="" />
         <div>
           <button className="about-name" onClick={() => open(PROJECT_URL)} title={PROJECT_URL}>
-            SafePassword
+            MySafePass
           </button>
           <div className="muted small">版本 {APP_VERSION} · Windows 桌面版</div>
         </div>
@@ -141,7 +141,7 @@ export function AboutDialog({ ctx, onClose }: { ctx: AppCtx; onClose: () => void
       </div>
 
       <div className="about-foot muted small">
-        SafePassword 是独立实现，与任何第三方产品无关联。
+        MySafePass 是独立实现，与任何第三方产品无关联。
       </div>
     </Dialog>
   );

@@ -1,9 +1,9 @@
 //! 对齐 Android SyncEngine.kt（224 行，多密码库云端布局）。
 //!
-//! 每个密码库一个云端文件：`<remoteDir>/SafePassword-<key>.spv`，key 由库名算出
-//! （CloudManifest.keyFor）。读取时依次回退旧布局（SafePassword.spv / 1.4.1 按库名键），
+//! 每个密码库一个云端文件：`<remoteDir>/MySafePass-<key>.spv`，key 由库名算出
+//! （CloudManifest.keyFor）。读取时依次回退旧布局（MySafePass.spv / 1.4.1 按库名键），
 //! 但只有内容密钥一致（同一密码库）才认领，避免读到别的库。
-//! 上传顺带维护 `<remoteDir>/SafePassword-index.json`（失败不影响同步）。
+//! 上传顺带维护 `<remoteDir>/MySafePass-index.json`（失败不影响同步）。
 //! 四个分支：无远端→上传；仅远端新→下载；仅本地新→上传；双新→冲突策略。
 #![allow(dead_code)]
 
@@ -166,6 +166,34 @@ impl SyncEngine {
         self.cache.clone()
     }
 
+    /// 读云端清单：先新名 MySafePass-index.json，再回退改名前的 SafePassword-index.json。
+    async fn read_manifest_text(&self) -> Result<Option<Vec<u8>>, crate::sp::webdav::WebDavError> {
+        match self.webdav.get(&self.config.manifest_path()).await? {
+            Some(bytes) => Ok(Some(bytes)),
+            None => self.webdav.get(&self.config.legacy_manifest_path()).await,
+        }
+    }
+
+    /// 云端库文件读取：新名优先，兼容改名前的 SafePassword-<键>.spv。
+    async fn locate_cloud_vault(
+        &self,
+        key: &str,
+    ) -> Result<Option<(String, Vec<u8>)>, crate::sp::webdav::WebDavError> {
+        let new_path = self.config.remote_path(key);
+        if let Some(bytes) = self.webdav.get(&new_path).await? {
+            return Ok(Some((new_path, bytes)));
+        }
+        let old_path = self.config.legacy_prefixed_remote_path(key);
+        if let Some(bytes) = self.webdav.get(&old_path).await? {
+            return Ok(Some((old_path, bytes)));
+        }
+        Ok(None)
+    }
+
+    async fn get_cloud_vault(&self, key: &str) -> Result<Option<Vec<u8>>, crate::sp::webdav::WebDavError> {
+        Ok(self.locate_cloud_vault(key).await?.map(|(_, bytes)| bytes))
+    }
+
     /// 强制用云端覆盖本地，无视时间戳（WebDAV 界面的"拉取云端数据"）。
     pub async fn pull_remote(
         &mut self,
@@ -176,6 +204,12 @@ impl SyncEngine {
         let mut remote_bytes = self.webdav.get(&remote_path).await.map_err(dav_err)?;
         if remote_bytes.is_none() {
             remote_bytes = self
+                .get_cloud_vault(&self.remote_key)
+                .await
+                .map_err(dav_err)?;
+        }
+        if remote_bytes.is_none() {
+            remote_bytes = self
                 .webdav
                 .get(&self.config.legacy_remote_path())
                 .await
@@ -184,8 +218,7 @@ impl SyncEngine {
         if remote_bytes.is_none() {
             // 旧版本按库名写的文件（内容密钥方案之前上传的），也要能拉下来
             remote_bytes = self
-                .webdav
-                .get(&self.config.remote_path(&key_for(&local.vault.name)))
+                .get_cloud_vault(&key_for(&local.vault.name))
                 .await
                 .map_err(dav_err)?;
         }
@@ -194,11 +227,7 @@ impl SyncEngine {
             if let Some(legacy) =
                 crate::sp::cloud::legacy_key_for_content(&local.vault.content_key)
             {
-                remote_bytes = self
-                    .webdav
-                    .get(&self.config.remote_path(&legacy))
-                    .await
-                    .map_err(dav_err)?;
+                remote_bytes = self.get_cloud_vault(&legacy).await.map_err(dav_err)?;
             }
         }
         let remote_bytes = remote_bytes.ok_or_else(|| {
@@ -304,17 +333,20 @@ impl SyncEngine {
         if remote_bytes.is_none() {
             // 升级迁移：旧版文件只有内容密钥一致（同一密码库）才认领，
             // 否则视为云端还没有本库文件，直接上传本地，避免读到别的密码库的数据。
-            // 依次尝试：旧版单文件 SafePassword.spv → 1.4.1 的按库名键 → 现在的按库名键（v 前缀）
+            // 依次尝试：旧版单文件 SafePassword.spv → 1.4.1 的按库名键 → 按内容键的新/旧文件名
             // → 上一版用完整内容密钥生成的 65 位键（k + 64 hex，旧桌面构建上传过这种文件）。
             let mut candidates = vec![
                 self.config.legacy_remote_path(),
                 self.config.legacy_name_path(&local.vault.name),
+                self.config.legacy_prefixed_remote_path(&self.remote_key),
                 self.config.remote_path(&key_for(&local.vault.name)),
+                self.config.legacy_prefixed_remote_path(&key_for(&local.vault.name)),
             ];
             if let Some(legacy) =
                 crate::sp::cloud::legacy_key_for_content(&local.vault.content_key)
             {
                 candidates.push(self.config.remote_path(&legacy));
+                candidates.push(self.config.legacy_prefixed_remote_path(&legacy));
             }
             for candidate in candidates.iter().filter(|p| **p != remote_path) {
                 let Some(bytes) = self.webdav.get(candidate).await.map_err(dav_err)? else {
@@ -342,11 +374,7 @@ impl SyncEngine {
         // 不能认领（否则会把它当成本库的旧文件迁移删掉），只能提示改名。
         let mut name_taken: Option<String> = None;
         if remote_bytes.is_none() && local.vault.last_synced_at > 0 {
-            let manifest_text = self
-                .webdav
-                .get(&self.config.manifest_path())
-                .await
-                .map_err(dav_err)?;
+            let manifest_text = self.read_manifest_text().await.map_err(dav_err)?;
             let manifest = match manifest_text.as_ref() {
                 Some(bytes) => CloudManifest::parse(Some(String::from_utf8_lossy(bytes).as_ref())),
                 None => CloudManifest::parse(None),
@@ -359,8 +387,9 @@ impl SyncEngine {
                 .find(|e| e.name.trim().to_lowercase() == want)
             {
                 if entry.key != remote_key {
-                    let path = self.config.remote_path(&entry.key);
-                    if let Some(bytes) = self.webdav.get(&path).await.map_err(dav_err)? {
+                    if let Some((path, bytes)) =
+                        self.locate_cloud_vault(&entry.key).await.map_err(dav_err)?
+                    {
                         // 同名不代表同一个库：内容密钥一致才认领（改名/重新上传过的情况），
                         // 否则记下来，稍后按"同名冲突"提示改名，一个字节都不动云端。
                         let same_vault = VaultContainer::open(&bytes, password)
@@ -385,8 +414,7 @@ impl SyncEngine {
                     if entry.key == remote_key {
                         continue;
                     }
-                    let path = self.config.remote_path(&entry.key);
-                    let Ok(Some(bytes)) = self.webdav.get(&path).await else {
+                    let Ok(Some((path, bytes))) = self.locate_cloud_vault(&entry.key).await else {
                         continue;
                     };
                     let Ok(container) = VaultContainer::open(&bytes, password) else {
@@ -442,6 +470,9 @@ impl SyncEngine {
             });
         };
 
+        // 本库是否从改名前的 SafePassword-<键>.spv 认领而来。内容即使没变，
+        // 也要借这次同步把库体与清单重写到新文件名，否则旧文件名会一直留在云端。
+        let adopted_legacy_file = adopted_legacy.is_some();
         let remote = match adopted_legacy {
             Some(container) => container,
             None => VaultContainer::open(&remote_bytes, password).map_err(|_| {
@@ -451,6 +482,10 @@ impl SyncEngine {
 
         // 认领到的旧文件名（按库名派生的键）→ 上传成功后做迁移清理，避免云端同名两份
         let mut migrate_from: Option<String> = None;
+        if adopted_legacy_file {
+            // 用当前键作为清理目标：upload 成功后会删掉该键的旧前缀文件。
+            migrate_from = Some(self.remote_key.clone());
+        }
         if let Some((key, name, updated)) = adopted {
             let stable_key = self.remote_key.clone();
             if local.vault.updated_at > updated {
@@ -531,6 +566,25 @@ impl SyncEngine {
                 let updated_hash = content_hash(&updated.vault);
                 // 合并结果与云端完全一致（通常只有对端改过）：不必回传整包。
                 if updated_hash == content_hash(&remote_clean) {
+                    // 内容没变、但库体还挂在改名前的旧文件名上：借这次同步把它重写到
+                    // MySafePass-<键>.spv 并刷新清单，迁移完成后按 migrate_from 清旧文件。
+                    if let Some(old_key) = migrate_from.clone() {
+                        if let UploadOutcome::NameTaken(other) = self
+                            .upload(&remote_path, &mut updated, &remote_key)
+                            .await?
+                        {
+                            return Ok(name_conflict_result(updated, other));
+                        }
+                        self.cache.rev = head.as_ref().map(RemoteRev::from_stat);
+                        self.cache.content_hash = updated_hash;
+                        self.cleanup_migrated(&old_key).await;
+                        return Ok(SyncResult {
+                            container: updated,
+                            direction: SyncDirection::Merged,
+                            conflicts: merged.conflicts as i32,
+                            message: "已将云端密码库迁移到新文件名".to_string(),
+                        });
+                    }
                     // 本地内容没变 → 没东西可下载；变了 → 说明这次从云端拿到了更新。
                     // 用内容哈希判断而不是时间戳：两端时钟不可比，且上传方可能把
                     // updated_at 原样带过来，靠时间戳会把"刚下载"误判成"已是最新"。
@@ -600,23 +654,32 @@ impl SyncEngine {
                 result.direction,
                 SyncDirection::Uploaded | SyncDirection::Merged
             ) {
-                let old_path = self.config.remote_path(&old_key);
-                let _ = self.webdav.delete(&old_path).await;
-                if let Ok(Some(bytes)) = self.webdav.get(&self.config.manifest_path()).await {
-                    let text = String::from_utf8_lossy(&bytes).to_string();
-                    let mut manifest = CloudManifest::parse(Some(text.as_str()));
-                    let before = manifest.vaults.len();
-                    manifest.vaults.retain(|e| e.key != old_key);
-                    if manifest.vaults.len() != before {
-                        let _ = self
-                            .webdav
-                            .put(&self.config.manifest_path(), manifest.to_json().as_bytes())
-                            .await;
-                    }
-                }
+                self.cleanup_migrated(&old_key).await;
             }
         }
         Ok(result)
+    }
+
+    /// 删除旧键对应的云端库文件（新名与旧名两种前缀）并从清单移除其条目。
+    /// 失败被忽略：迁移本身已完成，残留旧文件只会在下次同步再清一次。
+    async fn cleanup_migrated(&self, old_key: &str) {
+        let _ = self.webdav.delete(&self.config.remote_path(old_key)).await;
+        let _ = self
+            .webdav
+            .delete(&self.config.legacy_prefixed_remote_path(old_key))
+            .await;
+        if let Ok(Some(bytes)) = self.read_manifest_text().await {
+            let text = String::from_utf8_lossy(&bytes).to_string();
+            let mut manifest = CloudManifest::parse(Some(text.as_str()));
+            let before = manifest.vaults.len();
+            manifest.vaults.retain(|e| e.key != old_key);
+            if manifest.vaults.len() != before {
+                let _ = self
+                    .webdav
+                    .put(&self.config.manifest_path(), manifest.to_json().as_bytes())
+                    .await;
+            }
+        }
     }
 
     /// 把本地库强制上传到云端（"云端已删除"弹窗里的"恢复到云端"）：
@@ -656,7 +719,7 @@ impl SyncEngine {
         // 先读清单：既用于同名检测，也决定"写完库文件后要不要重写清单"。
         // 注意区分「云端确实没有清单」(Ok(None)) 与「读失败」(Err)：后者绝不能
         // 当成空清单写回去，否则会把别的库的条目全清掉（新建一个库 → 云端只剩它）。
-        let manifest_text = match self.webdav.get(&self.config.manifest_path()).await {
+        let manifest_text = match self.read_manifest_text().await {
             Ok(Some(bytes)) => Some(String::from_utf8_lossy(&bytes).to_string()),
             Ok(None) => None,
             Err(_) => {
@@ -687,7 +750,7 @@ impl SyncEngine {
         // 期间别的设备很可能刚写过清单。直接写回旧快照会把别人新加的条目抹掉
         // （云端列表里少一个库，文件还在但用户看不到）。写入前再取一次最新清单，
         // 只把自己这条 upsert 进去。
-        let fresh = match self.webdav.get(&self.config.manifest_path()).await {
+        let fresh = match self.read_manifest_text().await {
             Ok(Some(bytes)) => Some(CloudManifest::parse(Some(
                 String::from_utf8_lossy(&bytes).as_ref(),
             ))),
@@ -713,7 +776,7 @@ impl SyncEngine {
 
     /// 补登记：把本库写进云端清单（不动库文件）。读不到清单就留着标记等下次。
     async fn repair_manifest(&mut self, container: &mut VaultContainer) {
-        let Ok(Some(bytes)) = self.webdav.get(&self.config.manifest_path()).await else {
+        let Ok(Some(bytes)) = self.read_manifest_text().await else {
             return;
         };
         let mut manifest = CloudManifest::parse(Some(String::from_utf8_lossy(&bytes).as_ref()));
@@ -851,16 +914,16 @@ mod tests {
         assert_eq!(key_for("我的密码库").len(), 17);
         assert_eq!(
             config.remote_path(&key_for("我的密码库")),
-            format!("SafePassword/SafePassword-{}.spv", key_for("我的密码库"))
+            format!("MySafePass/MySafePass-{}.spv", key_for("我的密码库"))
         );
-        assert_eq!(config.legacy_remote_path(), "SafePassword/SafePassword.spv");
+        assert_eq!(config.legacy_remote_path(), "MySafePass/SafePassword.spv");
         assert_eq!(
             config.manifest_path(),
-            "SafePassword/SafePassword-index.json"
+            "MySafePass/MySafePass-index.json"
         );
         // 1.4.1 旧键：小写、非 ASCII 字母数字转 '-'，落在 <dir>/<key>.spv
-        assert_eq!(config.legacy_name_path("My Vault"), "SafePassword/my-vault.spv");
-        assert_eq!(config.legacy_name_path("!!!"), "SafePassword/vault.spv");
+        assert_eq!(config.legacy_name_path("My Vault"), "MySafePass/my-vault.spv");
+        assert_eq!(config.legacy_name_path("!!!"), "MySafePass/vault.spv");
     }
 
     /// 云端文件名只由内容密钥派生：同一密码库改名后文件名不变（改名不会再触发"云端被删除"）。
@@ -879,7 +942,7 @@ mod tests {
         );
         assert_eq!(
             config.remote_path(&key),
-            format!("SafePassword/SafePassword-{key}.spv")
+            format!("MySafePass/MySafePass-{key}.spv")
         );
         // 库名怎么改都不影响：键取自内容密钥，与名字无关
         for name in ["我的密码库", "改名后", "Renamed"] {

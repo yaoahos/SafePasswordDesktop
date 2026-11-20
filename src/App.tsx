@@ -56,7 +56,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   accent: "#1677FF",
   autoLockSeconds: 300,
   hibpApiKey: "",
-  webdav: { baseUrl: "", username: "", password: "", remoteDir: "/SafePassword", enabled: false },
+  webdav: { baseUrl: "", username: "", password: "", remoteDir: "/MySafePass", enabled: false },
   autoBackupDays: 1,
   lastBackupAt: 0,
   autoSync: true,
@@ -93,6 +93,8 @@ function withSyncTimeout<T>(p: Promise<T>): Promise<T> {
 /** 同步失败文案：超时单独提示 */
 function syncErrorText(prefix: string, e: unknown): string {
   const msg = String(e);
+  // 后端同步闸门占用：这是瞬时状态，不是真正的失败，不打扰用户。
+  if (msg.includes("正在同步中")) return "刚才那次同步仍在进行，已跳过本次";
   return msg.includes("同步超时") ? `${prefix}同步超时，请检查网络或 WebDAV 设置` : `${prefix}${msg}`;
 }
 
@@ -408,9 +410,11 @@ export default function App() {
   const flashSync = useCallback((kind: "working" | "ok" | "err", text: string) => {
     setSyncState({ kind, text });
     if (syncStateTimer.current !== null) window.clearTimeout(syncStateTimer.current);
-    // 对齐手机端：状态文本 3 秒后自动消失
-    syncStateTimer.current =
-      kind === "working" ? null : window.setTimeout(() => setSyncState(null), 3000);
+    // 成功/失败提示 3 秒后消失；working 也必须有兜底超时——
+    // 若同步被闸门拒绝、页面切换或异常路径没走到结果回调，"正在同步…"会一直挂着。
+    // 30 秒远大于正常同步耗时，到点自动清除，避免永久显示。
+    const ttl = kind === "working" ? 30_000 : 3_000;
+    syncStateTimer.current = window.setTimeout(() => setSyncState(null), ttl);
   }, []);
 
   /** 立刻清掉同步提示（静默场景用：例如用户选过"稍后处理"的云端删除） */
@@ -515,7 +519,7 @@ export default function App() {
             const r = await webdavSync(settings.webdav, "MERGE");
             await applySync(r, null);
           } catch (e) {
-            flashSync("err", `同步失败：${String(e)}`);
+            flashSync("err", syncErrorText("同步失败：", e));
           }
         }
         // create_vault 已切换 current，这里再把条目选中状态理顺

@@ -1156,21 +1156,30 @@ pub async fn webdav_test_connection(config: WebDavConfig) -> CmdResult<String> {
     Ok("连接成功".to_string())
 }
 
-/// 列出云端密码库（读取 WebDAV 上的清单 SafePassword-index.json）。
+/// 列出云端密码库（读取 WebDAV 清单：新名 MySafePass-index.json，回退旧名 SafePassword-index.json）。
 #[tauri::command]
 pub async fn webdav_list_cloud(config: WebDavConfig) -> CmdResult<Vec<CloudVaultEntry>> {
     let client = WebDavClient::new(config.clone()).map_err(err)?;
-    match client.get(&config.manifest_path()).await.map_err(err)? {
-        Some(bytes) => Ok(CloudManifest::parse(Some(&String::from_utf8_lossy(&bytes))).vaults),
-        None => Ok(Vec::new()),
-    }
+    let bytes = match client.get(&config.manifest_path()).await.map_err(err)? {
+        Some(bytes) => Some(bytes),
+        None => client.get(&config.legacy_manifest_path()).await.map_err(err)?,
+    };
+    Ok(bytes
+        .map(|b| CloudManifest::parse(Some(&String::from_utf8_lossy(&b))).vaults)
+        .unwrap_or_default())
 }
 
 /// 下载指定云端密码库的密文（Base64），供前端用主密码导入并切换。
 #[tauri::command]
 pub async fn webdav_get_vault(config: WebDavConfig, key: String) -> CmdResult<Option<String>> {
     let client = WebDavClient::new(config.clone()).map_err(err)?;
-    let bytes = client.get(&config.remote_path(&key)).await.map_err(err)?;
+    let bytes = match client.get(&config.remote_path(&key)).await.map_err(err)? {
+        Some(bytes) => Some(bytes),
+        None => client
+            .get(&config.legacy_prefixed_remote_path(&key))
+            .await
+            .map_err(err)?,
+    };
     Ok(bytes.map(|b| {
         use base64::Engine as _;
         base64::engine::general_purpose::STANDARD.encode(b)
@@ -1182,7 +1191,12 @@ pub async fn webdav_get_vault(config: WebDavConfig, key: String) -> CmdResult<Op
 pub async fn webdav_delete_cloud(config: WebDavConfig, key: String) -> CmdResult<()> {
     let client = WebDavClient::new(config.clone()).map_err(err)?;
     let _ = client.delete(&config.remote_path(&key)).await;
-    let mut manifest = match client.get(&config.manifest_path()).await.map_err(err)? {
+    let _ = client.delete(&config.legacy_prefixed_remote_path(&key)).await;
+    let bytes = match client.get(&config.manifest_path()).await.map_err(err)? {
+        Some(bytes) => Some(bytes),
+        None => client.get(&config.legacy_manifest_path()).await.map_err(err)?,
+    };
+    let mut manifest = match bytes {
         Some(bytes) => CloudManifest::parse(Some(&String::from_utf8_lossy(&bytes))),
         None => CloudManifest::default(),
     };
@@ -1452,7 +1466,13 @@ pub async fn webdav_pull_if_changed(
     let key = crate::sp::cloud::key_for_content(&content_key)
         .unwrap_or_else(|| key_for(&name));
     let path = config.remote_path(&key);
-    let stat = client.stat(&path).await.map_err(err)?;
+    let stat = match client.stat(&path).await.map_err(err)? {
+        Some(stat) => Some(stat),
+        None => client
+            .stat(&config.legacy_prefixed_remote_path(&key))
+            .await
+            .map_err(err)?,
+    };
     let changed = match stat {
         // 云端文件不存在：可能被别处删除，交给同步引擎判断（会给出 RemoteDeleted）
         None => true,
@@ -1535,7 +1555,7 @@ fn format_unix_local(ts: i64) -> String {
 }
 
 /// 桌面版 Release 仓库（推送后即可用；未发布时返回可读错误）
-const UPDATE_REPO: &str = "yaoahos/SafePasswordDesktop";
+const UPDATE_REPO: &str = "yaoahos/MySafePassDesktop";
 
 /// 检查更新失败的原因。所有面向用户的文案都从这里出：
 /// 将来换更新源（GitHub → 自建地址 / 对象存储）时只改这个类型，前端不用动。
@@ -1569,7 +1589,7 @@ impl UpdateFailure {
 #[tauri::command]
 pub async fn check_update(app_version: String) -> CmdResult<UpdateInfo> {
     let client = reqwest::Client::builder()
-        .user_agent("SafePassword-Desktop")
+        .user_agent("MySafePass-Desktop")
         .timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(|e| format!("初始化网络失败：{e}"))?;
@@ -1687,7 +1707,7 @@ pub async fn update_download_and_install(asset_url: String) -> CmdResult<String>
         return Err("安装包地址无效".to_string());
     }
     let client = reqwest::Client::builder()
-        .user_agent("SafePassword-Desktop")
+        .user_agent("MySafePass-Desktop")
         .timeout(std::time::Duration::from_secs(300))
         .build()
         .map_err(|e| format!("无法初始化网络：{e}"))?;
@@ -1703,12 +1723,12 @@ pub async fn update_download_and_install(asset_url: String) -> CmdResult<String>
         .bytes()
         .await
         .map_err(|e| format!("读取安装包失败：{e}"))?;
-    let dir = std::env::temp_dir().join("SafePassword-update");
+    let dir = std::env::temp_dir().join("MySafePass-update");
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建临时目录失败：{e}"))?;
     let raw_name = asset_url
         .rsplit('/')
         .next()
-        .unwrap_or("SafePassword-setup.exe");
+        .unwrap_or("MySafePass-setup.exe");
     // 文件名白名单：只留安全字符并强制 exe/msi 后缀，避免 ".."、分隔符之类造成路径穿越
     let name: String = raw_name
         .chars()

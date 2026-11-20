@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use safepassword::commands::{self, AppState};
-use safepassword::runtime;
+use mysafepass::commands::{self, AppState};
+use mysafepass::runtime;
 use tauri::Manager;
 
 fn main() {
@@ -14,7 +14,13 @@ fn main() {
             //   backups/          备份
             //   settings.json      主题/HIBP key/WebDAV 配置
             //   window.json        上次窗口位置与尺寸
-            let legacy = app.path().app_data_dir().ok();
+            // identifier 已从 com.yaoahos.safepassword.desktop 改为
+            // com.yaoahos.mysafepass.desktop；app_data_dir() 现在返回新目录，
+            // 搬迁源必须显式指向旧包名对应的目录，否则装到不可写位置时读不到旧数据。
+            let legacy = app.path().app_data_dir().ok().and_then(|new| {
+                new.parent()
+                    .map(|parent| parent.join("com.yaoahos.safepassword.desktop"))
+            });
             let dir = runtime::data_root(legacy.as_deref());
             let state = AppState::new(&dir).expect("初始化数据目录失败");
             app.manage(state);
@@ -70,5 +76,5 @@ fn main() {
             commands::capture_screen_png,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running SafePassword");
+        .expect("error while running MySafePass");
 }

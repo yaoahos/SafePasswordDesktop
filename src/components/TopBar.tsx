@@ -31,7 +31,7 @@ export function AppTitleBar() {
     <div className="titlebar" data-tauri-drag-region="true">
       <div className="titlebar-brand" data-tauri-drag-region="true">
         <img className="titlebar-logo" src="/icon.png" alt="" draggable={false} />
-        <span className="titlebar-title">SafePassword</span>
+        <span className="titlebar-title">MySafePass</span>
         <span className="titlebar-version">v{APP_VERSION}</span>
       </div>
       <div className="titlebar-grow" data-tauri-drag-region="true" />

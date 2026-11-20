@@ -2,7 +2,7 @@
 //!
 //! 覆盖真实 HTTP 链路：PROPFIND 连通 → 首传 → 二次幂等 → 设备B 导入副本 MERGE 首同步 →
 //! A 改动上传 / B 下载 → B 改动上传 / A 下载 → 附件跨设备往返。
-//! 远端路径对齐手机端多库布局：`<remoteDir>/SafePassword-<key>.spv` + 清单 `SafePassword-index.json`（旧单文件路径仅作回退）。
+//! 远端路径对齐手机端多库布局：`<remoteDir>/MySafePass-<key>.spv` + 清单 `MySafePass-index.json`（旧单文件路径仅作回退）。
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -11,11 +11,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use safepassword::commands as c;
-use safepassword::commands::AppState;
-use safepassword::sp::sync::ConflictStrategy;
-use safepassword::sp::webdav::WebDavConfig;
-use safepassword::sp::model::VaultItem;
+use mysafepass::commands as c;
+use mysafepass::commands::AppState;
+use mysafepass::sp::sync::ConflictStrategy;
+use mysafepass::sp::webdav::WebDavConfig;
+use mysafepass::sp::model::VaultItem;
 use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
 use tauri::{App, Manager};
 
@@ -108,7 +108,7 @@ fn handle(stream: TcpStream, files: &Files) {
                 GETS.fetch_add(1, Ordering::Relaxed);
             }
             // 故障注入：让清单读失败，验证"读不到清单时不能把别人的条目清空"
-            if target.ends_with("/SafePassword-index.json")
+            if target.ends_with("/MySafePass-index.json")
                 && files.lock().unwrap().contains_key(FAIL_FLAG)
             {
                 write_resp(&mut stream, "500 Internal Server Error", "text/plain", &[], b"boom");
@@ -199,7 +199,7 @@ async fn two_devices_sync_through_mock_webdav() {
         base_url: base.clone(),
         username: "user".into(),
         password: "app-password".into(),
-        remote_dir: "SafePassword".into(),
+        remote_dir: "MySafePass".into(),
         enabled: true,
     };
 
@@ -225,14 +225,14 @@ async fn two_devices_sync_through_mock_webdav() {
     assert_eq!(s.direction, "UPLOADED", "首传方向不对：{s:?}");
     assert_eq!(s.message, "已上传到 WebDAV");
     let keys: Vec<String> = files.lock().unwrap().keys().cloned().collect();
-    // 云端文件名按**内容密钥**派生：SafePassword-k<64 位 hex>.spv（改名不变）
+    // 云端文件名按**内容密钥**派生：MySafePass-k<64 位 hex>.spv（改名不变）
     assert!(
         keys.iter()
-            .any(|k| k.contains("/SafePassword-k") && k.ends_with(".spv")),
-        "远端应按内容密钥分文件 SafePassword-<key>.spv，实际：{keys:?}"
+            .any(|k| k.contains("/MySafePass-k") && k.ends_with(".spv")),
+        "远端应按内容密钥分文件 MySafePass-<key>.spv，实际：{keys:?}"
     );
     assert!(
-        keys.iter().any(|k| k.ends_with("/SafePassword-index.json")),
+        keys.iter().any(|k| k.ends_with("/MySafePass-index.json")),
         "上传后应维护云端清单，实际：{keys:?}"
     );
 
@@ -324,7 +324,7 @@ async fn two_devices_sync_through_mock_webdav() {
         "A 应拿到改后的标题"
     );
 
-    // 6. 多库布局：上传后应落到 SafePassword-<key>.spv，并维护清单
+    // 6. 多库布局：上传后应落到 MySafePass-<key>.spv，并维护清单
     let s = c::webdav_sync(app_a.state::<AppState>(), cfg(), None)
         .await
         .unwrap();
@@ -373,7 +373,7 @@ async fn sync_reports_name_conflict_instead_of_uploading_duplicate() {
         base_url: base.clone(),
         username: "user".into(),
         password: "app-password".into(),
-        remote_dir: "SafePassword".into(),
+        remote_dir: "MySafePass".into(),
         enabled: true,
     };
 
@@ -407,7 +407,7 @@ async fn sync_reports_name_conflict_instead_of_uploading_duplicate() {
         assert_eq!(spvs.len(), 1, "同名冲突时不该写入云端：{spvs:?}");
         let idx_key = guard
             .keys()
-            .find(|k| k.ends_with("/SafePassword-index.json"))
+            .find(|k| k.ends_with("/MySafePass-index.json"))
             .cloned()
             .expect("上传后应维护清单");
         let manifest: serde_json::Value = serde_json::from_slice(&guard[&idx_key].0).unwrap();
@@ -447,7 +447,7 @@ async fn rename_does_not_hijack_another_vault_with_the_same_name() {
         base_url: base.clone(),
         username: "user".into(),
         password: "app-password".into(),
-        remote_dir: "SafePassword".into(),
+        remote_dir: "MySafePass".into(),
         enabled: true,
     };
 
@@ -519,7 +519,7 @@ async fn rename_does_not_hijack_another_vault_with_the_same_name() {
         );
         let idx_key = guard
             .keys()
-            .find(|k| k.ends_with("/SafePassword-index.json"))
+            .find(|k| k.ends_with("/MySafePass-index.json"))
             .cloned()
             .expect("云端应有清单");
         let manifest: serde_json::Value = serde_json::from_slice(&guard[&idx_key].0).unwrap();
@@ -546,7 +546,7 @@ async fn syncing_a_new_vault_keeps_other_manifest_entries() {
         base_url: base.clone(),
         username: "user".into(),
         password: "app-password".into(),
-        remote_dir: "SafePassword".into(),
+        remote_dir: "MySafePass".into(),
         enabled: true,
     };
     let root = tmp_root("multi");
@@ -585,7 +585,7 @@ async fn syncing_a_new_vault_keeps_other_manifest_entries() {
 fn manifest_names(files: &Files) -> Vec<String> {    let guard = files.lock().unwrap();
     let Some((bytes, _)) = guard
         .iter()
-        .find(|(k, _)| k.ends_with("/SafePassword-index.json"))
+        .find(|(k, _)| k.ends_with("/MySafePass-index.json"))
         .map(|(_, v)| v.clone())
     else {
         return Vec::new();
@@ -610,7 +610,7 @@ async fn manifest_read_failure_does_not_wipe_other_entries() {
         base_url: base.clone(),
         username: "user".into(),
         password: "app-password".into(),
-        remote_dir: "SafePassword".into(),
+        remote_dir: "MySafePass".into(),
         enabled: true,
     };
     let root = tmp_root("mf");

@@ -2,7 +2,7 @@
 //!
 //! 用法: cargo run --example read_fixture -- <file.spv> <password-file> <out.json>
 //! 密码从 UTF-8 文件读取（规避 shell 传参编码问题）。
-use safepassword::sp::container::VaultContainer;
+use mysafepass::sp::container::VaultContainer;
 use std::fs;
 use std::process::exit;
 

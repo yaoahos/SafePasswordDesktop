@@ -1,8 +1,8 @@
 //! 由明文 JSON 重新生成互操作夹具（容器格式变更后重建 .spv）。
 //!
 //! 用法: cargo run --example make_fixture -- <vault.json> <password-file> <out.spv>
-use safepassword::sp::container::VaultContainer;
-use safepassword::sp::model::Vault;
+use mysafepass::sp::container::VaultContainer;
+use mysafepass::sp::model::Vault;
 use std::fs;
 use std::process::exit;
 

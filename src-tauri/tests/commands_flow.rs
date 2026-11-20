@@ -10,10 +10,10 @@ use std::fs;
 use std::path::PathBuf;
 
 use base64::Engine;
-use safepassword::commands as c;
-use safepassword::commands::AppState;
-use safepassword::sp::container::VaultContainer;
-use safepassword::sp::model::{Field, VaultItem};
+use mysafepass::commands as c;
+use mysafepass::commands::AppState;
+use mysafepass::sp::container::VaultContainer;
+use mysafepass::sp::model::{Field, VaultItem};
 use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
 use tauri::{App, Manager};
 

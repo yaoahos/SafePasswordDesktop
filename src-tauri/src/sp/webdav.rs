@@ -2,7 +2,7 @@
 //!
 //! 与 Kotlin 一致的关键行为：Basic 凭据只发给 baseUrl 主机（reqwest 跨源重定向
 //! 自动剥离 Authorization，等价 ktor 的 authHost 守卫）；GET 的 409 用 HEAD
-//! 探测区分坚果云怪癖；超时 60-20-60s；仅 GET 设置 UA "SafePassword-Android/1.4"。
+//! 探测区分坚果云怪癖；超时 60-20-60s；仅 GET 设置 UA "MySafePass-Android/1.4"。
 #![allow(dead_code)]
 
 use std::collections::HashMap;
@@ -30,7 +30,7 @@ impl Default for WebDavConfig {
             base_url: String::new(),
             username: String::new(),
             password: String::new(),
-            remote_dir: "SafePassword".to_string(),
+            remote_dir: "MySafePass".to_string(),
             enabled: false,
         }
     }
@@ -44,19 +44,24 @@ impl WebDavConfig {
     pub fn normalized_dir(&self) -> String {
         let trimmed = self.remote_dir.trim().trim_matches('/');
         if trimmed.is_empty() {
-            "SafePassword".to_string()
+            "MySafePass".to_string()
         } else {
             trimmed.to_string()
         }
     }
 
-    /// 每个密码库一个云端文件：`<remoteDir>/SafePassword-<ASCII 键>.spv`
+    /// 每个密码库一个云端文件：`<remoteDir>/MySafePass-<ASCII 键>.spv`（写入用）
     /// （对齐 CloudManifest.keyFor，避免中文文件名与多库互相覆盖）。
     pub fn remote_path(&self, vault_key: &str) -> String {
+        format!("{}/MySafePass-{vault_key}.spv", self.normalized_dir())
+    }
+
+    /// 改名前的多库文件名 `<remoteDir>/SafePassword-<键>.spv`：只读回退。
+    pub fn legacy_prefixed_remote_path(&self, vault_key: &str) -> String {
         format!("{}/SafePassword-{vault_key}.spv", self.normalized_dir())
     }
 
-    /// 旧版单文件布局：升级后只用于读取回退，写入一律走 remote_path。
+    /// 旧版单文件布局 SafePassword.spv：升级后只用于读取回退，写入一律走 remote_path。
     pub fn legacy_remote_path(&self) -> String {
         format!("{}/SafePassword.spv", self.normalized_dir())
     }
@@ -88,8 +93,13 @@ impl WebDavConfig {
         format!("{}/{key}.spv", self.normalized_dir())
     }
 
-    /// 云端密码库清单（key → 显示名），用于「从云端恢复」时列出可选的库。
+    /// 云端密码库清单（key → 显示名），新名写入。
     pub fn manifest_path(&self) -> String {
+        format!("{}/MySafePass-index.json", self.normalized_dir())
+    }
+
+    /// 改名前的清单 SafePassword-index.json：只读回退。
+    pub fn legacy_manifest_path(&self) -> String {
         format!("{}/SafePassword-index.json", self.normalized_dir())
     }
 
@@ -225,7 +235,7 @@ impl WebDavClient {
                 .client
                 .get(self.url(path))
                 .header("Accept", "*/*")
-                .header("User-Agent", "SafePassword-Android/1.4")
+                .header("User-Agent", "MySafePass-Android/1.4")
                 .send()
                 .await?;
             last_status = response.status().as_u16();
@@ -435,37 +445,39 @@ mod tests {
     #[test]
     fn legacy_name_rules() {
         let config = WebDavConfig::default();
-        assert_eq!(config.legacy_name_path("My Vault"), "SafePassword/my-vault.spv");
-        assert_eq!(config.legacy_name_path("  我的密码库  "), "SafePassword/我的密码库.spv");
-        assert_eq!(config.legacy_name_path("Bank___Card"), "SafePassword/bank-card.spv");
-        assert_eq!(config.legacy_name_path("---"), "SafePassword/vault.spv");
-        assert_eq!(config.legacy_name_path(""), "SafePassword/vault.spv");
+        assert_eq!(config.legacy_name_path("My Vault"), "MySafePass/my-vault.spv");
+        assert_eq!(config.legacy_name_path("  我的密码库  "), "MySafePass/我的密码库.spv");
+        assert_eq!(config.legacy_name_path("Bank___Card"), "MySafePass/bank-card.spv");
+        assert_eq!(config.legacy_name_path("---"), "MySafePass/vault.spv");
+        assert_eq!(config.legacy_name_path(""), "MySafePass/vault.spv");
         // 64 字符截断（去掉 .spv 后缀后）
         let long = "a".repeat(100);
-        assert_eq!(config.legacy_name_path(&long), format!("SafePassword/{}.spv", "a".repeat(64)));
-        assert_eq!(config.legacy_name_path("a!!!b"), "SafePassword/a-b.spv");
+        assert_eq!(config.legacy_name_path(&long), format!("MySafePass/{}.spv", "a".repeat(64)));
+        assert_eq!(config.legacy_name_path("a!!!b"), "MySafePass/a-b.spv");
     }
 
     #[test]
     fn remote_paths_follow_mobile_multi_vault_layout() {
-        let config = WebDavConfig { remote_dir: "/SafePassword/".to_string(), ..Default::default() };
-        assert_eq!(config.remote_path("vabc123"), "SafePassword/SafePassword-vabc123.spv");
-        assert_eq!(config.legacy_remote_path(), "SafePassword/SafePassword.spv");
-        assert_eq!(config.manifest_path(), "SafePassword/SafePassword-index.json");
+        let config = WebDavConfig { remote_dir: "/MySafePass/".to_string(), ..Default::default() };
+        assert_eq!(config.remote_path("vabc123"), "MySafePass/MySafePass-vabc123.spv");
+        assert_eq!(config.legacy_prefixed_remote_path("vabc123"), "MySafePass/SafePassword-vabc123.spv");
+        assert_eq!(config.legacy_remote_path(), "MySafePass/SafePassword.spv");
+        assert_eq!(config.manifest_path(), "MySafePass/MySafePass-index.json");
+        assert_eq!(config.legacy_manifest_path(), "MySafePass/SafePassword-index.json");
     }
 
     #[test]
     fn normalized_urls() {
         let config = WebDavConfig {
             base_url: " https://dav.example.com/dav/ ".to_string(),
-            remote_dir: "/SafePassword/".to_string(),
+            remote_dir: "/MySafePass/".to_string(),
             ..Default::default()
         };
         assert_eq!(config.normalized_base_url(), "https://dav.example.com/dav/");
-        assert_eq!(config.normalized_dir(), "SafePassword");
+        assert_eq!(config.normalized_dir(), "MySafePass");
         // 多库布局：按库名哈希 key 分文件；旧路径仅作回退
-        assert_eq!(config.remote_path("vwhatever"), "SafePassword/SafePassword-vwhatever.spv");
-        assert_eq!(config.legacy_remote_path(), "SafePassword/SafePassword.spv");
+        assert_eq!(config.remote_path("vwhatever"), "MySafePass/MySafePass-vwhatever.spv");
+        assert_eq!(config.legacy_remote_path(), "MySafePass/SafePassword.spv");
         // isConfigured 与 Kotlin 一致：对原始 baseUrl 判断、不 trim——
         // 带前导空格的 " https://…" 在 Kotlin 里同样是 false，这里如实复现该怪癖
         assert!(!config.is_configured());
@@ -474,12 +486,12 @@ mod tests {
         assert!(!WebDavConfig::default().is_configured());
 
         let blank = WebDavConfig { remote_dir: "  /  ".to_string(), ..Default::default() };
-        assert_eq!(blank.normalized_dir(), "SafePassword");
+        assert_eq!(blank.normalized_dir(), "MySafePass");
     }
 
     #[test]
     fn path_segment_encoding() {
-        assert_eq!(percent_encode_path_segment("SafePassword.spv"), "SafePassword.spv");
+        assert_eq!(percent_encode_path_segment("MySafePass.spv"), "MySafePass.spv");
         assert_eq!(percent_encode_path_segment("我的 密码"), "%E6%88%91%E7%9A%84%20%E5%AF%86%E7%A0%81");
         assert_eq!(percent_encode_path_segment("a/b?c#d"), "a%2Fb%3Fc%23d");
         assert_eq!(percent_encode_path_segment("sub dir"), "sub%20dir");
@@ -494,8 +506,8 @@ mod tests {
         let client = WebDavClient::new(config).unwrap();
         assert_eq!(client.url(""), "https://dav.example.com/dav/");
         assert_eq!(
-            client.url("SafePassword/SafePassword.spv"),
-            "https://dav.example.com/dav/SafePassword/SafePassword.spv"
+            client.url("MySafePass/MySafePass.spv"),
+            "https://dav.example.com/dav/MySafePass/MySafePass.spv"
         );
         assert_eq!(
             client.url("/dir//with spaces/file"),

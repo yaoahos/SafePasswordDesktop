@@ -160,7 +160,7 @@ export function AuthScreens({
     baseUrl: "",
     username: "",
     password: "",
-    remoteDir: "SafePassword",
+    remoteDir: "MySafePass",
     enabled: true,
   };
 
@@ -207,7 +207,7 @@ export function AuthScreens({
     const next: WebDavConfig = {
       ...cloudCfg,
       baseUrl,
-      remoteDir: (cloudCfg.remoteDir || "").trim() || "SafePassword",
+      remoteDir: (cloudCfg.remoteDir || "").trim() || "MySafePass",
       enabled: true,
     };
     setBusy(true);
@@ -304,7 +304,7 @@ export function AuthScreens({
         <label className="field-caption">远程目录</label>
         <input
           className="input"
-          placeholder="SafePassword"
+          placeholder="MySafePass"
           value={cloudCfg.remoteDir}
           onChange={(e) => setCloudCfg({ ...cloudCfg, remoteDir: e.target.value })}
         />
@@ -322,7 +322,7 @@ export function AuthScreens({
         <div className="auth-panel">
         <div className="auth-hero">
           <img className="auth-appicon" src="/icon.png" alt="" />
-          <div className="auth-appname">SafePassword</div>
+          <div className="auth-appname">MySafePass</div>
           <div className="auth-appsub">AES-256 加密 · 仅保存在你的设备与自己的云</div>
         </div>
 

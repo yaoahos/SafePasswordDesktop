@@ -120,9 +120,9 @@ export const TEMPLATES: TemplateDef[] = [
     name: "登录账号",
     emoji: "🔑",
     fields: [
+      { label: "网址", type: "URL" },
       { label: "账号", type: "TEXT" },
       { label: "密码", type: "PASSWORD" },
-      { label: "网址", type: "URL" },
     ],
   },
   {

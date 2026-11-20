@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use safepassword::commands::AppState;
+use mysafepass::commands::AppState;
 use tauri::test::{mock_builder, mock_context, noop_assets};
 
 #[test]

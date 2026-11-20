@@ -624,25 +624,8 @@ function ItemDetailInner({
       </div>
 
       <div className="card">
-        <div className="row" style={{ alignItems: "center", gap: 8 }}>
-          <div className="card-title grow" style={{ marginBottom: 0 }}>
-            字段
-          </div>
-          {!trashed && (
-            <button
-              className="btn sm"
-              onClick={() => {
-                setFLabel("");
-                setFType("TEXT");
-                setFieldDlg({ mode: "add" });
-              }}
-            >
-              ＋添加字段
-            </button>
-          )}
-        </div>
         {draft.fields.length === 0 && !hasNotes && (
-          <div className="muted small">无字段，可用右上角「＋添加字段」</div>
+          <div className="muted small">还没有字段，点击下方「＋添加字段」添加</div>
         )}
         {rowSeq.map((row) => {
           if (row === "notes") {
@@ -839,6 +822,20 @@ function ItemDetailInner({
             </div>
           );
         })}
+        {!trashed && (
+          <div className="row" style={{ marginTop: 8 }}>
+            <button
+              className="btn sm"
+              onClick={() => {
+                setFLabel("");
+                setFType("TEXT");
+                setFieldDlg({ mode: "add" });
+              }}
+            >
+              ＋添加字段
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="card">
