@@ -394,8 +394,8 @@ export function releaseNotes(raw: string, limit = 8): string[] {
     .map((line) =>
       line
         .trim()
-        .replace(/^[-*+•]\s*/, "")
         .replace(/\*\*|`/g, "")
+        .replace(/^[-*+•]\s*/, "")
         .trim()
     )
     .filter((line) => line !== "")

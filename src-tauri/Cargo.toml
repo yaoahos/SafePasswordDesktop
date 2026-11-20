@@ -1,6 +1,6 @@
 [package]
 name = "mysafepass"
-version = "1.1.4"
+version = "1.1.5"
 description = "MySafePass 桌面端"
 authors = ["yaoahos"]
 edition = "2021"

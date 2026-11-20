@@ -4,11 +4,11 @@ MySafePass 桌面版是一个离线优先的密码管理器。界面与数据模
 
 - 项目名：`MySafePass Desktop`
 - 应用标识：`com.yaoahos.mysafepass.desktop`
-- 正式版本：`1.1.4`
+- 正式版本：`1.1.5`
 - 支持平台：Windows 10 / 11（x64，需要 WebView2 运行时）
-- 安装包：`MySafePass_1.1.4_x64-setup.exe`（NSIS）/ `MySafePass_1.1.4_x64_zh-CN.msi`
-- 安装包大小：2,459,770 字节（NSIS）/ 3,452,928 字节（MSI）
-- SHA-256：`647D3B203A183D9731D04EEF567CAEA8AA643528B0869A27C7327AE964DAFB4B`（NSIS）/ `146E4F043698FC4E8356D5E79D2995229A80A82B6DD3ECF87BDFC8E6FD3221D9`（MSI）
+- 安装包：`MySafePass_1.1.5_x64-setup.exe`（NSIS）/ `MySafePass_1.1.5_x64_zh-CN.msi`
+- 安装包大小：2,460,012 字节（NSIS）/ 3,448,832 字节（MSI）
+- SHA-256：`FAE1F07DFCE5FF8E07199A0C88D7AC1BE2F753A11D8A24DE1E7A9B119308735D`（NSIS）/ `10CE511630D1ECC255E552854189F94B38013C21473D50858CF1F374471C6164`（MSI）
 - 发布下载：[Releases](https://github.com/yaoahos/MySafePassDesktop/releases)
 
 > 本项目为独立实现，未使用任何第三方应用的源代码；界面与交互仅作设计参考。密码库格式与 Android 版互通。
@@ -290,6 +290,10 @@ MySafePassDesktop/
 ---
 
 ## 十、版本记录
+
+**2026/11/20 · 1.1.5**
+
+- 修复：发现新版本的提示中版本标题前多出一个星号，且变更条目被截断一条
 
 **2026/11/20 · 1.1.4**
 
