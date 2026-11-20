@@ -2,9 +2,10 @@
 node_modules/
 dist/
 src-tauri/target/
-src-tauri/gen/schemas/
+src-tauri/gen/
 interop/build/
 interop/.gradle/
+interop/.kotlin/
 
 # ---- 安装包产物（只通过 GitHub Releases 分发）----
 *.msi
